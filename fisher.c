@@ -24,6 +24,7 @@
 // your own program.
 // #define TEST_BUILD
 
+// fuzz
 #define SMALLISH_EPSILON 0.00000000003
 #define SMALL_EPSILON 0.0000000000001
 
@@ -70,14 +71,14 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
     cur_prob *= (cur12 * cur21) / (cur11 * cur22);
     cur12 -= 1;
     cur21 -= 1;
-    if (cur_prob == INFINITY) {
-      return 0;
-    }
     if (cur_prob < EXACT_TEST_BIAS) {
       tprob += cur_prob;
       break;
     }
     cprob += cur_prob;
+    if (cprob == INFINITY) {
+      return 0;
+    }
   }
   if (cprob == 0) {
     return 1;
@@ -116,6 +117,195 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
     } while (cur11 > 0.5);
   }
   return tprob / (cprob + tprob);
+}
+
+double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt) {
+  double cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+  double left_prob = cur_prob;
+  double right_prob = 0;
+  uint32_t uii;
+  double cur11;
+  double cur12;
+  double cur21;
+  double cur22;
+  double preaddp;
+  // Ensure m11 <= m22 and m12 <= m21.
+  if (m12 > m21) {
+    uii = m12;
+    m12 = m21;
+    m21 = uii;
+  }
+  if (m11 > m22) {
+    uii = m11;
+    m11 = m22;
+    m22 = uii;
+  }
+  // Flipping m11<->m12 and m21<->m22 also flips the direction of the
+  // alternative hypothesis.  So we flip on m11-is-greater alternative
+  // hypothesis here to allow the rest of the code to assume m11-is-less.
+  if (m11_is_greater_alt) {
+    uii = m11;
+    m11 = m12;
+    m12 = uii;
+    uii = m21;
+    m21 = m22;
+    m22 = uii;
+  }
+  cur11 = m11;
+  cur12 = m12;
+  cur21 = m21;
+  cur22 = m22;
+  if ((((uint64_t)m11) * m22) >= (((uint64_t)m12) * m21)) {
+    // starting right of (or at) center, p > 0.5
+    // 1. left_prob = sum leftward to precision limit
+    // 2. total_prob := left_prob
+    // 3. total_prob += sum rightward to total_prob precision limit
+    // return left_prob / total_prob
+    while (cur11 > 0.5) {
+      cur12 += 1;
+      cur21 += 1;
+      cur_prob *= (cur11 * cur22) / (cur12 * cur21);
+      cur11 -= 1;
+      cur22 -= 1;
+      preaddp = left_prob;
+      left_prob += cur_prob;
+      if (left_prob <= preaddp) {
+	break;
+      }
+      if (left_prob >= 1.0) {
+	// Probability mass of our starting table was represented as 2^{-83},
+	// so this would mean the left probability mass partial sum is greater
+	// than 2^83 times that.  In which case the final p-value will
+        // be indistinguishable from 1 at 53-bit precision if our input just
+	// had 32-bit integers.  (Yes, the constant can be reduced.)
+	return 1;
+      }
+    }
+    cur11 = m11;
+    cur12 = m12;
+    cur21 = m21;
+    cur22 = m22;
+    cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+    right_prob = left_prob; // actually total_prob
+    while (cur12 > 0.5) {
+      cur11 += 1;
+      cur22 += 1;
+      cur_prob *= (cur12 * cur21) / (cur11 * cur22);
+      cur12 -= 1;
+      cur21 -= 1;
+      preaddp = right_prob;
+      right_prob += cur_prob;
+      if (right_prob <= preaddp) {
+	break;
+      }
+    }
+    return left_prob / right_prob;
+  } else {
+    // starting left of center, p could be small
+    // 1. right_prob = sum rightward to precision limit
+    // 2. left_prob = sum leftward to left_prob precision limit
+    // return left_prob / (left_prob + right_prob)
+    while (cur12 > 0.5) {
+      cur11 += 1;
+      cur22 += 1;
+      cur_prob *= (cur12 * cur21) / (cur11 * cur22);
+      cur12 -= 1;
+      cur21 -= 1;
+      preaddp = right_prob;
+      right_prob += cur_prob;
+      if (right_prob == INFINITY) {
+	return 0;
+      }
+      if (right_prob <= preaddp) {
+	break;
+      }
+    }
+    cur11 = m11;
+    cur12 = m12;
+    cur21 = m21;
+    cur22 = m22;
+    cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+    while (cur11 > 0.5) {
+      cur12 += 1;
+      cur21 += 1;
+      cur_prob *= (cur11 * cur22) / (cur12 * cur21);
+      cur11 -= 1;
+      cur22 -= 1;
+      preaddp = left_prob;
+      left_prob += cur_prob;
+      if (left_prob <= preaddp) {
+	break;
+      }
+    }
+    return left_prob / (left_prob + right_prob);
+  }
+}
+
+void fisher22_precomp_thresh(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t* m11_minp, uint32_t* m11_maxp, uint32_t* tiep) {
+  // Treating m11 as the only variable, this returns the minimum and (maximum -
+  // 1) values of m11 which are less extreme than the observed result.  If the
+  // observed result is maximally common, the return values will both be zero.
+  // Also, if there is a second value of m11 which results in the exact same
+  // p-value as the original, *tiep is set to that (otherwise it's just set to
+  // the original m11).
+  double cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+  double cur11 = ((int32_t)m11);
+  double cur12 = ((int32_t)m12);
+  double cur21 = ((int32_t)m21);
+  double cur22 = ((int32_t)m22);
+  double ratio = (cur11 * cur22) / ((cur12 + 1) * (cur21 + 1));
+
+  *tiep = m11;
+  // Is m11 greater than the p-maximizing value?
+  if (ratio > (1 + SMALL_EPSILON)) {
+    *m11_maxp = m11;
+    cur12 += 1;
+    cur21 += 1;
+    cur_prob *= ratio;
+    do {
+      cur11 -= 1;
+      cur22 -= 1;
+      m11--;
+      cur12 += 1;
+      cur21 += 1;
+      cur_prob *= (cur11 * cur22) / (cur12 * cur21);
+    } while (cur_prob > EXACT_TEST_BIAS);
+    *m11_minp = m11;
+    if (cur_prob > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+      *tiep = m11 - 1;
+    }
+  } else if (ratio > (1 - SMALL_EPSILON)) {
+    *m11_minp = 0;
+    *m11_maxp = 0;
+    *tiep = m11 - 1;
+  } else {
+    // Is it less?
+    cur11 += 1;
+    cur22 += 1;
+    ratio = (cur12 * cur21) / (cur11 * cur22);
+    if (ratio > (1 + SMALL_EPSILON)) {
+      cur_prob *= ratio;
+      *m11_minp = ++m11;
+      do {
+	cur12 -= 1;
+	cur21 -= 1;
+	m11++;
+	cur11 += 1;
+	cur22 += 1;
+	cur_prob *= (cur12 * cur21) / (cur11 * cur22);
+      } while (cur_prob > EXACT_TEST_BIAS);
+      *m11_maxp = m11;
+      if (cur_prob > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+	*tiep = m11;
+      }
+    } else {
+      *m11_minp = 0;
+      *m11_maxp = 0;
+      if (ratio > (1 - SMALL_EPSILON)) {
+	*tiep = m11 + 1;
+      }
+    }
+  }
 }
 
 int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p, double* saved22p, double* saved23p, double *totalp, uint32_t right_side) {
