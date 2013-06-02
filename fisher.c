@@ -120,7 +120,7 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
 }
 
 double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt) {
-  double cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+  double cur_prob = EXACT_TEST_BIAS;
   double left_prob = cur_prob;
   double right_prob = 0;
   uint32_t uii;
@@ -185,7 +185,7 @@ double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, u
     cur12 = m12;
     cur21 = m21;
     cur22 = m22;
-    cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+    cur_prob = EXACT_TEST_BIAS;
     right_prob = left_prob; // actually total_prob
     while (cur12 > 0.5) {
       cur11 += 1;
@@ -224,7 +224,7 @@ double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, u
     cur12 = m12;
     cur21 = m21;
     cur22 = m22;
-    cur_prob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+    cur_prob = EXACT_TEST_BIAS;
     while (cur11 > 0.5) {
       cur12 += 1;
       cur21 += 1;
