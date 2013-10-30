@@ -1,16 +1,22 @@
 stats
 =====
 
-Standalone functions for calculating Hardy-Weinberg equilibrium and Fisher
-2x2/2x3 exact test statistics.
+Standalone functions for calculating binomial exact test, Hardy-Weinberg
+equilibrium, and Fisher 2x2/2x3 exact test statistics.
 
 Test program compilation:
+
+gcc -O2 binom.c binom_test.c -o binom_test
 
 gcc -O2 snphwe2.c snphwe_test.c -o snphwe_test
 
 gcc -O2 fisher.c fisher_test.c -o fisher_test
 
 Test program usage examples:
+
+  binom_test binom_test.txt
+
+  binom_test 2900 5000 0.52
 
   snphwe_test snphwe_test.txt
 
