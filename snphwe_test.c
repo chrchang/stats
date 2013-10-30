@@ -4,12 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define EPSILON 0.0000000000001
-
-// A bias of this sort is needed to enable calculation of p-values down to the
-// minimum representable positive number.
-#define EXACT_TEST_BIAS 0.00000000000000000000000010339757656912845935892608650874535669572651386260986328125
-
 double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2);
 int32_t SNPHWE_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double thresh);
 
@@ -46,8 +40,8 @@ int main(int argc, char** argv) {
   } else if (argc != 2) {
     printf(
 "SNPHWE2 demo    http://www.sph.umich.edu/csg/abecasis/Exact/\n\n"
-"  snphwe2 [het count] [hom count 1] [hom count 2] {threshold}\n"
-"  snphwe2 [filename]\n\n"
+"  snphwe_test [het count] [hom count 1] [hom count 2] {threshold}\n"
+"  snphwe_test [filename]\n\n"
 "If a filename is provided, the file is expected to contain marker names in the\n"
 "first column, heterozygote counts in the second, and homozygote counts in the\n"
 "third and fourth.\n");

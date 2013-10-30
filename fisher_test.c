@@ -74,11 +74,11 @@ int main(int argc, char** argv) {
   } else if (argc != 2) {
   main_std_help:
     printf(
-"Fisher 2x2 and 2x3 exact test    https://www.cog-genomics.org/software/stats\n"
+"Fisher 2x2 and 2x3 exact test    https://github.com/chrchang/stats\n"
 "(C) 2013 Christopher Chang, GNU General Public License version 3\n\n"
-"Usage: fisher [m11] [m12] [m21] [m22] <+ | ->\n"
-"       fisher [m11] [m12] [m21] [m22] [m31] [m32]\n"
-"       fisher [filename]\n\n"
+"Usage: fisher_test [m11] [m12] [m21] [m22] <+ | ->\n"
+"       fisher_test [m11] [m12] [m21] [m22] [m31] [m32]\n"
+"       fisher_test [filename]\n\n"
 "For the 2x2 case, if the optional last parameter is '+', a 1-sided test is used\n"
 "where the alternative hypothesis is that m11 is greater than expected;\n"
 "similarly, '-' invokes the 1-sided test with the m11-is-less-than-expected\n"
