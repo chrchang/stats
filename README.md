@@ -26,6 +26,6 @@ Test program usage examples:
 
   fisher_test 20 30 40 50 60 70
 
-fisher.c is covered by GPLv3 (see the LICENSE file).  For snphwe2.c usage
-rules, refer to the Abecasis Lab's SNP-HWE page at
+binom.c and fisher.c are covered by GPLv3 (see the LICENSE file).  For
+snphwe2.c usage rules, refer to the Abecasis Lab's SNP-HWE page at
 http://sph.umich.edu/csg/abecasis/Exact .
