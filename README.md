@@ -1,8 +1,8 @@
 stats
 =====
 
-Standalone functions for calculating binomial exact test, Hardy-Weinberg
-equilibrium, and Fisher 2x2/2x3 exact test statistics.
+Standalone functions for calculating binomial, Hardy-Weinberg equilibrium, and
+Fisher 2x2/2x3 exact test statistics.
 
 Test program compilation:
 
