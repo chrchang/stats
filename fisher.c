@@ -84,7 +84,7 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t
       return 0;
     }
   }
-  if (cprob == 0) {
+  if ((cprob == 0) && (!midp)) {
     return 1;
   }
   if (cur12 > 0.5) {
@@ -441,12 +441,12 @@ int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p,
   *saved13p = tmp13;
   *saved22p = tmp22;
   *saved23p = tmp23;
-  if (cur_prob > EXACT_TEST_BIAS) {
-    // even most extreme table on this side is too probable
-    *totalp = 0;
-    return 0;
-  }
   if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+    if (cur_prob > EXACT_TEST_BIAS) {
+      // even most extreme table on this side is too probable
+      *totalp = 0;
+      return 0;
+    }
     *tie_ctp += 1;
   }
   // sum tail to floating point precision limit

@@ -4,13 +4,13 @@
 // for INFINITY
 #include <math.h>
 
-#define EPSILON 0.0000000000001
+#define SMALL_EPSILON 0.00000000000005684341886080801486968994140625
 
 // A bias of this sort is needed to enable calculation of p-values down to the
 // minimum representable positive number.
 #define EXACT_TEST_BIAS 0.00000000000000000000000010339757656912845935892608650874535669572651386260986328125
 
-double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
+double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t midp) {
   // This function implements an exact SNP test of Hardy-Weinberg
   // Equilibrium as described in Wigginton, JE, Cutler, DJ, and
   // Abecasis, GR (2005) A Note on Exact Tests of Hardy-Weinberg
@@ -21,14 +21,16 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
   // This version was written by Christopher Chang.  It contains the following
   // improvements over the original SNPHWE():
   // - Proper handling of >64k genotypes.  Previously, there was a potential
-  // integer overflow.
+  //   integer overflow.
   // - Detection and efficient handling of floating point overflow and
-  // underflow.  E.g. instead of summing a tail all the way down, the loop
-  // stops once the latest increment underflows the partial sum's 53-bit
-  // precision; this results in a large speedup when max heterozygote count
-  // >1k.
+  //   underflow.  E.g. instead of summing a tail all the way down, the loop
+  //   stops once the latest increment underflows the partial sum's 53-bit
+  //   precision; this results in a large speedup when max heterozygote count
+  //   >1k.
   // - No malloc() call.  It's only necessary to keep track of a few partial
-  // sums.
+  //   sums.
+  // - Support for the mid-p variant of this test.  See Graffelman J, Moreno V
+  //   (2013) The mid p-value in exact tests for Hardy-Weinberg equilibrium.
   //
   // Note that the SNPHWE_t() function below is a lot more efficient for
   // testing against a p-value inclusion threshold.  SNPHWE2() should only be
@@ -44,10 +46,11 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
   }
   int64_t rare_copies = 2LL * obs_homr + obs_hets;
   int64_t genotypes2 = (obs_hets + obs_homc + obs_homr) * 2LL;
+  int32_t tie_ct = 1;
   double curr_hets_t2 = obs_hets;
   double curr_homr_t2 = obs_homr;
   double curr_homc_t2 = obs_homc;
-  double tailp = (1 - EPSILON) * EXACT_TEST_BIAS;
+  double tailp = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
   double centerp = 0;
   double lastp2 = tailp;
   double lastp1 = tailp;
@@ -56,7 +59,11 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
   double curr_homc_t1;
   double preaddp;
   if (!genotypes2) {
-    return 1;
+    if (midp) {
+      return 0.5;
+    } else {
+      return 1;
+    }
   }
 
   if (obs_hets * genotypes2 > rare_copies * (genotypes2 - rare_copies)) {
@@ -69,6 +76,9 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
       lastp2 *= (curr_hets_t2 * (curr_hets_t2 - 1)) / (4 * curr_homr_t2 * curr_homc_t2);
       curr_hets_t2 -= 2;
       if (lastp2 < EXACT_TEST_BIAS) {
+	if (lastp2 > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+	  tie_ct++;
+	}
 	tailp += lastp2;
 	break;
       }
@@ -77,7 +87,7 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
 	return 0;
       }
     }
-    if (centerp == 0) {
+    if ((centerp == 0) && (!midp)) {
       return 1;
     }
     while (curr_hets_t2 > 1.5) {
@@ -114,6 +124,9 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
       curr_homr_t2 -= 1;
       curr_homc_t2 -= 1;
       if (lastp2 < EXACT_TEST_BIAS) {
+	if (lastp2 > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+          tie_ct++;
+	}
 	tailp += lastp2;
 	break;
       }
@@ -122,7 +135,7 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
 	return 0;
       }
     }
-    if (centerp == 0) {
+    if ((centerp == 0) && (!midp)) {
       return 1;
     }
     while (curr_homr_t2 > 0.5) {
@@ -151,7 +164,11 @@ double SNPHWE2(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2) {
       curr_hets_t1 -= 2;
     }
   }
-  return tailp / (tailp + centerp);
+  if (!midp) {
+    return tailp / (tailp + centerp);
+  } else {
+    return (tailp - ((1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (tailp + centerp);
+  }
 }
 
 int32_t SNPHWE_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double thresh) {
@@ -190,7 +207,7 @@ int32_t SNPHWE_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double th
   // Subtract epsilon from initial probability mass, so that we can compare to
   // 1 when determining tail vs. center membership without floating point error
   // biting us in the ass
-  double tailp1 = (1 - EPSILON) * EXACT_TEST_BIAS;
+  double tailp1 = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
   double centerp = 0;
   double lastp2 = tailp1;
   double tailp2 = 0;
@@ -275,6 +292,7 @@ int32_t SNPHWE_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double th
     curr_hets_t1 = obs_hets + 2;
     curr_homr_t1 = obs_homr;
     curr_homc_t1 = obs_homc;
+    // ratio for the other tail
     lastp1 = (4 * curr_homr_t1 * curr_homc_t1) / (curr_hets_t1 * (curr_hets_t1 - 1));
     tail1_ceil = tailp1 / (1 - lastp1);
     if (tail1_ceil + tail2_ceil < exit_thresh) {
@@ -352,6 +370,203 @@ int32_t SNPHWE_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double th
     lastp1 = (curr_hets_t1 * (curr_hets_t1 - 1)) / (4 * curr_homr_t1 * curr_homc_t1);
     tail1_ceil = tailp1 / (1 - lastp1);
     lastp1 *= tailp1;
+    tailp1 += lastp1;
+
+    if (tail1_ceil + tail2_ceil < exit_thresh) {
+      return 1;
+    }
+    if (obs_hets >= 4) {
+      exit_threshx = exit_thresh - tailp2;
+      do {
+	curr_hets_t1 -= 2;
+	curr_homr_t1 += 1;
+	curr_homc_t1 += 1;
+	lastp1 *= (curr_hets_t1 * (curr_hets_t1 - 1)) / (4 * curr_homr_t1 * curr_homc_t1);
+	preaddp = tailp1;
+        tailp1 += lastp1;
+	if (tailp1 > exit_threshx) {
+	  return 0;
+	}
+	if (tailp1 <= preaddp) {
+	  break;
+	}
+      } while (curr_hets_t1 > 3.5);
+    }
+    if (tailp1 + tail2_ceil < exit_thresh) {
+      return 1;
+    }
+    exit_threshx = exit_thresh - tailp1;
+    while (curr_homr_t2 > 0.5) {
+      curr_hets_t2 += 2;
+      lastp2 *= (4 * curr_homr_t2 * curr_homc_t2) / (curr_hets_t2 * (curr_hets_t2 - 1));
+      curr_homr_t2 -= 1;
+      curr_homc_t2 -= 1;
+      preaddp = tailp2;
+      tailp2 += lastp2;
+      if (tailp2 >= exit_threshx) {
+	return 0;
+      }
+      if (tailp2 <= preaddp) {
+	return 1;
+      }
+    }
+    return 1;
+  }
+}
+
+int32_t SNPHWE_midp_t(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double thresh) {
+  // Mid-p version of SNPHWE_t().  (There are enough fiddly differences that I
+  // think it's better for this to be a separate function.)  Assumes threshold
+  // is smaller than 0.5.
+  intptr_t obs_homc;
+  intptr_t obs_homr;
+  if (obs_hom1 < obs_hom2) {
+    obs_homc = obs_hom2;
+    obs_homr = obs_hom1;
+  } else {
+    obs_homc = obs_hom1;
+    obs_homr = obs_hom2;
+  }
+  int64_t rare_copies = 2LL * obs_homr + obs_hets;
+  int64_t genotypes2 = (obs_hets + obs_homc + obs_homr) * 2LL;
+  double curr_hets_t2 = obs_hets; // tail 2
+  double curr_homr_t2 = obs_homr;
+  double curr_homc_t2 = obs_homc;
+  double tailp1 = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5;
+  double centerp = tailp1;
+  double lastp2 = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
+  double tailp2 = 0;
+  double tail1_ceil;
+  double tail2_ceil;
+  double lastp1;
+  double curr_hets_t1;
+  double curr_homr_t1;
+  double curr_homc_t1;
+  double exit_thresh;
+  double exit_threshx;
+  double ratio;
+  double preaddp;
+  if (!genotypes2) {
+    return 0;
+  }
+  thresh = (1 - thresh) / thresh;
+  if (obs_hets * genotypes2 > rare_copies * (genotypes2 - rare_copies)) {
+    if (obs_hets < 2) {
+      return 0;
+    }
+    exit_thresh = rare_copies * thresh * EXACT_TEST_BIAS;
+    do {
+      curr_homr_t2 += 1;
+      curr_homc_t2 += 1;
+      lastp2 *= (curr_hets_t2 * (curr_hets_t2 - 1)) / (4 * curr_homr_t2 * curr_homc_t2);
+      curr_hets_t2 -= 2;
+      if (lastp2 < EXACT_TEST_BIAS) {
+	if (lastp2 > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+	  // tie with original contingency table, apply mid-p correction here
+	  // too
+          tailp2 = tailp1;
+          centerp += tailp1;
+	} else {
+	  tailp2 = lastp2;
+	}
+	break;
+      }
+      centerp += lastp2;
+      if (centerp > exit_thresh) {
+	return 1;
+      }
+    } while (curr_hets_t2 > 1.5);
+    exit_thresh = centerp / thresh;
+    if (tailp1 + tailp2 >= exit_thresh) {
+      return 0;
+    }
+    ratio = (curr_hets_t2 * (curr_hets_t2 - 1)) / (4 * (curr_homr_t2 + 1) * (curr_homc_t2 + 1));
+    // this needs to work in both the tie and no-tie cases
+    tail2_ceil = tailp2 + lastp2 * ratio / (1 - ratio);
+    curr_hets_t1 = obs_hets + 2;
+    curr_homr_t1 = obs_homr;
+    curr_homc_t1 = obs_homc;
+    lastp1 = (4 * curr_homr_t1 * curr_homc_t1) / (curr_hets_t1 * (curr_hets_t1 - 1));
+    // always a tie here
+    tail1_ceil = tailp1 * 2 / (1 - lastp1) - tailp1;
+    if (tail1_ceil + tail2_ceil < exit_thresh) {
+      return 1;
+    }
+    lastp1 *= tailp1 * 2;
+    tailp1 += lastp1;
+
+    if (obs_homr > 1) {
+      exit_threshx = exit_thresh - tailp2;
+      do {
+	curr_hets_t1 += 2;
+	curr_homr_t1 -= 1;
+	curr_homc_t1 -= 1;
+	lastp1 *= (4 * curr_homr_t1 * curr_homc_t1) / (curr_hets_t1 * (curr_hets_t1 - 1));
+	preaddp = tailp1;
+	tailp1 += lastp1;
+	if (tailp1 > exit_threshx) {
+	  return 0;
+	}
+	if (tailp1 <= preaddp) {
+	  break;
+	}
+      } while (curr_homr_t1 > 1.5);
+    }
+    if (tailp1 + tail2_ceil < exit_thresh) {
+      return 1;
+    }
+    exit_threshx = exit_thresh - tailp1;
+    while (curr_hets_t2 > 1) {
+      curr_homr_t2 += 1;
+      curr_homc_t2 += 1;
+      lastp2 *= (curr_hets_t2 * (curr_hets_t2 - 1)) / (4 * curr_homr_t2 * curr_homc_t2);
+      preaddp = tailp2;
+      tailp2 += lastp2;
+      if (tailp2 >= exit_threshx) {
+	return 0;
+      }
+      if (tailp2 <= preaddp) {
+	return 1;
+      }
+      curr_hets_t2 -= 2;
+    }
+    return 1;
+  } else {
+    if (!obs_homr) {
+      return 0;
+    }
+    exit_thresh = rare_copies * thresh * EXACT_TEST_BIAS;
+    do {
+      curr_hets_t2 += 2;
+      lastp2 *= (4 * curr_homr_t2 * curr_homc_t2) / (curr_hets_t2 * (curr_hets_t2 - 1));
+      curr_homr_t2 -= 1;
+      curr_homc_t2 -= 1;
+      if (lastp2 < EXACT_TEST_BIAS) {
+	if (lastp2 > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+          tailp2 = tailp1;
+          centerp += tailp1;
+	} else {
+	  tailp2 = lastp2;
+	}
+	break;
+      }
+      centerp += lastp2;
+      if (centerp > exit_thresh) {
+	return 1;
+      }
+    } while (curr_homr_t2 > 0.5);
+    exit_thresh = centerp / thresh;
+    if (tailp1 + tailp2 >= exit_thresh) {
+      return 0;
+    }
+    ratio = (4 * curr_homr_t2 * curr_homc_t2) / ((curr_hets_t2 + 2) * (curr_hets_t2 + 1));
+    tail2_ceil = tailp2 + lastp2 * ratio / (1 - ratio);
+    curr_hets_t1 = obs_hets;
+    curr_homr_t1 = obs_homr + 1;
+    curr_homc_t1 = obs_homc + 1;
+    lastp1 = (curr_hets_t1 * (curr_hets_t1 - 1)) / (4 * curr_homr_t1 * curr_homc_t1);
+    tail1_ceil = 2 * tailp1 / (1 - lastp1) - tailp1;
+    lastp1 *= 2 * tailp1;
     tailp1 += lastp1;
 
     if (tail1_ceil + tail2_ceil < exit_thresh) {
