@@ -127,7 +127,7 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t
   if (!midp) {
     return tprob / (cprob + tprob);
   } else {
-    return (tprob - ((1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (cprob * tprob);
+    return (tprob - ((1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (cprob + tprob);
   }
 }
 
