@@ -31,11 +31,12 @@
 // This helps us avoid premature floating point overflow.
 #define EXACT_TEST_BIAS 0.00000000000000000000000010339757656912845935892608650874535669572651386260986328125
 
-double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
+double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t midp) {
   // Basic 2x2 Fisher exact test p-value calculation.
   double tprob = (1 - SMALL_EPSILON) * EXACT_TEST_BIAS;
   double cur_prob = tprob;
   double cprob = 0;
+  int32_t tie_ct = 1;
   uint32_t uii;
   double cur11;
   double cur12;
@@ -72,6 +73,9 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
     cur12 -= 1;
     cur21 -= 1;
     if (cur_prob < EXACT_TEST_BIAS) {
+      if (cur_prob > (1 - 2 * SMALL_EPSILON) * EXACT_TEST_BIAS) {
+        tie_ct++;
+      }
       tprob += cur_prob;
       break;
     }
@@ -112,14 +116,22 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22) {
       preaddp = tprob;
       tprob += cur_prob;
       if (tprob <= preaddp) {
-	return preaddp / (cprob + preaddp);
+        if (!midp) {
+	  return preaddp / (cprob + preaddp);
+        } else {
+          return (preaddp - ((1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (cprob + preaddp);
+        }
       }
     } while (cur11 > 0.5);
   }
-  return tprob / (cprob + tprob);
+  if (!midp) {
+    return tprob / (cprob + tprob);
+  } else {
+    return (tprob - ((1 - SMALL_EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (cprob * tprob);
+  }
 }
 
-double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt) {
+double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt, uint32_t midp) {
   double cur_prob = EXACT_TEST_BIAS;
   double left_prob = cur_prob;
   double right_prob = 0;
@@ -199,7 +211,11 @@ double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, u
 	break;
       }
     }
-    return left_prob / right_prob;
+    if (!midp) {
+      return left_prob / right_prob;
+    } else {
+      return (left_prob - EXACT_TEST_BIAS * 0.5) / right_prob;
+    }
   } else {
     // starting left of center, p could be small
     // 1. right_prob = sum rightward to precision limit
@@ -237,7 +253,11 @@ double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, u
 	break;
       }
     }
-    return left_prob / (left_prob + right_prob);
+    if (!midp) {
+      return left_prob / (left_prob + right_prob);
+    } else {
+      return (left_prob - EXACT_TEST_BIAS * 0.5) / (left_prob + right_prob);
+    }
   }
 }
 
@@ -308,7 +328,7 @@ void fisher22_precomp_thresh(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t 
   }
 }
 
-int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p, double* saved22p, double* saved23p, double *totalp, uint32_t right_side) {
+int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p, double* saved22p, double* saved23p, double *totalp, uint32_t* tie_ctp, uint32_t right_side) {
   double total = 0;
   double cur_prob = *base_probp;
   double tmp12 = *saved12p;
@@ -355,11 +375,14 @@ int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p,
 	}
 	tmp12 -= 1;
 	tmp23 -= 1;
-	// throw in extra (1 - SMALL_EPSILON) multiplier to prevent rounding
-	// errors from causing this to keep going when the left-side test
-	// stopped
-	if (cur_prob > (1 - SMALL_EPSILON) * EXACT_TEST_BIAS) {
-	  break;
+        if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+	  // throw in extra (1 - SMALL_EPSILON) multiplier to prevent rounding
+	  // errors from causing this to keep going when the left-side test
+	  // stopped
+	  if (cur_prob > (1 - SMALL_EPSILON) * EXACT_TEST_BIAS) {
+	    break;
+	  }
+          *tie_ctp += 1;
 	}
 	total += cur_prob;
       }
@@ -401,8 +424,11 @@ int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p,
 	}
 	tmp13 -= 1;
 	tmp22 -= 1;
-	if (cur_prob > EXACT_TEST_BIAS) {
-	  break;
+        if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+	  if (cur_prob > EXACT_TEST_BIAS) {
+	    break;
+	  }
+	  *tie_ctp += 1;
 	}
 	total += cur_prob;
       }
@@ -416,8 +442,12 @@ int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p,
   *saved22p = tmp22;
   *saved23p = tmp23;
   if (cur_prob > EXACT_TEST_BIAS) {
+    // even most extreme table on this side is too probable
     *totalp = 0;
     return 0;
+  }
+  if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+    *tie_ctp += 1;
   }
   // sum tail to floating point precision limit
   if (right_side) {
@@ -449,7 +479,7 @@ int32_t fisher23_tailsum(double* base_probp, double* saved12p, double* saved13p,
   return 0;
 }
 
-double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23) {
+double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp) {
   // 2x3 Fisher-Freeman-Halton exact test p-value calculation.
   // The number of tables involved here is still small enough that the network
   // algorithm (and the improved variants thereof that I've seen) are
@@ -461,8 +491,9 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
   double cur_prob = (1 - SMALLISH_EPSILON) * EXACT_TEST_BIAS;
   double tprob = cur_prob;
   double cprob = 0;
-  uint32_t dir = 0; // 0 = forwards, 1 = backwards
   double dyy = 0;
+  uint32_t tie_ct = 1;
+  uint32_t dir = 0; // 0 = forwards, 1 = backwards
   double base_probl;
   double base_probr;
   double orig_base_probl;
@@ -559,6 +590,9 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
       tmp12 -= 1;
       tmp23 -= 1;
       if (cur_prob <= EXACT_TEST_BIAS) {
+        if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+          tie_ct++;
+	}
 	tprob += cur_prob;
 	break;
       }
@@ -622,6 +656,9 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
 	tmp13 -= 1;
 	tmp22 -= 1;
 	if (cur_prob <= EXACT_TEST_BIAS) {
+          if (cur_prob > (1 - 2 * SMALLISH_EPSILON) * EXACT_TEST_BIAS) {
+	    tie_ct++;
+	  }
 	  tprob += cur_prob;
 	  break;
 	}
@@ -729,7 +766,7 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
 	}
 	cur21 -= 1;
       }
-      if (fisher23_tailsum(&base_probl, &savedl12, &savedl13, &savedl22, &savedl23, &dxx, 0)) {
+      if (fisher23_tailsum(&base_probl, &savedl12, &savedl13, &savedl22, &savedl23, &dxx, &tie_ct, 0)) {
 	break;
       }
       tprob += dxx;
@@ -754,7 +791,7 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
 	  savedr12 -= 1;
 	}
       }
-      fisher23_tailsum(&base_probr, &savedr12, &savedr13, &savedr22, &savedr23, &dyy, 1);
+      fisher23_tailsum(&base_probr, &savedr12, &savedr13, &savedr22, &savedr23, &dyy, &tie_ct, 1);
       tprob += dyy;
       cprob += row_prob - dxx - dyy;
       if (cprob == INFINITY) {
@@ -794,7 +831,11 @@ double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t
       }
     }
   }
-  return tprob / (tprob + cprob);
+  if (!midp) {
+    return tprob / (tprob + cprob);
+  } else {
+    return (tprob - ((1 - SMALLISH_EPSILON) * EXACT_TEST_BIAS * 0.5) * ((int32_t)tie_ct)) / (tprob + cprob);
+  }
 }
 
 #ifdef TEST_BUILD
@@ -813,9 +854,9 @@ int main(int argc, char** argv) {
   uint32_t m31;
   uint32_t m32;
   if (argc == 5) {
-    printf("p-value: %g\n", fisher22(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), atoi(argv[4])));
+    printf("p-value: %g\n", fisher22(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), atoi(argv[4])), 0);
   } else if (argc == 7) {
-    printf("p-value: %g\n", fisher23(atoi(argv[1]), atoi(argv[3]), atoi(argv[5]), atoi(argv[2]), atoi(argv[4]), atoi(argv[6])));
+    printf("p-value: %g\n", fisher23(atoi(argv[1]), atoi(argv[3]), atoi(argv[5]), atoi(argv[2]), atoi(argv[4]), atoi(argv[6])), 0);
   } else if (argc != 2) {
     printf(
 "Fisher 2x2 and 2x3 exact test    https://www.cog-genomics.org/software/stats\n"
@@ -853,9 +894,9 @@ int main(int argc, char** argv) {
         // skip improperly formatted line
         continue;
       }
-      printf("p-value for %s: %g\n", idstr, fisher22(m11, m12, m21, m22));
+      printf("p-value for %s: %g\n", idstr, fisher22(m11, m12, m21, m22, 0));
     } else {
-      printf("p-value for %s: %g\n", idstr, fisher23(m11, m21, m31, m12, m22, m32));
+      printf("p-value for %s: %g\n", idstr, fisher23(m11, m21, m31, m12, m22, m32, 0));
     }
   }
   if (!feof(test_file)) {

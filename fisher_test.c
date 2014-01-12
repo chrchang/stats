@@ -1,11 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <math.h>
 
 // Fisher 2x2 and 2x3 exact test command line utility
-// Copyright (C) 2013  Christopher Chang  chrchang@alumni.caltech.edu
+// Copyright (C) 2013-2014  Christopher Chang  chrchang@alumni.caltech.edu
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -20,18 +21,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22);
+double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t midp);
 
-double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt);
+double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt, uint32_t midp);
 
 void fisher22_precomp_thresh(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t* m11_minp, uint32_t* m11_maxp, uint32_t* tiep);
 
-double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23);
+double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp);
 
 #define MAXLINELEN 131072
 
 int main(int argc, char** argv) {
   FILE* test_file;
+  uint32_t midp = 0;
   char buf[MAXLINELEN];
   char idstr[MAXLINELEN];
   char* bufptr;
@@ -42,12 +44,16 @@ int main(int argc, char** argv) {
   uint32_t m31;
   uint32_t m32;
   uint32_t tie;
+  if (!strcmp(argv[argc - 1], "midp")) {
+    midp = 1;
+    argc--;
+  }
   if (argc == 5) {
     m11 = atoi(argv[1]);
     m12 = atoi(argv[2]);
     m21 = atoi(argv[3]);
     m22 = atoi(argv[4]);
-    printf("p-value: %g\n", fisher22(m11, m12, m21, m22));
+    printf("p-value: %g\n", fisher22(m11, m12, m21, m22, midp));
     fisher22_precomp_thresh(m11, m12, m21, m22, &m31, &m32, &tie);
     if (!m32) {
       printf("(This is maximal.)\n");
@@ -66,26 +72,27 @@ int main(int argc, char** argv) {
     m12 = atoi(argv[2]);
     m21 = atoi(argv[3]);
     m22 = atoi(argv[4]);
-    printf("p-value: %g\n", fisher22_1sided(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0));
+    printf("p-value: %g\n", fisher22_1sided(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp));
     return 0;
   } else if (argc == 7) {
-    printf("p-value: %g\n", fisher23(atoi(argv[1]), atoi(argv[3]), atoi(argv[5]), atoi(argv[2]), atoi(argv[4]), atoi(argv[6])));
+    printf("p-value: %g\n", fisher23(atoi(argv[1]), atoi(argv[3]), atoi(argv[5]), atoi(argv[2]), atoi(argv[4]), atoi(argv[6]), midp));
     return 0;
   } else if (argc != 2) {
   main_std_help:
     printf(
-"Fisher 2x2 and 2x3 exact test    https://github.com/chrchang/stats\n"
-"(C) 2013 Christopher Chang, GNU General Public License version 3\n\n"
-"Usage: fisher_test [m11] [m12] [m21] [m22] <+ | ->\n"
-"       fisher_test [m11] [m12] [m21] [m22] [m31] [m32]\n"
-"       fisher_test [filename]\n\n"
-"For the 2x2 case, if the optional last parameter is '+', a 1-sided test is used\n"
+"Fisher 2x2 and 2x3 exact test       https://github.com/chrchang/stats\n"
+"(C) 2013-2014 Christopher Chang, GNU General Public License version 3\n\n"
+"Usage: fisher_test [m11] [m12] [m21] [m22] <+ | -> <midp>\n"
+"       fisher_test [m11] [m12] [m21] [m22] [m31] [m32] <midp>\n"
+"       fisher_test [filename] <midp>\n\n"
+"For the 2x2 case, if the optional 5th parameter is '+', a 1-sided test is used\n"
 "where the alternative hypothesis is that m11 is greater than expected;\n"
 "similarly, '-' invokes the 1-sided test with the m11-is-less-than-expected\n"
 "alternative.  With neither, a 2-sided test is employed.\n\n"
 "If a filename is provided, each line of the file is expected to contain an ID\n"
 "in the first column, and then either 4 or 6 values (in m11-m12-m21-m22-m31-m32\n"
-"order).\n"
+"order).\n\n"
+"If 'midp' is the last parameter, Lancaster's mid-p correction is applied.\n"
 	   );
     return 1;
   }
@@ -113,9 +120,9 @@ int main(int argc, char** argv) {
         // skip improperly formatted line
         continue;
       }
-      printf("p-value for %s: %g\n", idstr, fisher22(m11, m12, m21, m22));
+      printf("p-value for %s: %g\n", idstr, fisher22(m11, m12, m21, m22, midp));
     } else {
-      printf("p-value for %s: %g\n", idstr, fisher23(m11, m21, m31, m12, m22, m32));
+      printf("p-value for %s: %g\n", idstr, fisher23(m11, m21, m31, m12, m22, m32, midp));
     }
   }
   if (!feof(test_file)) {
