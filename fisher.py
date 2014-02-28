@@ -62,7 +62,7 @@ def fisher22(m11, m12, m21, m22, midp=False):
         cur12 -= 1.0
         cur21 -= 1.0
         if cur_prob == INFINITY:
-            return 0
+            return 0.0
         if cur_prob < EXACT_TEST_BIAS:
             if cur_prob > (1 - 2 * FISHER_EPSILON) * EXACT_TEST_BIAS:
                 tie_ct += 1
@@ -70,7 +70,7 @@ def fisher22(m11, m12, m21, m22, midp=False):
             break
         cprob += cur_prob
     if cprob == 0.0 and not midp:
-        return 1
+        return 1.0
     while cur12 > 0.5:
         cur11 += 1.0
         cur22 += 1.0
