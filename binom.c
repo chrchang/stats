@@ -25,7 +25,7 @@ double binom_2sided(uint32_t succ, uint32_t obs, double rate, uint32_t midp) {
   double cur_fail_t1;
   double preaddp;
   if (!obs) {
-    return 1;
+    return midp? 0.5 : 1;
   }
   if (obs * rate < succ) {
     while (cur_succ_t2 > 0.5) {
