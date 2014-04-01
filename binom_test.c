@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-double binom_2sided(int32_t succ, int32_t obs, double rate);
+double binom_2sided(uint32_t succ, uint32_t obs, double rate, uint32_t midp);
 double binom_1sided(int32_t succ, int32_t obs, double rate);
 
 int main(int argc, char** argv) {
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
       return 3;
     }
     if (argc == 4) {
-      p_value = binom_2sided(succ, obs, rate);
+      p_value = binom_2sided(succ, obs, rate, 0);
     } else {
       if (argv[4][1] || ((argv[4][0] != '+') && (argv[4][0] != '-'))) {
 	printf("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n");
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
   }
   while (!feof(test_file)) {
     fscanf(test_file, "%s %d %d %lg\n", name, &succ, &obs, &rate);
-    p_value = binom_2sided(succ, obs, rate);
+    p_value = binom_2sided(succ, obs, rate, 0);
     printf("P-value for %s: %g\n", name, p_value);
   }
   fclose(test_file);

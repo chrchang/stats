@@ -10,13 +10,15 @@
 // minimum representable positive number.
 #define EXACT_TEST_BIAS 0.00000000000000000000000010339757656912845935892608650874535669572651386260986328125
 
-double binom_2sided(int32_t succ, int32_t obs, double rate) {
-  double cur_succ_t2 = succ;
-  double cur_fail_t2 = obs - succ;
+double binom_2sided(uint32_t succ, uint32_t obs, double rate, uint32_t midp) {
+  // straightforward to generalize this to any success probability
+  double cur_succ_t2 = (int32_t)succ;
+  double cur_fail_t2 = (int32_t)(obs - succ);
   double tailp = (1 - EPSILON) * EXACT_TEST_BIAS;
   double centerp = 0;
   double lastp2 = tailp;
   double lastp1 = tailp;
+  int32_t tie_ct = 1;
   double rate_mult_incr = rate / (1 - rate);
   double rate_mult_decr = (1 - rate) / rate;
   double cur_succ_t1;
@@ -31,6 +33,9 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
       lastp2 *= rate_mult_decr * cur_succ_t2 / cur_fail_t2;
       cur_succ_t2 -= 1;
       if (lastp2 < EXACT_TEST_BIAS) {
+	if (lastp2 > (1 - 2 * EPSILON) * EXACT_TEST_BIAS) {
+	  tie_ct++;
+	}
 	tailp += lastp2;
 	break;
       }
@@ -39,7 +44,7 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
 	return 0;
       }
     }
-    if (centerp == 0) {
+    if ((centerp == 0) && (!midp)) {
       return 1;
     }
     while (cur_succ_t2 > 0.5) {
@@ -52,8 +57,8 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
 	break;
       }
     }
-    cur_succ_t1 = succ + 1;
-    cur_fail_t1 = obs - succ;
+    cur_succ_t1 = (int32_t)(succ + 1);
+    cur_fail_t1 = (int32_t)(obs - succ);
     while (cur_fail_t1 > 0.5) {
       lastp1 *= rate_mult_incr * cur_fail_t1 / cur_succ_t1;
       preaddp = tailp;
@@ -78,7 +83,7 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
 	return 0;
       }
     }
-    if (centerp == 0) {
+    if ((centerp == 0) && (!midp)) {
       return 1;
     }
     while (cur_fail_t2 > 0.5) {
@@ -91,8 +96,8 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
 	break;
       }
     }
-    cur_succ_t1 = succ;
-    cur_fail_t1 = obs - succ;
+    cur_succ_t1 = (int32_t)succ;
+    cur_fail_t1 = (int32_t)(obs - succ);
     while (cur_succ_t1 > 0.5) {
       cur_fail_t1 += 1;
       lastp1 *= rate_mult_decr * cur_succ_t1 / cur_fail_t1;
@@ -104,7 +109,11 @@ double binom_2sided(int32_t succ, int32_t obs, double rate) {
       cur_succ_t1 -= 1;
     }
   }
-  return tailp / (tailp + centerp);
+  if (!midp) {
+    return tailp / (tailp + centerp);
+  } else {
+    return (tailp - ((1 - EPSILON) * EXACT_TEST_BIAS * 0.5) * tie_ct) / (tailp + centerp);
+  }
 }
 
 double binom_1sided(int32_t succ, int32_t obs, double rate) {
