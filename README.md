@@ -27,7 +27,7 @@ Test program usage examples:
   ./hwe_test 16 3 81
 
 binom.c, fisher.c, hwe_test.cc, and all files under include/ except
-plink2_highprec.* are covered by LGPLv3 (see the COPYING.LESSER file).
-plink2_highprec.*'s adaptation of a small subset of the QD library
+plink2_highprec.cc and .h are covered by LGPLv3 (see the COPYING.LESSER file).
+plink2_highprec's adaptation of a small subset of the QD library
 (https://github.com/BL-highprecision/QD ) is under the include/LICENSE.QD
 BSD-3-Clause-LBNL license.  mini-gmp/* is dual-licensed under LGPLv3 and GPLv2.
