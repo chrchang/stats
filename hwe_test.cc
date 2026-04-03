@@ -9,7 +9,6 @@ int32_t main(int argc, char** argv) {
   using namespace plink2;
   FILE* test_file = nullptr;
   PglErr reterr = kPglRetSuccess;
-  uint32_t midp = 0;
   {
     uint32_t midp = 0;
     if (!strcmp(argv[argc - 1], "midp")) {
@@ -31,6 +30,11 @@ int32_t main(int argc, char** argv) {
       if (unlikely(ScanUintDefcap(argv[3], &homs2))) {
         fprintf(stderr, "Error: Invalid hom2 count '%s'.\n", argv[3]);
         goto main_ret_INVALID_CMDLINE;
+      }
+      if (unlikely(S_CAST(uint64_t, hets) + homs1 + homs2 > 0x7fffffff)) {
+        fputs("Error: Problem instance too large.\n", stderr);
+        reterr = kPglRetNotYetSupported;
+        goto main_ret_1;
       }
       if (argc == 4) {
         double logp;
@@ -84,6 +88,11 @@ int32_t main(int argc, char** argv) {
           fprintf(stderr, "Error: Failed to read or parse line %" PRIuPTR " of %s .\n", line_idx, argv[1]);
           goto main_ret_READ_FAIL;
         }
+        if (unlikely(S_CAST(int64_t, hets) + homs1 + homs2 > 0x7fffffff)) {
+          fprintf(stderr, "Error: Problem instance too large on line %" PRIuPTR " of %s .\n", line_idx, argv[1]);
+          reterr = kPglRetNotYetSupported;
+          goto main_ret_1;
+        }
         double logp;
         if (unlikely(HweLnP(hets, homs1, homs2, midp, &logp))) {
           goto main_ret_NOMEM;
@@ -113,6 +122,7 @@ int32_t main(int argc, char** argv) {
     reterr = kPglRetInvalidCmdline;
     break;
   }
+ main_ret_1:
   if (test_file) {
     fclose(test_file);
   }
