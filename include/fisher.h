@@ -1,5 +1,7 @@
-// This library is part of PLINK 2.0, copyright (C) 2005-2026 Shaun Purcell,
-// Christopher Chang.
+#ifndef __FISHER_H__
+#define __FISHER_H__
+
+// Fisher's Exact Test library, copyright (C) 2013-2026 Christopher Chang.
 //
 // This library is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by the
@@ -14,32 +16,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
-#include "plink2_float.h"
-
-#ifdef __APPLE__
-#  include <fenv.h>
-#endif
+#include "plink2_base.h"
 
 #ifdef __cplusplus
 namespace plink2 {
 #endif
 
-void flush_denormals() {
-#if defined(__x86_64__) || defined(__i386__)
-  _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-#else
-#  ifdef __APPLE__
-  fesetenv(FE_DFL_DISABLE_DENORMS_ENV);
-#  else
-  // generic arm64
-  uint64_t fpcr;
-  asm volatile("mrs %0, fpcr" : "=r"(fpcr));
-  fpcr |= (1LLU << 24);
-  asm volatile("msr fpcr, %0" : : "r"(fpcr));
-#  endif
-#endif
-}
+BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t midp, double* resultp);
 
 #ifdef __cplusplus
 }
 #endif
+
+#endif  // __FISHER_H__
