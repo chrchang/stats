@@ -76,6 +76,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     swap_u32(&obs_m11, &obs_m12);
     swap_u32(&obs_m21, &obs_m22);
   }
+  ;;;
   return 0;
 }
 
