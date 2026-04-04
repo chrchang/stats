@@ -210,8 +210,8 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         curr_hets -= 2;
         // Number of center terms is maximized with obs_hets - modal_nhet ~=
         // 344, obs_homr = 0, obs_homc and obs_hets both large.
-        // Since 1 + 1/2 + ... + 1/172 < 1/73 + ... + 1/53000, we're limited to
-        // ~53000 terms.  Each lastp update involves 4 operations which can
+        // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited
+        // to ~53000 terms.  Each lastp update involves 4 operations which can
         // each introduce up to 0.5 ULP relative error under the default
         // rounding mode.
         if (lastp < 1 + 53000 * 2 * k2m52) {

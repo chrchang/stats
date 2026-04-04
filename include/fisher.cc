@@ -76,7 +76,88 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     swap_u32(&obs_m11, &obs_m12);
     swap_u32(&obs_m21, &obs_m22);
   }
-  ;;;
+  if (!midp) {
+    // Fast path for p=1.
+    if (S_CAST(uint64_t, obs_m11 + 1) * (obs_m22 + 1) == S_CAST(uint64_t, obs_m12) * obs_m21) {
+      *resultp = 0;
+      return 0;
+    }
+  }
+  double m11 = u31tod(obs_m11);
+  double m12 = u31tod(obs_m12);
+  double m21 = u31tod(obs_m21);
+  double m22 = u31tod(obs_m22);
+  double lastp = 1;
+  double tailp = 1;
+  // Iterate outward to floating-point precision limit.
+  while (1) {
+    m12 += 1;
+    m21 += 1;
+    lastp *= (m11 * m22) / (m12 * m21);
+    m11 -= 1;
+    m22 -= 1;
+    const double preaddp = tailp;
+    tailp += lastp;
+    if (tailp == preaddp) {
+      break;
+    }
+  }
+  // In the common case, where we're close enough to the mode that float64
+  // underflow/overflow isn't an issue, use the original algorithm: sum all
+  // center relative-likelihoods, sum far-tail relative-likelihoods to
+  // floating-point precision limit, return log(tailp / (tailp + centerp)).
+  //
+  // As with HweLnP(), we note that if we're within 172 steps of the mode and
+  // the starting relative-likelihood is normalized to 1, the modal
+  // relative-likelihood can be loosely bounded above by
+  //   ((172^172) / 172!)^4 ~= 5.3e+292
+  // which leaves enough headroom to accumulate the rest of the center-sum and
+  // represent intermediate values without overflowing.
+  int32_t tie_ct = 1;
+  if ((S_CAST(int64_t, obs_m11) + 172) * (S_CAST(int64_t, obs_m22) + 172) >=
+      (S_CAST(int64_t, obs_m12) - 172) * (S_CAST(int64_t, obs_m21) - 172)) {
+    lastp = 1;
+    m11 = u31tod(obs_m11);
+    m12 = u31tod(obs_m12);
+    m21 = u31tod(obs_m21);
+    m22 = u31tod(obs_m22);
+    dd_real starting_lnprob_other_component_ddr = {{DBL_MAX, 0.0}};
+    double centerp = 0;
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lastp *= (m12 * m21) / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      // Number of center terms is maximized with obs_m11 = 0, modal_m11 = 172,
+      // other values large.
+      // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited to
+      // ~53000 terms.  Each lastp update involves 4 operations which can each
+      // introduce up to 0.5 ULP relative error under the default rounding
+      // mode.
+      if (lastp < 1 + 53000 * 2 * k2m52) {
+        if (lastp <= 1 - 53000 * 2 * k2m52) {
+          tailp += lastp;
+          break;
+        }
+        // Near-tie.  True value of lastp can be greater than, equal to, or
+        // less than 1.
+        const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
+        intptr_t cmp_result;
+        if (unlikely(FisherCompare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+          return 1;
+        }
+        if (cmp_result <= 0) {
+          tailp += lastp;
+          tie_ct += (cmp_result == 0);
+          break;
+        }
+      }
+      centerp += lastp;
+    }
+    // TODO
+  }
+  // TODO
   return 0;
 }
 
