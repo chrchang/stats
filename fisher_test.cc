@@ -68,7 +68,7 @@ int32_t main(int argc, char** argv) {
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
         }
-        printf("p-value: %g\n", fisher23(m11, m12, m21, m22, m31, m32, midp));
+        printf("p-value: %g\n", fisher23(m11, m21, m31, m12, m22, m32, midp));
       } else {
         if (unlikely(S_CAST(uint64_t, m11) + m12 + m21 + m22 > 0x7fffffff)) {
           fputs("Error: Problem instance too large.\n", stderr);
