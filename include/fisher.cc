@@ -332,6 +332,90 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   return 0;
 }
 
+// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
+// Just returns 0 if the log-p-value > 1 - 2^{-54} since additional precision
+// in that direction is expected to be irrelevant.  (Reverse the test direction
+// when you do actually want that precision.)
+double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t m11_is_greater_alt, uint32_t midp) {
+  // Normalize.
+  if (obs_m11 > obs_m22) {
+    swap_u32(&obs_m11, &obs_m22);
+  }
+  if (obs_m12 > obs_m21) {
+    swap_u32(&obs_m12, &obs_m21);
+  }
+  // Flipping m11<->m12 and m21<->m22 also flips the direction of the
+  // alternative hypothesis.  So we flip on m11-is-greater alternative
+  // hypothesis here to allow the rest of the code to assume m11-is-less.
+  if (m11_is_greater_alt) {
+    swap_u32(&obs_m11, &obs_m12);
+    swap_u32(&obs_m21, &obs_m22);
+  }
+  const double obs_m11d = u31tod(obs_m11);
+  const double obs_m12d = u31tod(obs_m12);
+  const double obs_m21d = u31tod(obs_m21);
+  const double obs_m22d = u31tod(obs_m22);
+  double m11 = obs_m11d;
+  double m12 = obs_m12d;
+  double m21 = obs_m21d;
+  double m22 = obs_m22d;
+  if (S_CAST(uint64_t, obs_m11) * obs_m22 >= S_CAST(uint64_t, obs_m12) * obs_m21) {
+    // We're to the right of the mode.
+    // Start by computing an upper bound on the right-sum, and then iterating
+    // leftward until we either know the p-value > 1 - 2^{-54} (at which point
+    // we return 0), or remaining left likelihoods are smaller than the
+    // precision limit.
+    const double first_right_ratio = m12 * m21 / ((m11 + 1) * (m22 + 1));
+    // 1 + r + r^2 + ... = 1 / (1-r)
+    // const double right_upper_bound = 1.0 / (1 - first_right_ratio);
+
+    // Rescale our starting lastp so that we overflow to INFINITY when we'd
+    // want to early-exit and return 0; this saves us a comparison in the loop.
+    const double left_rescale = (DBL_MAX / (1LL << 54)) * (1 - first_right_ratio) ;
+    double lastp = left_rescale;
+    double left_sum = 0;
+    while (1) {
+      m12 += 1;
+      m21 += 1;
+      lastp *= m11 * m22 / (m12 * m21);
+      m11 -= 1;
+      m22 -= 1;
+      const double preaddp = left_sum;
+      left_sum += lastp;
+      if (left_sum == preaddp) {
+        break;
+      }
+    }
+    if (left_sum == INFINITY) {
+      return 0;
+    }
+    left_sum /= left_rescale;
+
+    // Now compute the right-sum to the precision limit.
+    m11 = obs_m11d + 1;
+    m12 = obs_m12d - 1;
+    m21 = obs_m21d - 1;
+    m22 = obs_m22d + 1;
+    lastp = first_right_ratio;
+    double right_sum = 1 + first_right_ratio;
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lastp *= m12 * m21 / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      const double preaddp = right_sum;
+      right_sum += lastp;
+      if (right_sum == preaddp) {
+        break;
+      }
+    }
+    return log(right_sum / (right_sum + left_sum));
+  }
+  // TODO
+  return 0;
+}
+
 #ifdef __cplusplus
 }
 #endif
