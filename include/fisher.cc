@@ -63,8 +63,19 @@ BoolErr FisherCompare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint
   return reterr;
 }
 
-BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t midp, double* resultp) {
-  // TODO
+// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
+BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t midp, double* resultp) {
+  // Normalize.
+  if (obs_m11 > obs_m22) {
+    swap_u32(&obs_m11, &obs_m22);
+  }
+  if (obs_m12 > obs_m21) {
+    swap_u32(&obs_m12, &obs_m21);
+  }
+  if (S_CAST(uint64_t, obs_m11) * obs_m22 > S_CAST(uint64_t, obs_m12) * obs_m21) {
+    swap_u32(&obs_m11, &obs_m12);
+    swap_u32(&obs_m21, &obs_m22);
+  }
   return 0;
 }
 
