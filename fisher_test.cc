@@ -13,8 +13,6 @@ double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t
 
 double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt, uint32_t midp);
 
-void fisher22_precomp_thresh(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t* m11_minp, uint32_t* m11_maxp, uint32_t* tiep);
-
 double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp);
 
 #if defined(__cplusplus)
@@ -77,18 +75,6 @@ int32_t main(int argc, char** argv) {
         }
         if (argc == 5) {
           printf("p-value: %g\n", fisher22(m11, m12, m21, m22, midp));
-          uint32_t m31;
-          uint32_t m32;
-          uint32_t tie;
-          fisher22_precomp_thresh(m11, m12, m21, m22, &m31, &m32, &tie);
-          if (!m32) {
-            printf("(This is maximal.)\n");
-          } else {
-            printf("%u <= m11 < %u results in a higher p-value.\n", m31, m32);
-          }
-          if (tie != m11) {
-            printf("m11 == %u results in the same p-value.\n", tie);
-          }
         } else {
           if ((argv[5][1] != '\0') || ((argv[5][0] != '+') && (argv[5][0] != '-'))) {
             goto main_std_help;
