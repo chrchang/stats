@@ -29,8 +29,8 @@ namespace plink2 {
 // likelihood than m11 = obs_m11, 0 if identical likelihood, and negative value
 // if lower likelihood.
 // Error is returned iff malloc fails.
-// If neg_numer_ddr has not been computed yet, set its
-// x[0] to DBL_MAX; it will be filled in if necessary.
+// If neg_numer_ddr has not been computed yet, set its x[0] to DBL_MAX; it will
+// be filled in if necessary.
 BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m11_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
   // Fisher 2x2 likelihood is
   //
@@ -494,6 +494,11 @@ static const double kJumpThresh = 314.0; // chosen to guarantee base_prob < kSwi
 // static const double kSwitchThresh = k2p100 * k2p50;
 // static const double kLnSwitchThresh = 150.0 * kLn2;
 
+BoolErr Fisher23LnFirstRow(int32_t obs_m12, int32_t obs_m13, int32_t obs_m22, int32_t obs_m23, double* tailp, dd_real* starting_lnprob_other_component_ddr_ptr, uint32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l12_ptr, double* orig_saved_l13_ptr, double* orig_saved_l22_ptr, double* orig_saved_l23_ptr, double* orig_saved_r12_ptr, double* orig_saved_r13_ptr, double* orig_saved_r22_ptr, double* orig_saved_r23_ptr) {
+  // TODO
+  return 0;
+}
+
 BoolErr Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t cur_m11, uint32_t cur_m12, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
   // Fisher 2x3 likelihood is
   //
@@ -536,7 +541,61 @@ BoolErr Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, ui
 
 // obs_m11 + obs_m12 + obs_m13 + obs_m21 + obs_m22 + obs_m23 assumed to be
 // <2^31.
-BoolErr Fisher23LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t midp, double* resultp) {
+BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) {
+  // Normalize: m11 + m21 <= m12 + m22 <= m13 + m23,
+  //            m11 * (m22 + m23) <= m21 * (m12 + m13)
+  {
+    int32_t mx1i = obs_m11 + obs_m21;
+    {
+      int32_t mx2i = obs_m12 + obs_m22;
+      if (mx1i > mx2i) {
+        swap_i32(&obs_m11, &obs_m12);
+        swap_i32(&obs_m21, &obs_m22);
+        swap_i32(&mx1i, &mx2i);
+      }
+      {
+        const int32_t mx3i = obs_m13 + obs_m23;
+        if (mx2i > mx3i) {
+          swap_i32(&obs_m12, &obs_m13);
+          swap_i32(&obs_m22, &obs_m23);
+          mx2i = mx3i;
+        }
+      }
+      if (mx1i > mx2i) {
+        swap_i32(&obs_m11, &obs_m12);
+        swap_i32(&obs_m21, &obs_m22);
+        mx1i = mx2i;
+      }
+    }
+    if (mx1i == 0) {
+      return Fisher22LnP(obs_m12, obs_m13, obs_m22, obs_m23, midp, resultp);
+    }
+    if (S_CAST(uint64_t, obs_m11) * (obs_m22 + obs_m23) > S_CAST(uint64_t, obs_m21) * (obs_m12 + obs_m13)) {
+      swap_i32(&obs_m11, &obs_m21);
+      swap_i32(&obs_m12, &obs_m22);
+      swap_i32(&obs_m13, &obs_m23);
+    }
+  }
+  double orig_base_lnprobl = 0;
+  double orig_base_lnprobr = 0;
+  double orig_base_probl;
+  double orig_base_epsl;
+  double orig_base_probr;
+  double orig_base_epsr;
+  double tailp;
+  dd_real starting_lnprob_other_component_ddr;
+  uint32_t tie_ct;
+  double orig_saved_l12;
+  double orig_saved_l13;
+  double orig_saved_l22;
+  double orig_saved_l23;
+  double orig_saved_r12;
+  double orig_saved_r13;
+  double orig_saved_r22;
+  double orig_saved_r23;
+  if (unlikely(Fisher23LnFirstRow(obs_m12, obs_m13, obs_m22, obs_m23, &tailp, &starting_lnprob_other_component_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l12, &orig_saved_l13, &orig_saved_l22, &orig_saved_l23, &orig_saved_r12, &orig_saved_r13, &orig_saved_r22, &orig_saved_r23))) {
+    return 1;
+  }
   // TODO
   return 0;
 }
