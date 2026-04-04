@@ -461,8 +461,27 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
     }
     return log((left_sum - 0.5 * u31tod(midp)) / (left_sum + right_sum));
   }
-  // TODO
-  return 0;
+  const dd_real starting_lnprob_other_component_ddr =
+    ddr_negate(ddr_add4_lfacts(obs_m11d, obs_m12d, obs_m21d, obs_m22d));
+  const dd_real common_lnprob_component_ddr =
+    ddr_sub(ddr_add4_lfacts(m1x, m2x, mx1, obs_m12d + obs_m22d),
+            ddr_lfact(mxx));
+  const double starting_lnprob = ddr_add(common_lnprob_component_ddr, starting_lnprob_other_component_ddr).x[0];
+  double lastp = 1;
+  double left_sum = 1;
+  while (1) {
+    m12 += 1;
+    m21 += 1;
+    lastp *= m11 * m22 / (m12 * m21);
+    m11 -= 1;
+    m22 -= 1;
+    const double preaddp = left_sum;
+    left_sum += lastp;
+    if (left_sum == preaddp) {
+      break;
+    }
+  }
+  return starting_lnprob + log(left_sum - 0.5 * u31tod(midp));
 }
 
 #ifdef __cplusplus
