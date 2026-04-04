@@ -31,7 +31,7 @@ namespace plink2 {
 // Error is returned iff malloc fails.
 // If neg_numer_ddr has not been computed yet, set its
 // x[0] to DBL_MAX; it will be filled in if necessary.
-BoolErr FisherCompare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m11_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
+BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m11_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
   // Fisher 2x2 likelihood is
   //
   //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
@@ -52,9 +52,9 @@ BoolErr FisherCompare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint
   numer_factorial_args[3] = obs_m22;
   uint32_t denom_factorial_args[4];
   denom_factorial_args[0] = obs_m11 + m11_incr;
-  denom_factorial_args[0] = obs_m12 - m11_incr;
-  denom_factorial_args[0] = obs_m21 - m11_incr;
-  denom_factorial_args[0] = obs_m22 + m11_incr;
+  denom_factorial_args[1] = obs_m12 - m11_incr;
+  denom_factorial_args[2] = obs_m21 - m11_incr;
+  denom_factorial_args[3] = obs_m22 + m11_incr;
 
   mp_limb_t* gmp_wkspace = nullptr;
   uintptr_t gmp_wkspace_limb_ct = 0;
@@ -148,7 +148,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
         // less than 1.
         const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
         intptr_t cmp_result;
-        if (unlikely(FisherCompare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+        if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
           return 1;
         }
         if (cmp_result <= 0) {
@@ -304,7 +304,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   if (lastp < 2 - one_minus_scaled_eps) {
     const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
     intptr_t cmp_result;
-    if (unlikely(FisherCompare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+    if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
       return 1;
     }
     if (cmp_result <= 0) {
@@ -481,6 +481,64 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
     }
   }
   return starting_lnprob + log(left_sum - 0.5 * u31tod(midp));
+}
+
+// Switch between log- and regular representations at kSwitchThresh.
+// 2^890 leaves enough headroom for at least 4 more multiplies by obs_total.
+// (Useful to reduce this to e.g. 2^150 when testing correctness, though it
+// isn't currently safe to go all the way down to 1 due to algorithmic
+// assumptions.)
+static const double kSwitchThresh = k2p800 * k2p50 * (1LL << 40);
+static const double kLnSwitchThresh = 890.0 * kLn2;
+static const double kJumpThresh = 314.0; // chosen to guarantee base_prob < kSwitchThresh in non-jumping case
+// static const double kSwitchThresh = k2p100 * k2p50;
+// static const double kLnSwitchThresh = 150.0 * kLn2;
+
+BoolErr Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t cur_m11, uint32_t cur_m12, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
+  // Fisher 2x3 likelihood is
+  //
+  //   (m11+m12+m13)! (m21+m22+m23)! (m11+m21)! (m12+m22)! (m13+m23)!
+  //   --------------------------------------------------------------
+  //      m11! m12! m13! m21! m22! m23! (m11+m12+m13+m21+m22+m23)!
+  //
+  // so likelihood ratio of interest is
+  //
+  //   obs_m11! obs_m12! obs_m13! obs_m21! obs_m22! obs_m23!
+  //   -----------------------------------------------------
+  //   cur_m11! cur_m12! cur_m13! cur_m21! cur_m22! cur_m23!
+  //
+  // where we infer the remaining cur_ values from the fixed row/column sums.
+  const uint32_t cur_m13 = obs_m11 + obs_m12 + obs_m13 - cur_m11 - cur_m12;
+  const uint32_t cur_m21 = obs_m11 + obs_m21 - cur_m11;
+  const uint32_t cur_m22 = obs_m12 + obs_m22 - cur_m12;
+  const uint32_t cur_m23 = obs_m13 + obs_m23 - cur_m13;
+  uint32_t numer_factorial_args[6];
+  numer_factorial_args[0] = obs_m11;
+  numer_factorial_args[1] = obs_m12;
+  numer_factorial_args[2] = obs_m13;
+  numer_factorial_args[3] = obs_m21;
+  numer_factorial_args[4] = obs_m22;
+  numer_factorial_args[5] = obs_m23;
+  uint32_t denom_factorial_args[6];
+  denom_factorial_args[0] = cur_m11;
+  denom_factorial_args[1] = cur_m12;
+  denom_factorial_args[2] = cur_m13;
+  denom_factorial_args[3] = cur_m21;
+  denom_factorial_args[4] = cur_m22;
+  denom_factorial_args[5] = cur_m23;
+
+  mp_limb_t* gmp_wkspace = nullptr;
+  uintptr_t gmp_wkspace_limb_ct = 0;
+  BoolErr reterr = CompareFactorialProducts(6, 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &gmp_wkspace, &gmp_wkspace_limb_ct, cmp_resultp, dbl_ptr);
+  free_cond(gmp_wkspace);
+  return reterr;
+}
+
+// obs_m11 + obs_m12 + obs_m13 + obs_m21 + obs_m22 + obs_m23 assumed to be
+// <2^31.
+BoolErr Fisher23LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t midp, double* resultp) {
+  // TODO
+  return 0;
 }
 
 #ifdef __cplusplus
