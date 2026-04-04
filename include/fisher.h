@@ -22,7 +22,7 @@
 namespace plink2 {
 #endif
 
-BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t midp, double* resultp);
+BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t midp, double* resultp);
 
 #ifdef __cplusplus
 }
