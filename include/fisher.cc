@@ -84,10 +84,14 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     }
   }
   // Iterate outward to floating-point precision limit.
-  double m11 = u31tod(obs_m11);
-  double m12 = u31tod(obs_m12);
-  double m21 = u31tod(obs_m21);
-  double m22 = u31tod(obs_m22);
+  const double obs_m11d = u31tod(obs_m11);
+  const double obs_m12d = u31tod(obs_m12);
+  const double obs_m21d = u31tod(obs_m21);
+  const double obs_m22d = u31tod(obs_m22);
+  double m11 = obs_m11d;
+  double m12 = obs_m12d;
+  double m21 = obs_m21d;
+  double m22 = obs_m22d;
   double lastp = 1;
   double tailp = 1;
   while (1) {
@@ -117,10 +121,10 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   if ((S_CAST(int64_t, obs_m11) + 172) * (S_CAST(int64_t, obs_m22) + 172) >=
       (S_CAST(int64_t, obs_m12) - 172) * (S_CAST(int64_t, obs_m21) - 172)) {
     lastp = 1;
-    m11 = u31tod(obs_m11);
-    m12 = u31tod(obs_m12);
-    m21 = u31tod(obs_m21);
-    m22 = u31tod(obs_m22);
+    m11 = obs_m11d;
+    m12 = obs_m12d;
+    m21 = obs_m21d;
+    m22 = obs_m22d;
     dd_real starting_lnprob_other_component_ddr = {{DBL_MAX, 0.0}};
     double centerp = 0;
     while (1) {
@@ -129,10 +133,10 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       lastp *= (m12 * m21) / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      // Number of center terms is maximized with obs_m11 = 0, modal_m11 = 172,
-      // other values large.
+      // Number of center contingency tables is maximized with obs_m11 = 0,
+      // modal_m11 = 172, other values large.
       // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited to
-      // ~53000 terms.  Each lastp update involves 4 operations which can each
+      // ~53000 tables.  Each lastp update involves 4 operations which can each
       // introduce up to 0.5 ULP relative error under the default rounding
       // mode.
       if (lastp < 1 + 53000 * 2 * k2m52) {
@@ -175,7 +179,88 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     *resultp = log(tailp / denom);
     return 0;
   }
-  // TODO
+  dd_real starting_lnprob_other_component_ddr =
+    ddr_negate(ddr_add4_lfacts(obs_m11d, obs_m12d, obs_m21d, obs_m22d));
+
+  // Now we want to jump near the other tail, without evaluating that many
+  // contingency table log-likelihoods along the way.
+  //
+  // Each full log-likelihood evaluation requires 4 ddr_lfact() calls.  Since
+  // they are now performed with extra precision, they require hundreds of
+  // floating-point operations, so we want to limit ourselves to 1-2 full
+  // evaluations most of the time.  (Possible todo: use lower-accuracy Lfact()
+  // to jump around, followed by ddr_lfact() when exiting the loop.  Should be
+  // an easy performance win, but there's a complexity cost so I'll wait until
+  // I see a scenario where this branch executes frequently...)
+  //
+  // The current heuristic starts by reflecting (obs_m12 + m12) * 0.5 across
+  // the mode, performing a full log-likelihood check at the nearest valid
+  // point.  (It is convenient to focus on m12 here, since m12=0 corresponds to
+  // the outermost table on this tail.)  Hopefully we find that we're in
+  // (starting_lnprob - 62 * kLn2, starting_lnprob], so we're at or near a
+  // table that actually contributes to the tail-sum.  (This window is chosen
+  // to be wide enough to guarantee that at least one point falls inside when
+  // obs_m11 + obs_m12 + obs_m21 + obs_m22 < 2^31.)
+  //
+  // If not, we jump again, using Newton's method.
+  // If m12 is too high (i.e. current log-likelihood is too high), decreasing
+  // m12 by 1 would multiply the likelihood by
+  //   (m11 + 1) * (m22 + 1) / (m12 * m21)
+  // If m12 is too low, increasing m12 by 1 would multiply the likelihood by
+  //   (m12 + 1) * (m21 + 1) / (m11 * m22)
+  // We use the log of the first expression as the Newton's method f'(x) when
+  // we're jumping to lower m12, and the negative-log of the second expression
+  // when we're jumping to higher m12.
+  // f''(x) is always negative, so we can aim for starting_lnprob instead of
+  // the middle of the interval.
+
+  const double m21_minus_m12 = obs_m21d - obs_m12d;
+  const double m1x = obs_m11d + obs_m12d;
+  const double m2x = obs_m21d + obs_m22d;
+  const double mx2 = obs_m12d + obs_m22d;
+  const double mxx = m1x + m2x;
+  {
+    // x=modal_m12 satisfies
+    //    (m1x - x) * (mx2 - x) = x * (x + m21_minus_m12)
+    // -> (x - m1x) * (x - mx2) = x * (x + m21_minus_m12)
+    // -> x^2 + x*(-m1x - mx2) + m1x*mx2 = x^2 + x*m21_minus_m12
+    // -> m1x*mx2 = x*(m21_minus_m12 + m1x + mx2)
+    // -> x = m1x*mx2 / mxx
+    const double modal_m12 = m1x * mx2 / mxx;
+    m12 = 2 * modal_m12 - m12 - obs_m12d;
+    if (m12 < 0) {
+      m12 = 0;
+    }
+  }
+  const dd_real common_lnprob_component_ddr =
+    ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11d + obs_m21d, mx2),
+            ddr_lfact(mxx));
+  const double starting_lnprob = ddr_add(common_lnprob_component_ddr, starting_lnprob_other_component_ddr).x[0];
+  while (1) {
+    m11 = m1x - m12;
+    m21 = m21_minus_m12 + m12;
+    m22 = mx2 - m12;
+    const dd_real lnprob_other_component_ddr =
+      ddr_negate(ddr_add4_lfacts(m11, m12, m21, m22));
+    const double lnprob_diff = ddr_sub(lnprob_other_component_ddr, starting_lnprob_other_component_ddr).x[0];
+    // Could tighten this threshold further; I haven't performed a careful
+    // error analysis yet but CompareFactorialProducts() includes a plausible
+    // assumption that 2^{-60} is safe.  But code is correct as long as we're
+    // guaranteed to enter the "lastp < 2 - one_minus_scaled_eps" branch for
+    // positive lnprob_diff.
+    if (lnprob_diff >= k2m53) {
+      if (m12 == 0) {
+        // All tables on this tail have higher likelihood than the starting
+        // table.  Exit.
+        if (midp) {
+          tailp -= 0.5;
+        }
+        *resultp = starting_lnprob + log(tailp);
+        return 0;
+      }
+      // TODO
+    }
+  }
   return 0;
 }
 

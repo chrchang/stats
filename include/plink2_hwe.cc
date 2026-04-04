@@ -30,8 +30,8 @@ namespace plink2 {
 // higher likelihood than nhets = obs_hets, 0 if identical likelihood, and
 // negative value if lower likelihood.
 // Error is returned iff malloc fails.
-// If neg_numer_ddr has not been computed yet, set its x[0] to DBL_MAX; it will
-// be filled in if necessary.
+// If neg_numer_ddr has not been computed yet, set its
+// x[0] to DBL_MAX; it will be filled in if necessary.
 //
 // Possible todo: handle multiple adjacent comparisons when appropriate.  Value
 // of cmp_result can indicate number of half-steps to the crossover point, e.g.
@@ -195,7 +195,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       }
     }
     if (het_delta < 344.0) {
-      // Jump back to starting table, and iterate inward.
+      // Jump back to starting contingency table, and iterate inward.
       lastp = 1;
       curr_hets = obs_hets;
       curr_homr = obs_homr;
@@ -208,10 +208,10 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         curr_homc += 1;
         lastp *= (curr_hets * (curr_hets - 1)) / (4 * curr_homr * curr_homc);
         curr_hets -= 2;
-        // Number of center terms is maximized with obs_hets - modal_nhet ~=
+        // Number of center tables is maximized with obs_hets - modal_nhet ~=
         // 344, obs_homr = 0, obs_homc and obs_hets both large.
         // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited
-        // to ~53000 terms.  Each lastp update involves 4 operations which can
+        // to ~53000 tables.  Each lastp update involves 4 operations which can
         // each introduce up to 0.5 ULP relative error under the default
         // rounding mode.
         if (lastp < 1 + 53000 * 2 * k2m52) {
@@ -262,7 +262,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       ddr_sub(ddr_muld(_ddr_log2, obs_hets),
               ddr_add3_lfacts(obs_hets, obs_homr, obs_homc));
     // Now we want to jump near the other tail, without evaluating that many
-    // terms in between.
+    // contingency table log-likelihoods along the way.
     //
     // Each full log-likelihood evaluation requires 3 ddr_lfact() calls.  Since
     // they are now performed with extra precision, they require hundreds of
@@ -327,7 +327,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       // positive lnprob_diff.
       if (lnprob_diff >= k2m53) {
         if (curr_homr >= max_homr) {
-          // All terms on this tail are larger than the starting term.  Exit.
+          // All tables on this tail are larger than the starting table.  Exit.
           // (This is possible when obs_hom1 == obs_hom2 == 0.)
           if (midp) {
             tailp -= 0.5;
@@ -443,7 +443,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       lastp *= (4 * curr_homr * curr_homc) / (curr_hets * (curr_hets - 1));
       curr_homr -= 1;
       curr_homc -= 1;
-      // If we're 172 steps from the center, number of center terms is limited
+      // If we're 172 steps from the center, number of center tables is limited
       // to ~2*172 = 344, when obs_homr ~= obs_homc.
       if (lastp < 1 + 344 * 2 * k2m52) {
         if (lastp <= 1 - 344 * 2 * k2m52) {
@@ -515,7 +515,8 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     const double lnprob_diff = ddr_sub(lnprob_other_component_ddr, starting_lnprob_other_component_ddr).x[0];
     if (lnprob_diff >= k2m53) {
       if (curr_homr <= 0) {
-        // All terms on this tail are larger than the starting term.  Exit.
+        // All tables on this tail have higher likelihood than the starting
+        // table.  Exit.
         if (midp) {
           tailp -= 0.5;
         }
