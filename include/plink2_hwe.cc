@@ -168,9 +168,8 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     //   which leaves enough headroom to accumulate the rest of the center-sum
     //   and multiply by e.g. allele_ct without overflowing.
     // * Log-factorial computations in the tail-jumping branch are now
-    //   performed with "double-double" precision.  (Possible todo: try
-    //   float128 on x86_64.  But low-priority since ARM has no hardware
-    //   support.)
+    //   performed with "double-double" precision.  (Possible todo: benchmark
+    //   float128 on x86_64.  But web search results imply QD is better.)
     if ((!midp) && (het_delta < 2.0)) {
       // Fast path for p=1.
       if (S_CAST(int64_t, obs_hets) * (obs_hets - 1) <= 4 * S_CAST(int64_t, obs_homr + 1) * (obs_homc + 1)) {

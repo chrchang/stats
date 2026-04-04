@@ -208,9 +208,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   //   (m11 + 1) * (m22 + 1) / (m12 * m21)
   // If m12 is too low, increasing m12 by 1 would multiply the likelihood by
   //   (m12 + 1) * (m21 + 1) / (m11 * m22)
-  // We use the log of the first expression as the Newton's method f'(x) when
-  // we're jumping to lower m12, and the negative-log of the second expression
-  // when we're jumping to higher m12.
+  // We use the negative-log of the first expression as the Newton's method
+  // f'(x) when we're jumping to lower m12, and the log of the second
+  // expression when we're jumping to higher m12.
   // f''(x) is always negative, so we can aim for starting_lnprob instead of
   // the middle of the interval.
 
@@ -228,6 +228,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     // -> x = m1x*mx2 / mxx
     const double modal_m12 = m1x * mx2 / mxx;
     m12 = 2 * modal_m12 - m12 - obs_m12d;
+    // Round down (to guarantee we've actually moved to the other side of the
+    // mode) and clamp.
+    m12 = S_CAST(double, S_CAST(int32_t, m12));
     if (m12 < 0) {
       m12 = 0;
     }
@@ -258,9 +261,74 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
         *resultp = starting_lnprob + log(tailp);
         return 0;
       }
-      // TODO
+      const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
+      // Round up, to guarantee that we make progress.
+      // This may overshoot.  But the function is guaranteed to terminate
+      // because we never overshoot (and we do always make progress on each
+      // step) once we're on the other side.
+      m12 -= 1 + S_CAST(int64_t, (1 - kSmallEpsilon) * lnprob_diff / ll_deriv);
+      if (m12 < 0) {
+        m12 = 0;
+      }
+    } else if (lnprob_diff > -62 * kLn2) {
+      lastp = exp(lnprob_diff);
+      break;
+    } else {
+      const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
+      // Round down, to guarantee we don't overshoot.
+      // (lnprob_diff is negative and ll_deriv is positive.)
+      // We're guaranteed to make progress, since lnprob_diff <= -62 * log(2),
+      // (m12 + 1) * (m21 + 1) < 2^62, and m11 * m22 >= 1.
+      m12 -= S_CAST(int64_t, lnprob_diff / ll_deriv);
     }
   }
+  // Sum toward center, until lastp >= 1.
+  // lastp should be accurate to 3 ULP as we enter this loop (max 1.5 ULP
+  // observed error from exp, tiny bit over 0.5 from lnprob_diff), so near-tie
+  // detection can use a tight epsilon here.
+  double one_minus_scaled_eps = 1 - 3 * k2m52;
+  double lastp_tail = lastp;
+  double m11_center = m11;
+  double m12_center = m12;
+  double m21_center = m21;
+  double m22_center = m22;
+  while (lastp <= one_minus_scaled_eps) {
+    tailp += lastp;
+    m12_center += 1;
+    m21_center += 1;
+    lastp *= m12_center * m21_center / (m11_center * m22_center);
+    m11_center -= 1;
+    m22_center -= 1;
+    one_minus_scaled_eps -= 2 * k2m52;
+  }
+  if (lastp < 2 - one_minus_scaled_eps) {
+    const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
+    intptr_t cmp_result;
+    if (unlikely(FisherCompare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+      return 1;
+    }
+    if (cmp_result <= 0) {
+      tailp += lastp;
+      tie_ct += (cmp_result == 0);
+    }
+  }
+  // Sum away from center, until sums stop changing.
+  while (1) {
+    m11 += 1;
+    m22 += 1;
+    lastp_tail *= m11 * m22 / (m12 * m21);
+    const double preaddp = tailp;
+    tailp += lastp_tail;
+    if (tailp == preaddp) {
+      break;
+    }
+    m12 -= 1;
+    m21 -= 1;
+  }
+  if (midp) {
+    tailp -= S_CAST(double, tie_ct) * 0.5;
+  }
+  *resultp = starting_lnprob + log(tailp);
   return 0;
 }
 
