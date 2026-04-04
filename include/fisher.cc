@@ -227,7 +227,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     // -> m1x*mx2 = x*(m21_minus_m12 + m1x + mx2)
     // -> x = m1x*mx2 / mxx
     const double modal_m12 = m1x * mx2 / mxx;
-    m12 = 2 * modal_m12 - m12 - obs_m12d;
+    m12 = 2 * modal_m12 - (m12 + obs_m12d) * 0.5;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
     m12 = S_CAST(double, S_CAST(int32_t, m12));
@@ -263,10 +263,11 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
       // Round up, to guarantee that we make progress.
+      // (lnprob_diff is positive and ll_deriv is negative.)
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      m12 -= 1 + S_CAST(int64_t, (1 - kSmallEpsilon) * lnprob_diff / ll_deriv);
+      m12 -= 1 - S_CAST(int64_t, (1 - kSmallEpsilon) * lnprob_diff / ll_deriv);
       if (m12 < 0) {
         m12 = 0;
       }
@@ -276,10 +277,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     } else {
       const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
       // Round down, to guarantee we don't overshoot.
-      // (lnprob_diff is negative and ll_deriv is positive.)
       // We're guaranteed to make progress, since lnprob_diff <= -62 * log(2),
-      // (m12 + 1) * (m21 + 1) < 2^62, and m11 * m22 >= 1.
-      m12 -= S_CAST(int64_t, lnprob_diff / ll_deriv);
+      // m11 * m22 < 2^62, and (m12 + 1) * (m21 + 1) >= 1.
+      m12 += S_CAST(int64_t, lnprob_diff / ll_deriv);
     }
   }
   // Sum toward center, until lastp >= 1.
@@ -296,7 +296,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     tailp += lastp;
     m12_center += 1;
     m21_center += 1;
-    lastp *= m12_center * m21_center / (m11_center * m22_center);
+    lastp *= m11_center * m22_center / (m12_center * m21_center);
     m11_center -= 1;
     m22_center -= 1;
     one_minus_scaled_eps -= 2 * k2m52;
@@ -316,7 +316,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   while (1) {
     m11 += 1;
     m22 += 1;
-    lastp_tail *= m11 * m22 / (m12 * m21);
+    lastp_tail *= m12 * m21 / (m11 * m22);
     const double preaddp = tailp;
     tailp += lastp_tail;
     if (tailp == preaddp) {
