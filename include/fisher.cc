@@ -83,13 +83,13 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       return 0;
     }
   }
+  // Iterate outward to floating-point precision limit.
   double m11 = u31tod(obs_m11);
   double m12 = u31tod(obs_m12);
   double m21 = u31tod(obs_m21);
   double m22 = u31tod(obs_m22);
   double lastp = 1;
   double tailp = 1;
-  // Iterate outward to floating-point precision limit.
   while (1) {
     m12 += 1;
     m21 += 1;
@@ -155,7 +155,25 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       }
       centerp += lastp;
     }
-    // TODO
+    // Continue down tail to floating-point precision limit.
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lastp *= (m12 * m21) / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      const double preaddp = tailp;
+      tailp += lastp;
+      if (tailp == preaddp) {
+        break;
+      }
+    }
+    const double denom = tailp + centerp;
+    if (midp) {
+      tailp -= S_CAST(double, tie_ct) * 0.5;
+    }
+    *resultp = log(tailp / denom);
+    return 0;
   }
   // TODO
   return 0;
