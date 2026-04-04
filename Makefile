@@ -1,14 +1,17 @@
 CWARN = -Wall -Wextra -Wshadow -Wformat-security -Wstrict-aliasing -Wdouble-promotion -Wfloat-conversion
 CXXWARN = ${CWARN} -Wold-style-cast
 
-ISRC = include/plink2_base.cc \
+ISRC = include/fisher.cc \
+       include/plink2_base.cc \
        include/plink2_float.cc \
        include/plink2_highprec.cc \
+       include/plink2_hwe.cc \
        include/plink2_ln.cc
 
-IHDR = $(ISRC:.cc=.h)
-
 GCSRC = mini-gmp/mini-gmp.c
+
+CCHDR = $(ISRC:.cc=.h)
+GCHDR = $(GCSRC:.c=.h)
 
 OBJ = $(ISRC:.cc=.o) $(GCSRC:.c=.o)
 
@@ -29,19 +32,19 @@ ifeq ($(UNAME), Darwin)
   CXXFLAGS=-O2 -std=c++17 -stdlib=libc++ ${BASEFLAGS}
 endif
 
-%.o: %.c
+%.o: %.c $(GCHDR)
 	gcc -c $(CFLAGS) -o $@ $<
 
-%.o: %.cc $(IHDR)
+%.o: %.cc $(CCHDR)
 	g++ -c $(CXXFLAGS) -o $@ $<
 
 all: fisher_test hwe_test
 
-fisher_test: $(OBJ) include/fisher.o fisher.o fisher_test.o
-	g++ $(OBJ) include/fisher.o fisher.o fisher_test.o -o fisher_test $(LINKFLAGS)
+fisher_test: $(OBJ) fisher.o fisher_test.o
+	g++ $(OBJ) fisher.o fisher_test.o -o fisher_test $(LINKFLAGS)
 
-hwe_test: $(OBJ) include/plink2_hwe.o hwe_test.o
-	g++ $(OBJ) include/plink2_hwe.o hwe_test.o -o hwe_test $(LINKFLAGS)
+hwe_test: $(OBJ) hwe_test.o
+	g++ $(OBJ) hwe_test.o -o hwe_test $(LINKFLAGS)
 
 .PHONY: clean
 clean:

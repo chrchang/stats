@@ -5,6 +5,10 @@
 #include <errno.h>
 #include <string.h>
 
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 double fisher22(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t midp);
 
 double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt, uint32_t midp);
@@ -12,6 +16,10 @@ double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, u
 void fisher22_precomp_thresh(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t* m11_minp, uint32_t* m11_maxp, uint32_t* tiep);
 
 double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp);
+
+#if defined(__cplusplus)
+}
+#endif
 
 int32_t main(int argc, char** argv) {
   using namespace plink2;
@@ -71,6 +79,7 @@ int32_t main(int argc, char** argv) {
           printf("p-value: %g\n", fisher22(m11, m12, m21, m22, midp));
           uint32_t m31;
           uint32_t m32;
+          uint32_t tie;
           fisher22_precomp_thresh(m11, m12, m21, m22, &m31, &m32, &tie);
           if (!m32) {
             printf("(This is maximal.)\n");
@@ -153,7 +162,7 @@ int32_t main(int argc, char** argv) {
   main_ret_NOMEM:
     fputs("Error: Out of memory.\n", stderr);
     reterr = kPglRetNomem;
-    breka;
+    break;
   main_ret_OPEN_FAIL:
     reterr = kPglRetOpenFail;
     break;
@@ -167,6 +176,7 @@ int32_t main(int argc, char** argv) {
     reterr = kPglRetMalformedInput;
     break;
   }
+ main_ret_1:
   if (test_file) {
     fclose(test_file);
   }
