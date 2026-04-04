@@ -7,10 +7,8 @@ Fisher 2x2/2x3 exact test statistics.
 Test program compilation:
 
 gcc -O2 binom.c binom_test.c -o binom_test
-
+make fisher_test
 make hwe_test
-
-gcc -O2 fisher.c fisher_test.c -o fisher_test
 
 Test program usage examples:
 
@@ -26,7 +24,7 @@ Test program usage examples:
 
   ./hwe_test 16 3 81
 
-binom.c, fisher.c, hwe_test.cc, and all files under include/ except
+binom.c, fisher_test.cc, hwe_test.cc, and all files under include/ except
 plink2_highprec.cc and .h are covered by LGPLv3 (see the COPYING.LESSER file).
 plink2_highprec's adaptation of a small subset of the QD library
 (https://github.com/BL-highprecision/QD ) is under the include/LICENSE.QD
