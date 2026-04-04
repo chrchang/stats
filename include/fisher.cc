@@ -365,15 +365,15 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
     // leftward until we either know the p-value > 1 - 2^{-54} (at which point
     // we return 0), or remaining left likelihoods are smaller than the
     // precision limit.
-    const double first_right_ratio = m12 * m21 / ((m11 + 1) * (m22 + 1));
-    // 1 + r + r^2 + ... = 1 / (1-r)
-    // const double right_upper_bound = 1.0 / (1 - first_right_ratio);
+    double right_sum = m12 * m21 / ((m11 + 1) * (m22 + 1));
+    // r + r^2 + ... = r / (1-r)
+    // const double right_upper_bound = right_sum / (1 - right_sum);
 
     // Rescale our starting lastp so that we overflow to INFINITY when we'd
     // want to early-exit and return 0; this saves us a comparison in the loop.
-    const double left_rescale = (DBL_MAX / (1LL << 54)) * (1 - first_right_ratio) ;
+    const double left_rescale = (DBL_MAX / (1LL << 54)) * (1 - right_sum) / right_sum;
     double lastp = left_rescale;
-    double left_sum = 0;
+    double left_sum = left_rescale;
     while (1) {
       m12 += 1;
       m21 += 1;
@@ -396,8 +396,7 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
     m12 = obs_m12d - 1;
     m21 = obs_m21d - 1;
     m22 = obs_m22d + 1;
-    lastp = first_right_ratio;
-    double right_sum = 1 + first_right_ratio;
+    lastp = right_sum;
     while (1) {
       m11 += 1;
       m22 += 1;
@@ -410,7 +409,7 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
         break;
       }
     }
-    return log(1 - (right_sum - 0.5 * u31tod(midp)) / (right_sum + left_sum));
+    return log1p((-0.5 * u31tod(midp) - right_sum) / (right_sum + left_sum));
   }
   // We're to the left of the mode, and are responsible for tiny p-values.
   // If we're close enough to the mode that a simple left_sum / (left_sum +
