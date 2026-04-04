@@ -9,8 +9,6 @@
 extern "C" {
 #endif
 
-double fisher22_1sided(uint32_t m11, uint32_t m12, uint32_t m21, uint32_t m22, uint32_t m11_is_greater_alt, uint32_t midp);
-
 double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp);
 
 #if defined(__cplusplus)
@@ -85,7 +83,12 @@ int32_t main(int argc, char** argv) {
           if ((argv[5][1] != '\0') || ((argv[5][0] != '+') && (argv[5][0] != '-'))) {
             goto main_std_help;
           }
-          printf("P-value: %g\n", fisher22_1sided(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp));
+          const double logp = Fisher22OneSidedLnP(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp);
+          char buf[80];
+          char* write_iter = strcpya(buf, "P-value: ");
+          write_iter = lntoa_g(logp, write_iter);
+          memcpy_k2(write_iter, "\n");
+          fputs(buf, stdout);
         }
       }
     } else if (argc != 2) {

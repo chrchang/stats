@@ -24,6 +24,8 @@ namespace plink2 {
 
 BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t midp, double* resultp);
 
+double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t m11_is_greater_alt, uint32_t midp);
+
 #ifdef __cplusplus
 }
 #endif
