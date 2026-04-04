@@ -410,7 +410,56 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
         break;
       }
     }
-    return log(right_sum / (right_sum + left_sum));
+    return log(1 - (right_sum - 0.5 * u31tod(midp)) / (right_sum + left_sum));
+  }
+  // We're to the left of the mode, and are responsible for tiny p-values.
+  // If we're close enough to the mode that a simple left_sum / (left_sum +
+  // right_sum) calculation doesn't risk overflow with the initial
+  // relative-likelihood set to 1, just do that.
+  // Otherwise... if the problem instance isn't *that* large, we could use
+  // Lfact() to compute the starting log-likelihood and eat a big catastrophic
+  // cancellation error, but I'll start with just the slow-and-accurate
+  // calculation.
+  const double m22_minus_m11 = obs_m22d - obs_m11d;
+  const double m1x = obs_m11d + obs_m12d;
+  const double m2x = obs_m21d + obs_m22d;
+  const double mx1 = obs_m11d + obs_m21d;
+  const double mxx = m1x + m2x;
+  const double modal_m11 = m1x * mx1 / mxx;
+  if (modal_m11 - obs_m11 <= 172) {
+    double lastp = 1;
+    double right_sum = 0;
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lastp *= m12 * m21 / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      const double preaddp = right_sum;
+      right_sum += lastp;
+      if (right_sum == preaddp) {
+        break;
+      }
+    }
+    m11 = obs_m11d;
+    m12 = obs_m12d;
+    m21 = obs_m21d;
+    m22 = obs_m22d;
+    lastp = 1;
+    double left_sum = 1;
+    while (1) {
+      m12 += 1;
+      m21 += 1;
+      lastp *= m11 * m22 / (m12 * m21);
+      m11 -= 1;
+      m22 -= 1;
+      const double preaddp = left_sum;
+      left_sum += lastp;
+      if (left_sum == preaddp) {
+        break;
+      }
+    }
+    return log((left_sum - 0.5 * u31tod(midp)) / (left_sum + right_sum));
   }
   // TODO
   return 0;
