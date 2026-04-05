@@ -25,13 +25,13 @@
 namespace plink2 {
 #endif
 
-// *cmp_resultp is set to positive value if m11 = obs_m11 + m11_incr has higher
-// likelihood than m11 = obs_m11, 0 if identical likelihood, and negative value
+// *cmp_resultp is set to positive value if m22 = obs_m22 + m22_incr has higher
+// likelihood than m22 = obs_m22, 0 if identical likelihood, and negative value
 // if lower likelihood.
 // Error is returned iff malloc fails.
 // If neg_numer_ddr has not been computed yet, set its x[0] to DBL_MAX; it will
 // be filled in if necessary.
-BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m11_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
+BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m22_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
   // Fisher 2x2 likelihood is
   //
   //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
@@ -44,17 +44,17 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
   //   ---------------------------------------------------
   //   (obs_m11+j)! (obs_m12-j)! (obs_m21-j)! (obs_m22+j)!
   //
-  // where j=m11_incr.
+  // where j=m22_incr.
   uint32_t numer_factorial_args[4];
   numer_factorial_args[0] = obs_m11;
   numer_factorial_args[1] = obs_m12;
   numer_factorial_args[2] = obs_m21;
   numer_factorial_args[3] = obs_m22;
   uint32_t denom_factorial_args[4];
-  denom_factorial_args[0] = obs_m11 + m11_incr;
-  denom_factorial_args[1] = obs_m12 - m11_incr;
-  denom_factorial_args[2] = obs_m21 - m11_incr;
-  denom_factorial_args[3] = obs_m22 + m11_incr;
+  denom_factorial_args[0] = obs_m11 + m22_incr;
+  denom_factorial_args[1] = obs_m12 - m22_incr;
+  denom_factorial_args[2] = obs_m21 - m22_incr;
+  denom_factorial_args[3] = obs_m22 + m22_incr;
 
   mp_limb_t* gmp_wkspace = nullptr;
   uintptr_t gmp_wkspace_limb_ct = 0;
@@ -64,34 +64,32 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
 }
 
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
-BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t midp, double* resultp) {
-  // Normalize.
-  if (obs_m11 > obs_m22) {
-    swap_u32(&obs_m11, &obs_m22);
+BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t midp, double* resultp) {
+  // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
+  // Note that the first two are reversed from PLINK 1.9, to get rid of
+  // spurious index differences between Fisher22 and Fisher23.
+  if (obs_m11 < obs_m22) {
+    swap_i32(&obs_m11, &obs_m22);
   }
-  if (obs_m12 > obs_m21) {
-    swap_u32(&obs_m12, &obs_m21);
+  if (obs_m12 < obs_m21) {
+    swap_i32(&obs_m12, &obs_m21);
   }
-  if (S_CAST(uint64_t, obs_m11) * obs_m22 > S_CAST(uint64_t, obs_m12) * obs_m21) {
-    swap_u32(&obs_m11, &obs_m12);
-    swap_u32(&obs_m21, &obs_m22);
+  if (S_CAST(int64_t, obs_m11) * obs_m22 > S_CAST(int64_t, obs_m12) * obs_m21) {
+    swap_i32(&obs_m11, &obs_m12);
+    swap_i32(&obs_m21, &obs_m22);
   }
   if (!midp) {
     // Fast path for p=1.
-    if (S_CAST(uint64_t, obs_m11 + 1) * (obs_m22 + 1) == S_CAST(uint64_t, obs_m12) * obs_m21) {
+    if (S_CAST(int64_t, obs_m11 + 1) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
       *resultp = 0;
       return 0;
     }
   }
   // Iterate outward to floating-point precision limit.
-  const double obs_m11d = u31tod(obs_m11);
-  const double obs_m12d = u31tod(obs_m12);
-  const double obs_m21d = u31tod(obs_m21);
-  const double obs_m22d = u31tod(obs_m22);
-  double m11 = obs_m11d;
-  double m12 = obs_m12d;
-  double m21 = obs_m21d;
-  double m22 = obs_m22d;
+  double m11 = obs_m11;
+  double m12 = obs_m12;
+  double m21 = obs_m21;
+  double m22 = obs_m22;
   double lastp = 1;
   double tailp = 1;
   while (1) {
@@ -118,13 +116,12 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   // which leaves enough headroom to accumulate the rest of the center-sum and
   // represent intermediate values without overflowing.
   int32_t tie_ct = 1;
-  if ((S_CAST(int64_t, obs_m11) + 172) * (S_CAST(int64_t, obs_m22) + 172) >=
-      (S_CAST(int64_t, obs_m12) - 172) * (S_CAST(int64_t, obs_m21) - 172)) {
+  if ((obs_m11 + 172LL) * (obs_m22 + 172LL) >= (obs_m12 - 172LL) * (obs_m21 - 172LL)) {
     lastp = 1;
-    m11 = obs_m11d;
-    m12 = obs_m12d;
-    m21 = obs_m21d;
-    m22 = obs_m22d;
+    m11 = obs_m11;
+    m12 = obs_m12;
+    m21 = obs_m21;
+    m22 = obs_m22;
     dd_real starting_lnprob_other_component_ddr = {{DBL_MAX, 0.0}};
     double centerp = 0;
     while (1) {
@@ -146,9 +143,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
         }
         // Near-tie.  True value of lastp can be greater than, equal to, or
         // less than 1.
-        const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
+        const intptr_t m22_incr = S_CAST(intptr_t, m22) - obs_m22;
         intptr_t cmp_result;
-        if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+        if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
           return 1;
         }
         if (cmp_result <= 0) {
@@ -174,13 +171,13 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     }
     const double denom = tailp + centerp;
     if (midp) {
-      tailp -= S_CAST(double, tie_ct) * 0.5;
+      tailp -= tie_ct * 0.5;
     }
     *resultp = log(tailp / denom);
     return 0;
   }
   dd_real starting_lnprob_other_component_ddr =
-    ddr_negate(ddr_add4_lfacts(obs_m11d, obs_m12d, obs_m21d, obs_m22d));
+    ddr_negate(ddr_add4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
 
   // Now we want to jump near the other tail, without evaluating that many
   // contingency table log-likelihoods along the way.
@@ -193,9 +190,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   // an easy performance win, but there's a complexity cost so I'll wait until
   // I see a scenario where this branch executes frequently...)
   //
-  // The current heuristic starts by reflecting (obs_m12 + m12) * 0.5 across
+  // The current heuristic starts by reflecting (obs_m21 + m21) * 0.5 across
   // the mode, performing a full log-likelihood check at the nearest valid
-  // point.  (It is convenient to focus on m12 here, since m12=0 corresponds to
+  // point.  (It is convenient to focus on m21 here, since m21=0 corresponds to
   // the outermost table on this tail.)  Hopefully we find that we're in
   // (starting_lnprob - 62 * kLn2, starting_lnprob], so we're at or near a
   // table that actually contributes to the tail-sum.  (This window is chosen
@@ -203,7 +200,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   // obs_m11 + obs_m12 + obs_m21 + obs_m22 < 2^31.)
   //
   // If not, we jump again, using Newton's method.
-  // If m12 is too high (i.e. current log-likelihood is too high), decreasing
+  // If m21 is too high (i.e. current log-likelihood is too high), decreasing
   // m12 by 1 would multiply the likelihood by
   //   (m11 + 1) * (m22 + 1) / (m12 * m21)
   // If m12 is too low, increasing m12 by 1 would multiply the likelihood by
@@ -214,35 +211,35 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
   // f''(x) is always negative, so we can aim for starting_lnprob instead of
   // the middle of the interval.
 
-  const double m21_minus_m12 = obs_m21d - obs_m12d;
-  const double m1x = obs_m11d + obs_m12d;
-  const double m2x = obs_m21d + obs_m22d;
-  const double mx2 = obs_m12d + obs_m22d;
+  const double m12_minus_m21 = obs_m12 - obs_m21;
+  const double m1x = obs_m11 + obs_m12;
+  const double m2x = obs_m21 + obs_m22;
+  const double mx1 = obs_m11 + obs_m21;
   const double mxx = m1x + m2x;
   {
-    // x=modal_m12 satisfies
-    //    (m1x - x) * (mx2 - x) = x * (x + m21_minus_m12)
-    // -> (x - m1x) * (x - mx2) = x * (x + m21_minus_m12)
-    // -> x^2 + x*(-m1x - mx2) + m1x*mx2 = x^2 + x*m21_minus_m12
-    // -> m1x*mx2 = x*(m21_minus_m12 + m1x + mx2)
-    // -> x = m1x*mx2 / mxx
-    const double modal_m12 = m1x * mx2 / mxx;
-    m12 = 2 * modal_m12 - (m12 + obs_m12d) * 0.5;
+    // x=modal_m21 satisfies
+    //    (m2x - x) * (mx1 - x) = x * (x + m12_minus_m21)
+    // -> (x - m2x) * (x - mx1) = x * (x + m12_minus_m21)
+    // -> x^2 + x*(-m2x - mx1) + m2x*mx1 = x^2 + x*m12_minus_m21
+    // -> m2x*mx1 = x*(m12_minus_m21 + m2x + mx1)
+    // -> x = m2x*mx1 / mxx
+    const double modal_m21 = m2x * mx1 / mxx;
+    m21 = 2 * modal_m21 - (m21 + obs_m21) * 0.5;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
-    m12 = S_CAST(double, S_CAST(int32_t, m12));
-    if (m12 < 0) {
-      m12 = 0;
+    m21 = S_CAST(double, S_CAST(int32_t, m21));
+    if (m21 < 0) {
+      m21 = 0;
     }
   }
   const dd_real common_lnprob_component_ddr =
-    ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11d + obs_m21d, mx2),
+    ddr_sub(ddr_add4_lfacts(m1x, m2x, mx1, obs_m12 + obs_m22),
             ddr_lfact(mxx));
   const double starting_lnprob = ddr_add(common_lnprob_component_ddr, starting_lnprob_other_component_ddr).x[0];
   while (1) {
-    m11 = m1x - m12;
-    m21 = m21_minus_m12 + m12;
-    m22 = mx2 - m12;
+    m11 = mx1 - m21;
+    m12 = m12_minus_m21 + m21;
+    m22 = m2x - m21;
     const dd_real lnprob_other_component_ddr =
       ddr_negate(ddr_add4_lfacts(m11, m12, m21, m22));
     const double lnprob_diff = ddr_sub(lnprob_other_component_ddr, starting_lnprob_other_component_ddr).x[0];
@@ -252,7 +249,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     // guaranteed to enter the "lastp < 2 - one_minus_scaled_eps" branch for
     // positive lnprob_diff.
     if (lnprob_diff >= k2m53) {
-      if (m12 == 0) {
+      if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
         if (midp) {
@@ -267,9 +264,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      m12 -= 1 - S_CAST(int64_t, (1 - kSmallEpsilon) * lnprob_diff / ll_deriv);
-      if (m12 < 0) {
-        m12 = 0;
+      m21 -= 1 - S_CAST(int64_t, (1 - kSmallEpsilon) * lnprob_diff / ll_deriv);
+      if (m21 < 0) {
+        m21 = 0;
       }
     } else if (lnprob_diff > -62 * kLn2) {
       lastp = exp(lnprob_diff);
@@ -279,7 +276,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
       // Round down, to guarantee we don't overshoot.
       // We're guaranteed to make progress, since lnprob_diff <= -62 * log(2),
       // m11 * m22 < 2^62, and (m12 + 1) * (m21 + 1) >= 1.
-      m12 += S_CAST(int64_t, lnprob_diff / ll_deriv);
+      m21 += S_CAST(int64_t, lnprob_diff / ll_deriv);
     }
   }
   // Sum toward center, until lastp >= 1.
@@ -302,9 +299,9 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     one_minus_scaled_eps -= 2 * k2m52;
   }
   if (lastp < 2 - one_minus_scaled_eps) {
-    const intptr_t m11_incr = S_CAST(intptr_t, m11) - obs_m11;
+    const intptr_t m22_incr = S_CAST(intptr_t, m22) - obs_m22;
     intptr_t cmp_result;
-    if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m11_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
+    if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprob_other_component_ddr, &cmp_result, &lastp))) {
       return 1;
     }
     if (cmp_result <= 0) {
@@ -326,7 +323,7 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
     m21 -= 1;
   }
   if (midp) {
-    tailp -= S_CAST(double, tie_ct) * 0.5;
+    tailp -= tie_ct * 0.5;
   }
   *resultp = starting_lnprob + log(tailp);
   return 0;
@@ -336,31 +333,27 @@ BoolErr Fisher22LnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32
 // Just returns 0 if the log-p-value > 1 - 2^{-54} since additional precision
 // in that direction is expected to be irrelevant.  (Reverse the test direction
 // when you do actually want that precision.)
-double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, uint32_t m11_is_greater_alt, uint32_t midp) {
+double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t m11_is_greater_alt, uint32_t midp) {
   // Normalize.
-  if (obs_m11 > obs_m22) {
-    swap_u32(&obs_m11, &obs_m22);
+  if (obs_m11 < obs_m22) {
+    swap_i32(&obs_m11, &obs_m22);
   }
-  if (obs_m12 > obs_m21) {
-    swap_u32(&obs_m12, &obs_m21);
+  if (obs_m12 < obs_m21) {
+    swap_i32(&obs_m12, &obs_m21);
   }
   // Flipping m11<->m12 and m21<->m22 also flips the direction of the
   // alternative hypothesis.  So we flip on m11-is-greater alternative
   // hypothesis here to allow the rest of the code to assume m11-is-less.
   if (m11_is_greater_alt) {
-    swap_u32(&obs_m11, &obs_m12);
-    swap_u32(&obs_m21, &obs_m22);
+    swap_i32(&obs_m11, &obs_m12);
+    swap_i32(&obs_m21, &obs_m22);
   }
-  const double obs_m11d = u31tod(obs_m11);
-  const double obs_m12d = u31tod(obs_m12);
-  const double obs_m21d = u31tod(obs_m21);
-  const double obs_m22d = u31tod(obs_m22);
-  double m11 = obs_m11d;
-  double m12 = obs_m12d;
-  double m21 = obs_m21d;
-  double m22 = obs_m22d;
-  if (S_CAST(uint64_t, obs_m11) * obs_m22 >= S_CAST(uint64_t, obs_m12) * obs_m21) {
-    // We're to the right of the mode.
+  double m11 = obs_m11;
+  double m12 = obs_m12;
+  double m21 = obs_m21;
+  double m22 = obs_m22;
+  if (S_CAST(int64_t, obs_m11) * obs_m22 >= S_CAST(int64_t, obs_m12) * obs_m21) {
+    // We're at or to the right of the mode.
     // Start by computing an upper bound on the right-sum, and then iterating
     // leftward until we either know the p-value > 1 - 2^{-54} (at which point
     // we return 0), or remaining left likelihoods are smaller than the
@@ -392,10 +385,10 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
     left_sum /= left_rescale;
 
     // Now compute the right-sum to the precision limit.
-    m11 = obs_m11d + 1;
-    m12 = obs_m12d - 1;
-    m21 = obs_m21d - 1;
-    m22 = obs_m22d + 1;
+    m11 = obs_m11 + 1;
+    m12 = obs_m12 - 1;
+    m21 = obs_m21 - 1;
+    m22 = obs_m22 + 1;
     lastp = right_sum;
     while (1) {
       m11 += 1;
@@ -409,7 +402,7 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
         break;
       }
     }
-    return log1p((-0.5 * u31tod(midp) - right_sum) / (right_sum + left_sum));
+    return log1p((-0.5 * midp - right_sum) / (right_sum + left_sum));
   }
   // We're to the left of the mode, and are responsible for tiny p-values.
   // If we're close enough to the mode that a simple left_sum / (left_sum +
@@ -419,13 +412,13 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
   // Lfact() to compute the starting log-likelihood and eat a big catastrophic
   // cancellation error, but I'll start with just the slow-and-accurate
   // calculation.
-  const double m22_minus_m11 = obs_m22d - obs_m11d;
-  const double m1x = obs_m11d + obs_m12d;
-  const double m2x = obs_m21d + obs_m22d;
-  const double mx1 = obs_m11d + obs_m21d;
+  const double m11_minus_m22 = obs_m11 - obs_m22;
+  const double m1x = obs_m11 + obs_m12;
+  const double m2x = obs_m21 + obs_m22;
+  const double mx2 = obs_m12 + obs_m22;
   const double mxx = m1x + m2x;
-  const double modal_m11 = m1x * mx1 / mxx;
-  if (modal_m11 - obs_m11 <= 172) {
+  const double modal_m22 = m2x * mx2 / mxx;
+  if (modal_m22 <= S_CAST(double, 172LL + obs_m22)) {
     double lastp = 1;
     double right_sum = 0;
     while (1) {
@@ -440,10 +433,10 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
         break;
       }
     }
-    m11 = obs_m11d;
-    m12 = obs_m12d;
-    m21 = obs_m21d;
-    m22 = obs_m22d;
+    m11 = obs_m11;
+    m12 = obs_m12;
+    m21 = obs_m21;
+    m22 = obs_m22;
     lastp = 1;
     double left_sum = 1;
     while (1) {
@@ -458,12 +451,12 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
         break;
       }
     }
-    return log((left_sum - 0.5 * u31tod(midp)) / (left_sum + right_sum));
+    return log((left_sum - 0.5 * midp) / (left_sum + right_sum));
   }
   const dd_real starting_lnprob_other_component_ddr =
-    ddr_negate(ddr_add4_lfacts(obs_m11d, obs_m12d, obs_m21d, obs_m22d));
+    ddr_negate(ddr_add4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
   const dd_real common_lnprob_component_ddr =
-    ddr_sub(ddr_add4_lfacts(m1x, m2x, mx1, obs_m12d + obs_m22d),
+    ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11 + obs_m21, mx2),
             ddr_lfact(mxx));
   const double starting_lnprob = ddr_add(common_lnprob_component_ddr, starting_lnprob_other_component_ddr).x[0];
   double lastp = 1;
@@ -480,7 +473,7 @@ double Fisher22OneSidedLnP(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21,
       break;
     }
   }
-  return starting_lnprob + log(left_sum - 0.5 * u31tod(midp));
+  return starting_lnprob + log(left_sum - 0.5 * midp);
 }
 
 // Switch between log- and regular representations at kSwitchThresh.
@@ -494,8 +487,88 @@ static const double kJumpThresh = 314.0; // chosen to guarantee base_prob < kSwi
 // static const double kSwitchThresh = k2p100 * k2p50;
 // static const double kLnSwitchThresh = 150.0 * kLn2;
 
-BoolErr Fisher23LnFirstRow(int32_t obs_m12, int32_t obs_m13, int32_t obs_m22, int32_t obs_m23, double* tailp, dd_real* starting_lnprob_other_component_ddr_ptr, uint32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l12_ptr, double* orig_saved_l13_ptr, double* orig_saved_l22_ptr, double* orig_saved_l23_ptr, double* orig_saved_r12_ptr, double* orig_saved_r13_ptr, double* orig_saved_r22_ptr, double* orig_saved_r23_ptr) {
-  // TODO
+BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tailp_ptr, dd_real* starting_lnprob_other_component_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
+  // possible todo: have this and Fisher22LnP() call a shared function
+  double m11 = obs_m11;
+  double m12 = obs_m12;
+  double m21 = obs_m21;
+  double m22 = obs_m22;
+  *starting_lnprob_other_component_ddr_ptr =
+    ddr_negate(ddr_add4_lfacts(m11, m12, m21, m22));
+  double lastp = 1;
+  int32_t tie_ct = 1;
+  double tailp = 1;
+  // No guaranteed normalization beyond m11+m21 >= m12+m22.  In particular,
+  // m11 < m22 is possible.
+
+  // As with PLINK 1.9 fisher23(), "left tail" corresponds to small m11, and
+  // "right tail" corresponds to large m11.
+  if (S_CAST(uint64_t, obs_m11) * obs_m22 > S_CAST(uint64_t, obs_m12) * obs_m21) {
+    // Starting m11 is beginning of right tail.
+    *orig_base_probr_ptr = 1;
+    *orig_base_epsr_ptr = 0;
+    *orig_saved_r11_ptr = m11;
+    *orig_saved_r12_ptr = m12;
+    *orig_saved_r21_ptr = m21;
+    *orig_saved_r22_ptr = m22;
+    const double m1x = m11 + m12;
+    const double m2x = m21 + m22;
+    const double mx2 = m11 + m21;
+    const double mxx = m1x + m2x;
+    const double modal_m11 = m1x * mx2 / mxx;
+    const double delta = m11 - modal_m11;
+    // Iterate outward to floating-point precision limit.
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lastp *= m12 * m21 / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      const double preaddp = tailp;
+      tailp += lastp;
+      if (tailp == preaddp) {
+        break;
+      }
+    }
+    if (delta < kJumpThresh) {
+      // Jump back to starting table, and iterate inward until we find the
+      // start of the other tail.
+      lastp = 1;
+      m11 = obs_m11;
+      m12 = obs_m12;
+      m21 = obs_m21;
+      m22 = obs_m22;
+      double one_plus_scaled_eps = 1;
+      double m11_x_m22 = m11 * m22;
+      while (1) {
+        const double m11_x_m22 = m11 * m22;
+        if (m11_x_m22 == 0) {
+          break;
+        }
+        m12 += 1;
+        m21 += 1;
+        lastp *= m11_x_m22 / (m12 * m21);
+        m11 -= 1;
+        m22 -= 1;
+        one_plus_scaled_eps += 2 * k2m52;
+        if (lastp < one_plus_scaled_eps) {
+          if (lastp <= 2 - one_plus_scaled_eps) {
+            tailp += lastp;
+            break;
+          }
+          // Near-tie.  True value of lastp can be greater than, equal to, or
+          // less than 1.
+          const intptr_t m22_incr = S_CAST(intptr_t, m22) - obs_m22;
+          intptr_t cmp_result;
+          if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprob_other_component_ddr_ptr, &cmp_result, &lastp))) {
+            return 1;
+          }
+          // TODO
+        }
+      }
+    }
+    // TODO
+  }
   return 0;
 }
 
@@ -542,35 +615,36 @@ BoolErr Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, ui
 // obs_m11 + obs_m12 + obs_m13 + obs_m21 + obs_m22 + obs_m23 assumed to be
 // <2^31.
 BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) {
-  // Normalize: m11 + m21 <= m12 + m22 <= m13 + m23,
-  //            m11 * (m22 + m23) <= m21 * (m12 + m13)
+  // Normalize: m11 + m21 >= m12 + m22 >= m13 + m23,
+  //            m13 * (m21 + m22) <= m23 * (m11 + m12)
+  // Note that columns are reversed from PLINK 1.9 fisher23().
   {
     int32_t mx1i = obs_m11 + obs_m21;
     {
       int32_t mx2i = obs_m12 + obs_m22;
-      if (mx1i > mx2i) {
+      if (mx1i < mx2i) {
         swap_i32(&obs_m11, &obs_m12);
         swap_i32(&obs_m21, &obs_m22);
         swap_i32(&mx1i, &mx2i);
       }
       {
-        const int32_t mx3i = obs_m13 + obs_m23;
-        if (mx2i > mx3i) {
+        int32_t mx3i = obs_m13 + obs_m23;
+        if (mx2i < mx3i) {
           swap_i32(&obs_m12, &obs_m13);
           swap_i32(&obs_m22, &obs_m23);
-          mx2i = mx3i;
+          swap_i32(&mx2i, &mx3i);
+        }
+        if (mx3i == 0) {
+          return Fisher22LnP(obs_m11, obs_m12, obs_m21, obs_m22, midp, resultp);
         }
       }
-      if (mx1i > mx2i) {
+      if (mx1i < mx2i) {
         swap_i32(&obs_m11, &obs_m12);
         swap_i32(&obs_m21, &obs_m22);
         mx1i = mx2i;
       }
     }
-    if (mx1i == 0) {
-      return Fisher22LnP(obs_m12, obs_m13, obs_m22, obs_m23, midp, resultp);
-    }
-    if (S_CAST(uint64_t, obs_m11) * (obs_m22 + obs_m23) > S_CAST(uint64_t, obs_m21) * (obs_m12 + obs_m13)) {
+    if (S_CAST(int64_t, obs_m13) * (obs_m21 + obs_m22) > S_CAST(int64_t, obs_m23) * (obs_m11 + obs_m12)) {
       swap_i32(&obs_m11, &obs_m21);
       swap_i32(&obs_m12, &obs_m22);
       swap_i32(&obs_m13, &obs_m23);
@@ -584,16 +658,16 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
   double orig_base_epsr;
   double tailp;
   dd_real starting_lnprob_other_component_ddr;
-  uint32_t tie_ct;
+  int32_t tie_ct;
+  double orig_saved_l11;
   double orig_saved_l12;
-  double orig_saved_l13;
+  double orig_saved_l21;
   double orig_saved_l22;
-  double orig_saved_l23;
+  double orig_saved_r11;
   double orig_saved_r12;
-  double orig_saved_r13;
+  double orig_saved_r21;
   double orig_saved_r22;
-  double orig_saved_r23;
-  if (unlikely(Fisher23LnFirstRow(obs_m12, obs_m13, obs_m22, obs_m23, &tailp, &starting_lnprob_other_component_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l12, &orig_saved_l13, &orig_saved_l22, &orig_saved_l23, &orig_saved_r12, &orig_saved_r13, &orig_saved_r22, &orig_saved_r23))) {
+  if (unlikely(Fisher23LnFirstRow(obs_m11, obs_m12, obs_m21, obs_m22, &tailp, &starting_lnprob_other_component_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22))) {
     return 1;
   }
   // TODO
