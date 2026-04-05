@@ -542,6 +542,8 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       double m11_x_m22 = m11 * m22;
       while (1) {
         const double m11_x_m22 = m11 * m22;
+        // Don't want to wait until lastp becomes 0, since we want m11 >= 0 and
+        // m22 >= 0 guaranteed when we save m11 and m22 on loop exit..
         if (m11_x_m22 == 0) {
           break;
         }
@@ -563,9 +565,22 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
           if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprob_other_component_ddr_ptr, &cmp_result, &lastp))) {
             return 1;
           }
-          // TODO
+          one_plus_scaled_eps = 1 + 3 * k2m52;
+          if (cmp_result <= 0) {
+            tailp += lastp;
+            tie_ct += (cmp_result == 0);
+            break;
+          }
         }
       }
+      *orig_saved_l11_ptr = m11;
+      *orig_saved_l12_ptr = m12;
+      *orig_saved_l21_ptr = m21;
+      *orig_saved_l22_ptr = m22;
+      *orig_base_probl_ptr = lastp;
+      *orig_base_epsl_ptr = one_plus_scaled_eps - 1;
+    } else {
+      // Jump to other tail.
     }
     // TODO
   }
