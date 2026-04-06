@@ -172,7 +172,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     //   float128 on x86_64.  But web search results imply QD is better.)
     if ((!midp) && (het_delta < 2.0)) {
       // Fast path for p=1.
-      if (S_CAST(int64_t, obs_hets) * (obs_hets - 1) <= 4 * S_CAST(int64_t, obs_homr + 1) * (obs_homc + 1)) {
+      if (obs_hets * (obs_hets - 1LL) <= 4 * (obs_homc + 1LL) * (obs_homr + 1)) {
         *resultp = 0;
         return 0;
       }
@@ -249,7 +249,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       }
       const double denom = tailp + centerp;
       if (midp) {
-        tailp -= S_CAST(double, tie_ct) * 0.5;
+        tailp -= tie_ct * 0.5;
       }
       *resultp = log(tailp / denom);
       return 0;
@@ -294,16 +294,16 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     // the middle of the interval.
 
     // curr_hets moves twice as fast as curr_homr.  So if we add
-    //   0.5 * (curr_hets + S_CAST(double, obs_hets)) - modal_nhet
-    // to 0.5 * (curr_homr + S_CAST(double, obs_homr)), that reflects curr_homr
-    // across the mode.
+    //   0.5 * (curr_hets + obs_hets) - modal_nhet
+    // to 0.5 * (curr_homr + obs_homr), that reflects curr_homr across the
+    // mode.
     const double max_homr = S_CAST(double, rare_ct / 2);
     {
-      const double delta = 0.5 * (curr_hets + S_CAST(double, obs_hets)) - modal_nhet;
-      curr_homr = 0.5 * (curr_homr + S_CAST(double, obs_homr)) + delta;
+      const double delta = 0.5 * (curr_hets + obs_hets) - modal_nhet;
+      curr_homr = 0.5 * (curr_homr + obs_homr) + delta;
       // Round up (to guarantee we've actually moved to the other side of the
       // mode) and clamp.
-      curr_homr = S_CAST(double, S_CAST(int32_t, curr_homr + 1));
+      curr_homr = S_CAST(int32_t, (curr_homr + 1) * (1 - kSmallEpsilon));
       if (curr_homr > max_homr) {
         curr_homr = max_homr;
       }
@@ -353,7 +353,6 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         // We're guaranteed to make progress, since lnprob_diff <= -62 * log(2)
         // and sample_ct < 2^31.
         curr_homr -= S_CAST(int64_t, lnprob_diff / ll_deriv);
-        assert(curr_homr >= 0);
       }
     }
     // Sum toward center, until lastp >= 1.  (No more risk of double-counting
@@ -402,7 +401,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       curr_hets -= 2;
     }
     if (midp) {
-      tailp -= S_CAST(double, tie_ct) * 0.5;
+      tailp -= tie_ct * 0.5;
     }
     *resultp = starting_lnprob + log(tailp);
     return 0;
@@ -411,7 +410,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
   const double het_delta = modal_nhet - curr_hets;
   if ((!midp) && (het_delta < 2.0)) {
     // Fast path for p=1.
-    if (4 * S_CAST(int64_t, obs_homr) * obs_homc <= S_CAST(int64_t, obs_hets + 2) * (obs_hets + 1)) {
+    if ((4LL * obs_homr) * obs_homc <= (obs_hets + 2LL) * (obs_hets + 1LL)) {
       *resultp = 0;
       return 0;
     }
@@ -478,7 +477,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     }
     const double denom = tailp + centerp;
     if (midp) {
-      tailp -= S_CAST(double, tie_ct) * 0.5;
+      tailp -= tie_ct * 0.5;
     }
     *resultp = log(tailp / denom);
     return 0;
@@ -489,11 +488,11 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
             ddr_add3_lfacts(obs_hets, obs_homr, obs_homc));
   // Jump to other tail.
   {
-    const double delta = modal_nhet - 0.5 * (curr_hets + S_CAST(double, obs_hets));
-    curr_homr = 0.5 * (curr_homr + S_CAST(double, obs_homr)) - delta;
+    const double delta = modal_nhet - 0.5 * (curr_hets + obs_hets);
+    curr_homr = 0.5 * (curr_homr + obs_homr) - delta;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
-    curr_homr = S_CAST(double, S_CAST(int32_t, curr_homr));
+    curr_homr = S_CAST(int32_t, curr_homr);
     if (curr_homr < 0) {
       curr_homr = 0;
     }
@@ -574,7 +573,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     curr_homc -= 1;
   }
   if (midp) {
-    tailp -= S_CAST(double, tie_ct) * 0.5;
+    tailp -= tie_ct * 0.5;
   }
   *resultp = starting_lnprob + log(tailp);
   return 0;
@@ -1191,9 +1190,9 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, ui
       curr_homc -= 1;
     }
     {
-      const double delta = 0.5 * (curr_hets + S_CAST(double, obs_hets)) - modal_nhet;
-      curr_homr = 0.5 * (curr_homr + S_CAST(double, obs_homr)) + delta;
-      curr_homr = S_CAST(double, S_CAST(int32_t, curr_homr + 0.5));
+      const double delta = 0.5 * (curr_hets + obs_hets) - modal_nhet;
+      curr_homr = 0.5 * (curr_homr + obs_homr) + delta;
+      curr_homr = S_CAST(int32_t, (curr_homr + 1) * (1 - kSmallEpsilon));
       if (curr_homr > max_homr) {
         curr_homr = max_homr;
       }
@@ -1305,9 +1304,9 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, ui
     }
   }
   {
-    const double delta = modal_nhet - 0.5 * (curr_hets + S_CAST(double, obs_hets));
-    curr_homr = 0.5 * (curr_homr + S_CAST(double, obs_homr)) - delta;
-    curr_homr = S_CAST(double, S_CAST(int32_t, curr_homr + 0.5));
+    const double delta = modal_nhet - 0.5 * (curr_hets + obs_hets);
+    curr_homr = 0.5 * (curr_homr + obs_homr) - delta;
+    curr_homr = S_CAST(int32_t, curr_homr);
     if (curr_homr < 0) {
       curr_homr = 0;
     }

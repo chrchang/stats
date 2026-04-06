@@ -80,7 +80,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
   }
   if (!midp) {
     // Fast path for p=1.
-    if (S_CAST(int64_t, obs_m11 + 1) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
+    if ((obs_m11 + 1LL) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
       *resultp = 0;
       return 0;
     }
@@ -130,8 +130,8 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
       lastp *= (m12 * m21) / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      // Number of center contingency tables is maximized with obs_m11 = 0,
-      // modal_m11 = 172, other values large.
+      // Number of center contingency tables is maximized with obs_m22 = 0,
+      // modal_m22 = 172, other values large.
       // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited to
       // ~53000 tables.  Each lastp update involves 4 operations which can each
       // introduce up to 0.5 ULP relative error under the default rounding
@@ -227,7 +227,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
     m21 = 2 * modal_m21 - (m21 + obs_m21) * 0.5;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
-    m21 = S_CAST(double, S_CAST(int32_t, m21));
+    m21 = S_CAST(int32_t, m21);
     if (m21 < 0) {
       m21 = 0;
     }
@@ -501,10 +501,10 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
   // No guaranteed normalization beyond m11+m21 >= m12+m22.  In particular,
   // m11 < m22 is possible.
 
-  // As with PLINK 1.9 fisher23(), "left tail" corresponds to small m11, and
-  // "right tail" corresponds to large m11.
-  if (S_CAST(uint64_t, obs_m11) * obs_m22 > S_CAST(uint64_t, obs_m12) * obs_m21) {
-    // Starting m11 is beginning of right tail.
+  // As with PLINK 1.9 fisher23(), "left tail" corresponds to small m22, and
+  // "right tail" corresponds to large m22.
+  if (S_CAST(int64_t, obs_m11) * obs_m22 > S_CAST(int64_t, obs_m12) * obs_m21) {
+    // Starting m22 is beginning of right tail.
     *orig_base_probr_ptr = 1;
     *orig_base_epsr_ptr = 0;
     *orig_saved_r11_ptr = m11;
@@ -513,10 +513,10 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
     *orig_saved_r22_ptr = m22;
     const double m1x = m11 + m12;
     const double m2x = m21 + m22;
-    const double mx2 = m11 + m21;
+    const double mx2 = m12 + m22;
     const double mxx = m1x + m2x;
-    const double modal_m11 = m1x * mx2 / mxx;
-    const double delta = m11 - modal_m11;
+    const double modal_m22 = m2x * mx2 / mxx;
+    const double delta = m22 - modal_m22;
     // Iterate outward to floating-point precision limit.
     while (1) {
       m11 += 1;
@@ -543,7 +543,7 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       while (1) {
         const double m11_x_m22 = m11 * m22;
         // Don't want to wait until lastp becomes 0, since we want m11 >= 0 and
-        // m22 >= 0 guaranteed when we save m11 and m22 on loop exit..
+        // m22 >= 0 guaranteed when we save m11 and m22 on loop exit.
         if (m11_x_m22 == 0) {
           break;
         }
@@ -580,7 +580,16 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       *orig_base_probl_ptr = lastp;
       *orig_base_epsl_ptr = one_plus_scaled_eps - 1;
     } else {
-      // Jump to other tail.
+      // Jump to other tail.  Round down and clamp.
+      const double m22_minus_m11 = m22 - m11; // usually but not always nonpositive
+      m22 = S_CAST(int32_t, modal_m22 - delta);
+      if (m22 < 0) {
+        m22 = 0;
+      }
+      if (m22 < m22_minus_m11) {
+        m22 = m22_minus_m11;
+      }
+      // TODO
     }
     // TODO
   }
