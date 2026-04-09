@@ -818,8 +818,60 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       }
     }
     // Sum toward center, until lastp >= 1.
-    ;;;
+    double one_minus_scaled_eps = 1 - 3 * k2m52;
+    const double lastp_tail = lastp;
+    const double m11_tail = m11;
+    const double m12_tail = m12;
+    const double m21_tail = m21;
+    const double m22_tail = m22;
+    while (lastp <= one_minus_scaled_eps) {
+      tailp += lastp;
+      m12 += 1;
+      m21 += 1;
+      lastp *= m11 * m22 / (m12 * m21);
+      m11 -= 1;
+      m22 -= 1;
+      one_minus_scaled_eps -= 2 * k2m52;
+    }
+    if (lastp < 2 - one_minus_scaled_eps) {
+      const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
+      intptr_t cmp_result;
+      if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr_ptr, &cmp_result, &lastp))) {
+        return 1;
+      }
+      one_minus_scaled_eps = 1 - 3 * k2m52;
+      if (cmp_result <= 0) {
+        tailp += lastp;
+        tie_ct += (cmp_result == 0);
+      }
+    }
+    *orig_saved_r11_ptr = m11;
+    *orig_saved_r12_ptr = m12;
+    *orig_saved_r21_ptr = m21;
+    *orig_saved_r22_ptr = m22;
+    *orig_base_probr_ptr = lastp;
+    *orig_base_epsr_ptr = 1 - one_minus_scaled_eps;
+    lastp = lastp_tail;
+    m11 = m11_tail;
+    m12 = m12_tail;
+    m21 = m21_tail;
+    m22 = m22_tail;
   }
+  *tie_ct_ptr = tie_ct;
+  // Sum away from center, until sums stop changing.
+  while (1) {
+    m11 += 1;
+    m22 += 1;
+    lastp *= m12 * m21 / (m11 * m22);
+    const double preaddp = tailp;
+    tailp += lastp;
+    if (tailp == preaddp) {
+      break;
+    }
+    m12 -= 1;
+    m21 -= 1;
+  }
+  *tailp_ptr = tailp;
   return 0;
 }
 
