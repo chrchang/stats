@@ -804,15 +804,21 @@ BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
           return 0;
         }
         // Derivative is w.r.t. m21.
-        const double ll_deriv = log((m11 + 1) * (m21 + 1) / (m11 * m22));
+        const double ll_deriv = log((m11 + 1) * (m22 + 1) / (m12 * m21));
         m21 -= ceil64_smalleps(lnprob_diff / ll_deriv);
         if (m21 < min_m21) {
           m21 = min_m21;
         }
+      } else if (lnprob_diff > -62 * kLn2) {
+        lastp = exp(lnprob_diff);
+        break;
       } else {
-        // TODO
+        const double ll_deriv = log(m11 * m22 / ((m12 + 1) * (m21 + 1)));
+        m21 += S_CAST(int64_t, -lnprob_diff / ll_deriv);
       }
     }
+    // Sum toward center, until lastp >= 1.
+    ;;;
   }
   return 0;
 }
