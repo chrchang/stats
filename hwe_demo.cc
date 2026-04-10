@@ -65,8 +65,8 @@ int32_t main(int argc, char** argv) {
     } else if (argc != 2) {
       fputs(
 "HweLnP() demo                                 https://github.com/chrchang/stats\n\n"
-"  hwe_test <het count> <hom count 1> <hom count 2> [threshold] ['midp']\n"
-"  hwe_test <filename> ['midp']\n\n"
+"  hwe_demo <het count> <hom count 1> <hom count 2> [threshold] ['midp']\n"
+"  hwe_demo <filename> ['midp']\n\n"
 "If a filename is provided, the file is expected to contain marker names in the\n"
 "first column, heterozygote counts in the second, and homozygote counts in the\n"
 "third and fourth.\n", stdout);

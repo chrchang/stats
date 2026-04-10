@@ -38,17 +38,17 @@ endif
 %.o: %.cc $(CCHDR)
 	g++ -c $(CXXFLAGS) -o $@ $<
 
-all: fisher_test hwe_test
+all: fisher_demo hwe_demo
 
-fisher_test: $(OBJ) fisher.o fisher_test.o
-	g++ $(OBJ) fisher.o fisher_test.o -o fisher_test $(LINKFLAGS)
+fisher_demo: $(OBJ) fisher.o fisher_demo.o
+	g++ $(OBJ) fisher.o fisher_demo.o -o fisher_demo $(LINKFLAGS)
 
-hwe_test: $(OBJ) hwe_test.o
-	g++ $(OBJ) hwe_test.o -o hwe_test $(LINKFLAGS)
+hwe_demo: $(OBJ) hwe_demo.o
+	g++ $(OBJ) hwe_demo.o -o hwe_demo $(LINKFLAGS)
 
 .PHONY: clean
 clean:
 	rm -f *.o
 	rm -f include/*.o
-	rm -f fisher_test
-	rm -f hwe_test
+	rm -f fisher_demo
+	rm -f hwe_demo

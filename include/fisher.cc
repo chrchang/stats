@@ -973,6 +973,16 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
   if (unlikely(Fisher23LnFirstRow(obs_m11, obs_m12, obs_m21, obs_m22, &tailp, &starting_lnprobv_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22))) {
     return 1;
   }
+
+  const double mx1 = obs_m11 + obs_m21;
+  const double mx2 = obs_m12 + obs_m22;
+  const dd_real lnprobf_ddr =
+    ddr_sub(ddr_add4_lfacts(obs_m11 + obs_m12, obs_m21 + obs_m22, mx1, mx2),
+            ddr_lfact(mx1 + mx2));
+  starting_lnprobv_ddr =
+    ddr_sub(starting_lnprobv_ddr,
+            ddr_add_lfacts(obs_m13, obs_m23));
+  ;;;
   // TODO
   return 0;
 }

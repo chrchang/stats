@@ -1,5 +1,5 @@
 *~
 *.o
 binom_test
-hwe_test
-fisher_test
+hwe_demo
+fisher_demo
