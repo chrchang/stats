@@ -458,8 +458,6 @@ dd_real ddr_lfact(double xx) {
 // Bignum factorial helper functions and constants.
 // See GMP mpz/bin_uiui.c.
 #if defined(__LP64__) && !defined(_WIN32)
-static_assert(sizeof(mp_limb_t) == 8, "Unexpected mp_limb_t size (expected 8).");
-CONSTI32(kInt32PerLimb, 2);
 // assume first term < 2^32 for now and make this comparison compile to no-op
 static const mp_limb_t kFallingFactorialInitMul2Max = 0xffffffffffffffffLLU;
 
@@ -470,8 +468,6 @@ static const mp_limb_t kFallingFactorialInitMul6Max = 0xa16;
 static const mp_limb_t kFallingFactorialInitMul7Max = 0x34b;
 static const mp_limb_t kFallingFactorialInitMul8Max = 0x1b2;
 #else
-static_assert(sizeof(mp_limb_t) == 4, "Unexpected mp_limb_t size (expected 4).");
-CONSTI32(kInt32PerLimb, 1);
 static const mp_limb_t kFallingFactorialInitMul2Max = 0x16a0a;
 static const mp_limb_t kFallingFactorialInitMul3Max = 0x801;
 static const mp_limb_t kFallingFactorialInitMul4Max = 0x16b;

@@ -377,6 +377,18 @@ HEADER_INLINE dd_real ddr_add5_lfacts(const double a, const double b, const doub
   return ddr_add5(ddr_lfact(a), ddr_lfact(b), ddr_lfact(c), ddr_lfact(d), ddr_lfact(e));
 }
 
+#if defined(__LP64__) && !defined(_WIN32)
+static_assert(sizeof(mp_limb_t) == 8, "Unexpected mp_limb_t size (expected 8).");
+CONSTI32(kInt32PerLimb, 2);
+#else
+static_assert(sizeof(mp_limb_t) == 4, "Unexpected mp_limb_t size (expected 4).");
+CONSTI32(kInt32PerLimb, 1);
+#endif
+
+int32_t falling_factorial(mp_limb_t top, uint32_t ct, mp_limb_t* result, uint32_t* result_limb_ctp, mp_limb_t* wkspace);
+
+void lshift_multilimb(uint64_t lshift_ct, mp_limb_t* num, uint32_t* num_limb_ctp);
+
 // Preconditions:
 // - numer_factorial_args[] and denom_factorial_args[] are
 //   not-necessarily-sorted lists of length ffac_ct, describing a quotient of

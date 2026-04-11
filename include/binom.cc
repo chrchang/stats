@@ -167,12 +167,10 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
       return 0;
     }
   }
-  // TODO: update bounds for odds ratio
-  return 0;
+  // TODO: implement odds_ratio^odds_ratio_pow multiply
 
-/*
   // numer: Usually CeilPow2(numer_term_ct) limbs in 32-bit limb case.  Also
-  //        ensure this is at least numer_term_ct + max(1, ceil(pow2 / 32)), to
+  //        ensure this is at least numer_term_ct + 1, to
   //        cover mpn_mul() and lshift_multilimb() edge cases.
   //        Usually DivUp(CeilPow2(numer_term_ct), 2) limbs in 64-bit limb
   //        case.  Also ensure this is at least DivUp(numer_term_ct, 2) +
@@ -296,7 +294,6 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
   }
   *dbl_ptr = ratio;
   return 0;
-*/
 }
 
 // - succ_odds_ratio must be initialized to p / (1-p) reduced to lowest terms,
