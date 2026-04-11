@@ -25,6 +25,44 @@
 namespace plink2 {
 #endif
 
+// Assumes exponent > 0.
+void mul_by_u63_to_u31_pow(uint64_t base, uint32_t exponent, mp_limb_t* num, uint32_t* num_limb_ctp, mp_limb_t* tmppow, mp_limb_t* numcopy) {
+  uint32_t num_limb_ct = *num_limb_ctp;
+  uint32_t tmppow_limb_ct = 1;
+  uint32_t tmppow_exp = 1;
+  tmppow[0] = base;
+#ifndef __LP64__
+  if (base > 0xffffffffU) {
+    tmppow[1] = base >> 32;
+    ++tmppow_limb_ct;
+  }
+#endif
+  while (1) {
+    if (tmppow_exp & exponent) {
+      memcpy(numcopy, num, num_limb_ct * sizeof(mp_limb_t));
+      mp_limb_t msl;
+      if (num_limb_ct >= tmppow_limb_ct) {
+        msl = mpn_mul(num, numcopy, num_limb_ct, tmppow, tmppow_limb_ct);
+      } else {
+        msl = mpn_mul(num, tmppow, tmppow_limb_ct, numcopy, num_limb_ct);
+      }
+      num_limb_ct += tmppow_limb_ct - (msl == 0);
+      exponent -= tmppow_exp;
+      if (!exponent) {
+        return;
+      }
+    }
+    memcpy(numcopy, tmppow, tmppow_limb_ct * sizeof(mp_limb_t));
+    mpn_sqr(tmppow, numcopy, tmppow_limb_ct);
+    tmppow_limb_ct *= 2;
+    if (tmppow[tmppow_limb_ct - 1] == 0) {
+      --tmppow_limb_ct;
+    }
+    exponent = exponent * 2;
+  }
+}
+
+
 // Forked from CompareFactorialProducts() in plink2_highprec; it will replace
 // the original if plink2 ever needs support for a non-power-of-2 odds ratio.
 //
@@ -56,7 +94,7 @@ namespace plink2 {
 //
 // This could take a precomputed ddr_lfact table as an additional pair of
 // parameters, but I don't think that makes much of a difference.
-BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, int64_t odds_ratio_denom, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint32_t* numer_factorial_args, uint32_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, mp_limb_t** gmp_wkspacep, uintptr_t* gmp_wkspace_limb_ctp, intptr_t* cmp_resultp, double* dbl_ptr) {
+BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, int64_t odds_ratio_denom, int32_t odds_ratio_pow, int32_t numer_odds_ratio_pow, uint32_t* numer_factorial_args, uint32_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, mp_limb_t** gmp_wkspacep, uintptr_t* gmp_wkspace_limb_ctp, intptr_t* cmp_resultp, double* dbl_ptr) {
   // 1. Sort numer_factorial_args and denom_factorial_args.  (This has the
   //    effect of cancelling out matching terms.)
   // 2. Iterate through numer_factorial_args[] and denom_factorial_args[] just
@@ -127,7 +165,7 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
       ln_odds_ratio_ddr = ddr_log(odds_ratio_ddr);
       *ln_odds_ratio_ddr_ptr = ln_odds_ratio_ddr;
     }
-    *dbl_ptr = exp(ddr_muld(ln_odds_ratio_ddr, S_CAST(double, odds_ratio_pow)).x[0]);
+    *dbl_ptr = exp(ddr_muld(ln_odds_ratio_ddr, odds_ratio_pow).x[0]);
     return 0;
   }
   // possible todo: tune this threshold.
@@ -140,13 +178,13 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
     }
     dd_real starting_lnprobv_ddr = *starting_lnprobv_ddr_ptr;
     if (starting_lnprobv_ddr.x[0] == DBL_MAX) {
-      starting_lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, S_CAST(double, numer_odds_ratio_pow));
+      starting_lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow);
       for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
         starting_lnprobv_ddr = ddr_sub(starting_lnprobv_ddr, ddr_lfact(u31tod(numer_factorial_args[ffac_idx])));
       }
       *starting_lnprobv_ddr_ptr = starting_lnprobv_ddr;
     }
-    dd_real lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, S_CAST(double, numer_odds_ratio_pow + odds_ratio_pow));
+    dd_real lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow + odds_ratio_pow);
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
       lnprobv_ddr = ddr_sub(lnprobv_ddr, ddr_lfact(u31tod(denom_factorial_args[ffac_idx])));
     }
@@ -167,31 +205,52 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
       return 0;
     }
   }
-  // TODO: implement odds_ratio^odds_ratio_pow multiply
-
-  // numer: Usually CeilPow2(numer_term_ct) limbs in 32-bit limb case.  Also
-  //        ensure this is at least numer_term_ct + 1, to
-  //        cover mpn_mul() and lshift_multilimb() edge cases.
-  //        Usually DivUp(CeilPow2(numer_term_ct), 2) limbs in 64-bit limb
-  //        case.  Also ensure this is at least DivUp(numer_term_ct, 2) +
-  //        max(1, ceil(pow2 / 64)) to cover edge cases.
+  // numer: Usually CeilPow2(numer_term_ct) + numer_odds_limb_ct limbs in
+  //        32-bit limb case.  Also ensure this is at least numer_term_ct + 1,
+  //        to cover mpn_mul() and lshift_multilimb() edge cases.
+  //        Usually DivUp(CeilPow2(numer_term_ct), 2) + numer_odds_limb_ct
+  //        limbs in 64-bit limb case.  Also ensure this is at least
+  //        DivUp(numer_term_ct, 2) + 1 to cover edge cases.
   // denom: Similar to above.
-  // new_ffac: CeilPow2(max_ffac_size) in 32-bit limb case, DivUp(., 2) in
-  //           64-bit case.
+  // new_ffac: max(CeilPow2(max_ffac_size), numer_odds_limb_ct,
+  //           denom_odds_limb_ct) in 32-bit limb case, DivUp(., 2) in 64-bit
+  //           case.
   // generic_wkspace: Used as intermediate buffer for falling-factorial
   //                  calculation, and temporary buffer to copy previous
-  //                  numerator or denominator into before multiplication by
-  //                  new_falling_factorial.  Safe to make this the larger of
-  //                  the numer and denom sizes; could tighten this later.
-  const uintptr_t numer_bound1 = numer_term_ct? DivUp(CeilPow2(numer_term_ct), kInt32PerLimb) : 0;
-  uintptr_t numer_bound2 = 1 + numer_term_ct;
-  const uintptr_t denom_bound1 = denom_term_ct? DivUp(CeilPow2(denom_term_ct), kInt32PerLimb) : 0;
-  uintptr_t denom_bound2 = 1 + denom_term_ct;
-  const uintptr_t numer_limb_req = MAXV(numer_bound1, numer_bound2);
-  const uintptr_t denom_limb_req = MAXV(denom_bound1, denom_bound2);
-  const uintptr_t new_ffac_limb_req = DivUp(CeilPow2(max_ffac_size), kInt32PerLimb);
-  const uintptr_t generic_wkspace_limb_req = MAXV(numer_limb_req, denom_limb_req);
-  const uintptr_t total_limb_req = numer_limb_req + denom_limb_req + new_ffac_limb_req + generic_wkspace_limb_req;
+  //                  numerator or denominator into before multiplication.
+  //                  Safe to make this the larger of the numer and denom
+  //                  sizes; could tighten this later.
+
+  uint64_t numer_odds_limb_ct = 0;
+  uint64_t denom_odds_limb_ct = 0;
+  if (odds_ratio_pow && ((odds_ratio_numer != 1) || (odds_ratio_denom != 1))) {
+    if (odds_ratio_pow < 0) {
+      odds_ratio_pow = -odds_ratio_pow;
+      // we don't touch ln_odds_ratio_ddr in this branch, only need to swap
+      // odds_ratio_{numer,denom}.
+      swap_i64(&odds_ratio_numer, &odds_ratio_denom);
+    }
+    numer_odds_limb_ct = DivUpU64(bsru64(odds_ratio_numer) * odds_ratio_pow, 32 * kInt32PerLimb);
+    denom_odds_limb_ct = DivUpU64(bsru64(odds_ratio_denom) * odds_ratio_pow, 32 * kInt32PerLimb);
+  }
+
+  const uint64_t numer_bound1 = numer_odds_limb_ct + (numer_term_ct? DivUp(CeilPow2(numer_term_ct), kInt32PerLimb) : 0);
+  uint64_t numer_bound2 = 1 + numer_term_ct;
+  const uint64_t denom_bound1 = denom_odds_limb_ct + (denom_term_ct? DivUp(CeilPow2(denom_term_ct), kInt32PerLimb) : 0);
+  uint64_t denom_bound2 = 1 + denom_term_ct;
+  const uint64_t numer_limb_req = MAXV(numer_bound1, numer_bound2);
+  const uint64_t denom_limb_req = MAXV(denom_bound1, denom_bound2);
+  const uint64_t new_ffac_limb_req = DivUp(CeilPow2(max_ffac_size), kInt32PerLimb);
+  const uint64_t generic_wkspace_limb_req = MAXV(numer_limb_req, denom_limb_req);
+  if (unlikely(generic_wkspace_limb_req > UINT32_MAX)) {
+    return 1;
+  }
+  const uint64_t total_limb_req = numer_limb_req + denom_limb_req + new_ffac_limb_req + generic_wkspace_limb_req;
+#ifndef __LP64__
+  if (unlikely(total_limb_req > 0x3fffffff)) {
+    return 1;
+  }
+#endif
   if (total_limb_req > *gmp_wkspace_limb_ctp) {
     free_cond(*gmp_wkspacep);
     uintptr_t new_limb_ct = 2 * (*gmp_wkspace_limb_ctp);
@@ -249,6 +308,19 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
       msl = mpn_mul(main, generic_wkspace, main_limb_ct, new_ffac, new_ffac_limb_ct);
     }
     *main_limb_ct_ptr = main_limb_ct + new_ffac_limb_ct - (msl == 0);
+  }
+  if (odds_ratio_pow) {
+    if (odds_ratio_numer & (odds_ratio_numer - 1)) {
+      mul_by_u63_to_u31_pow(odds_ratio_numer, odds_ratio_pow, numer, &numer_limb_ct, new_ffac, generic_wkspace);
+    } else {
+      // perfect power of 2
+      pow2 += odds_ratio_pow * bsru64(odds_ratio_numer);
+    }
+    if (odds_ratio_denom & (odds_ratio_denom - 1)) {
+      mul_by_u63_to_u31_pow(odds_ratio_denom, odds_ratio_pow, denom, &denom_limb_ct, new_ffac, generic_wkspace);
+    } else {
+      pow2 -= odds_ratio_pow * bsru64(odds_ratio_denom);
+    }
   }
   if (pow2 > 0) {
     lshift_multilimb(pow2, numer, &numer_limb_ct);
