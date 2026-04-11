@@ -1,7 +1,8 @@
 CWARN = -Wall -Wextra -Wshadow -Wformat-security -Wstrict-aliasing -Wdouble-promotion -Wfloat-conversion
 CXXWARN = ${CWARN} -Wold-style-cast
 
-ISRC = include/fisher.cc \
+ISRC = include/binom.cc \
+       include/fisher.cc \
        include/plink2_base.cc \
        include/plink2_float.cc \
        include/plink2_highprec.cc \
