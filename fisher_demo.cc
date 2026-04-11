@@ -9,8 +9,6 @@
 extern "C" {
 #endif
 
-double fisher23(uint32_t m11, uint32_t m12, uint32_t m13, uint32_t m21, uint32_t m22, uint32_t m23, uint32_t midp);
-
 #if defined(__cplusplus)
 }
 #endif
@@ -62,7 +60,15 @@ int32_t main(int argc, char** argv) {
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
         }
-        printf("P-value: %g\n", fisher23(m11, m21, m31, m12, m22, m32, midp));
+        double logp;
+        if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &logp))) {
+          goto main_ret_NOMEM;
+        }
+        char buf[80];
+        char* write_iter = strcpya(buf, "P-value: ");
+        write_iter = lntoa_g(logp, write_iter);
+        memcpy_k2(write_iter, "\n");
+        fputs(buf, stdout);
       } else {
         if (unlikely(S_CAST(uint64_t, m11) + m12 + m21 + m22 > 0x7fffffff)) {
           fputs("Error: Problem instance too large.\n", stderr);
@@ -137,25 +143,27 @@ int32_t main(int argc, char** argv) {
         uint32_t m22;
         uint32_t m31;
         uint32_t m32;
+        double logp;
         if (sscanf(bufptr, "%s %u %u %u %u %u %u", idstr, &m11, &m12, &m21, &m22, &m31, &m32) < 7) {
           if (sscanf(bufptr, "%s %u %u %u %u", idstr, &m11, &m12, &m21, &m22) < 5) {
             // skip improperly formatted line
             continue;
           }
-          double logp;
           if (unlikely(Fisher22LnP(m11, m12, m21, m22, midp, &logp))) {
             goto main_ret_NOMEM;
           }
-          char buf[80];
-          fputs("P-value for ", stdout);
-          fputs(idstr, stdout);
-          char* write_iter = strcpya(buf, ": ");
-          write_iter = lntoa_g(logp, write_iter);
-          memcpy_k2(write_iter, "\n");
-          fputs(buf, stdout);
         } else {
-          printf("P-value for %s: %g\n", idstr, fisher23(m11, m21, m31, m12, m22, m32, midp));
+          if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &logp))) {
+            goto main_ret_NOMEM;
+          }
         }
+        char buf[80];
+        fputs("P-value for ", stdout);
+        fputs(idstr, stdout);
+        char* write_iter = strcpya(buf, ": ");
+        write_iter = lntoa_g(logp, write_iter);
+        memcpy_k2(write_iter, "\n");
+        fputs(buf, stdout);
       }
       if (!feof(test_file)) {
         fputs("Error: File read failure.\n", stderr);

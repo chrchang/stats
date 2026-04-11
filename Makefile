@@ -40,8 +40,8 @@ endif
 
 all: fisher_demo hwe_demo
 
-fisher_demo: $(OBJ) fisher.o fisher_demo.o
-	g++ $(OBJ) fisher.o fisher_demo.o -o fisher_demo $(LINKFLAGS)
+fisher_demo: $(OBJ) fisher_demo.o
+	g++ $(OBJ) fisher_demo.o -o fisher_demo $(LINKFLAGS)
 
 hwe_demo: $(OBJ) hwe_demo.o
 	g++ $(OBJ) hwe_demo.o -o hwe_demo $(LINKFLAGS)

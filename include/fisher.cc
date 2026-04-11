@@ -500,7 +500,10 @@ static const double kJumpThresh = 314.0; // chosen to guarantee base_prob < kSwi
 // static const double kSwitchThresh = k2p100 * k2p50;
 // static const double kLnSwitchThresh = 150.0 * kLn2;
 
-BoolErr Fisher23LnFirstRow(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tailp_ptr, dd_real* starting_lnprobv_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
+// Since each Fisher's exact test contigency table has rows and columns, we use
+// 'line' instead of 'row' to refer to the set of tables with 3rd column held
+// constant.
+BoolErr Fisher23LnFirstLine(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tailp_ptr, dd_real* starting_lnprobv_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
   // possible todo: have this and Fisher22LnP() call a shared function
   double m11 = obs_m11;
   double m12 = obs_m12;
@@ -915,6 +918,180 @@ BoolErr Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, ui
   return reterr;
 }
 
+// Internally, this assumes we are iterating down the small-m22 tail.  Pass in
+// saved_m1lo = m12, saved_m1hi = m11, saved_m2hi = m22, saved_m2lo = m21 to
+// iterate down the large-m22 tail; this also requires swapping the
+// corresponding obs_ values.
+BoolErr Fisher23LnPTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, double* base_probp, double* base_lnprobp, double* base_epsp, double* saved_m1lop, double* saved_m1hip, double* saved_m2hip, double* saved_m2lop, int32_t* tie_ctp, double* totalp, uint32_t* center_is_emptyp) {
+  double total = 0;
+  double lastp = *base_probp;
+  double cur_eps = *base_epsp;
+  double m11 = *saved_m1lop;
+  double m12 = *saved_m1hip;
+  double m21 = *saved_m2hip;
+  double m22 = *saved_m2lop;
+  // identify beginning (center-facing side) of tail
+  if (lastp == 0.0) {
+    double last_lnp = *base_lnprobp;
+    if (last_lnp >= kLnSwitchThresh) {
+      while (1) {
+        const double prev_numer = m11 * m22;
+        if (prev_numer == 0) {
+          // lowest-likelihood table on this side is still too probable
+          *base_lnprobp = last_lnp;
+          *base_epsp = cur_eps;
+          *center_is_emptyp = 0;
+          *saved_m1lop = m11;
+          *saved_m1hip = m12;
+          *saved_m2hip = m21;
+          *saved_m2lop = m22;
+          return 0;
+        }
+        m12 += 1;
+        m21 += 1;
+        const double lnprob_incr = log(prev_numer / (m12 * m21));
+        last_lnp += lnprob_incr;
+        m11 -= 1;
+        m21 -= 1;
+        cur_eps += 3 * k2m52;
+        if (lnprob_incr <= -2) {
+          cur_eps += (trunc(-lnprob_incr) - 1) * k2m52;
+        }
+        // no risk of last_lnp dropping below cur_eps
+      }
+    }
+    lastp = exp(last_lnp);
+  }
+  double m11_tail;
+  double m12_tail;
+  double m21_tail;
+  double m22_tail;
+  if (lastp >= 1 + cur_eps) {
+    while (1) {
+      const double prev_numer = m11 * m22;
+      if (prev_numer == 0) {
+        // lowest-likelihood table on this side is still too probable
+        *center_is_emptyp = 0;
+        *saved_m1lop = m11;
+        *saved_m1hip = m12;
+        *saved_m2hip = m21;
+        *saved_m2lop = m22;
+        if (lastp < kSwitchThresh) {
+          *base_probp = lastp;
+          *base_epsp = cur_eps;
+        } else {
+          *base_probp = 0;
+          const double last_lnp = log(lastp);
+          *base_lnprobp = last_lnp;
+          *base_epsp = cur_eps + ceil64_smalleps(last_lnp) * k2m52;
+        }
+        return 0;
+      }
+      m12 += 1;
+      m21 += 1;
+      lastp *= prev_numer / (m12 * m21);
+      m11 -= 1;
+      m22 -= 1;
+      cur_eps += 2 * k2m52;
+      if (lastp < 1 + cur_eps) {
+        if (lastp <= 1 - cur_eps) {
+          break;
+        }
+        intptr_t cmp_result;
+        if (unlikely(Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), &starting_lnprobv_ddr, &cmp_result, &lastp))) {
+          return 1;
+        }
+        cur_eps = 3 * k2m52;
+        if (cmp_result <= 0) {
+          *tie_ctp += (cmp_result == 0);
+          break;
+        }
+      }
+    }
+    *base_probp = lastp;
+    total = lastp;
+    m11_tail = m11;
+    m12_tail = m12;
+    m21_tail = m21;
+    m22_tail = m22;
+  } else {
+    m11_tail = m11;
+    m12_tail = m12;
+    m21_tail = m21;
+    m22_tail = m22;
+    const double lastp_tail = lastp;
+    while (1) {
+      if (lastp > 1 - cur_eps) {
+        if (lastp >= 1 + cur_eps) {
+          break;
+        }
+        intptr_t cmp_result;
+        if (unlikely(Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), &starting_lnprobv_ddr, &cmp_result, &lastp))) {
+          return 1;
+        }
+        cur_eps = 3 * k2m52;
+        if (cmp_result > 0) {
+          break;
+        }
+        *tie_ctp += (cmp_result == 0);
+      }
+      total += lastp;
+      m11 += 1;
+      m22 += 1;
+      const double prob_mult = m12 * m21 / (m11 * m22);
+      if (prob_mult <= 1 + 2 * k2m52) {
+        if (prob_mult < 1 - 2 * k2m52) {
+          *center_is_emptyp = 1;
+          return 0;
+        }
+        const int64_t m11_i = S_CAST(int32_t, m11);
+        const int64_t m12_i = S_CAST(int32_t, m12);
+        const int64_t m21_i = S_CAST(int32_t, m21);
+        const int64_t m22_i = S_CAST(int32_t, m22);
+        if (m12_i * m21_i <= m11_i * m22_i) {
+          *center_is_emptyp = 1;
+          return 0;
+        }
+      }
+      lastp *= prob_mult;
+      m12 -= 1;
+      m21 -= 1;
+      cur_eps += 2 * k2m52;
+    }
+    *base_probp = lastp;
+    lastp = lastp_tail;
+  }
+  *base_epsp = cur_eps;
+  *saved_m1lop = m11;
+  *saved_m1hip = m12;
+  *saved_m2hip = m21;
+  *saved_m2lop = m22;
+  // {m11,m12,m21,m22}_tail is now at a table with relative-likelihood <= 1,
+  // and 'total' is the sum of all relative-likelihoods for tables at least as
+  // close to the center.
+
+  // sum tail to floating-point precision limit
+  m11 = m11_tail;
+  m12 = m12_tail;
+  m21 = m21_tail;
+  m22 = m22_tail;
+  while (1) {
+    m12 += 1;
+    m21 += 1;
+    lastp *= m11 * m22 / (m12 * m21);
+    m11 -= 1;
+    m22 -= 1;
+    const double preaddp = total;
+    total += lastp;
+    if (total == preaddp) {
+      break;
+    }
+  }
+  *totalp = total;
+  *center_is_emptyp = 0;
+  return 0;
+}
+
 // obs_m11 + obs_m12 + obs_m13 + obs_m21 + obs_m22 + obs_m23 assumed to be
 // <2^31.
 BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) {
@@ -970,20 +1147,214 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
   double orig_saved_r12;
   double orig_saved_r21;
   double orig_saved_r22;
-  if (unlikely(Fisher23LnFirstRow(obs_m11, obs_m12, obs_m21, obs_m22, &tailp, &starting_lnprobv_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22))) {
+  if (unlikely(Fisher23LnFirstLine(obs_m11, obs_m12, obs_m21, obs_m22, &tailp, &starting_lnprobv_ddr, &tie_ct, &orig_base_probl, &orig_base_lnprobl, &orig_base_epsl, &orig_base_probr, &orig_base_lnprobr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22))) {
     return 1;
   }
 
-  const double mx1 = obs_m11 + obs_m21;
-  const double mx2 = obs_m12 + obs_m22;
-  const dd_real lnprobf_ddr =
-    ddr_sub(ddr_add4_lfacts(obs_m11 + obs_m12, obs_m21 + obs_m22, mx1, mx2),
-            ddr_lfact(mx1 + mx2));
+  // Returned starting_lnprobv_ddr is for a single line, corresponding to
+  // 1 / (obs_m11! obs_m12! obs_m21! obs_m22!).
+  // Include m13! and m23! before we iterate over other lines.
   starting_lnprobv_ddr =
     ddr_sub(starting_lnprobv_ddr,
             ddr_add_lfacts(obs_m13, obs_m23));
-  ;;;
-  // TODO
+
+  // Other log-factorial expressions we want:
+  //
+  // * lnprobf, so we can add it to starting_lnprobv at the end and convert
+  //   tailp (which is a multiple of starting_prob) into the final
+  //   log-[mid]p-value.
+  //
+  //     (m11+m12+m13)! (m21+m22+m23)! (m11+m21)! (m12+m22)! (m13+m23)!
+  //     --------------------------------------------------------------
+  //                       (m11+m12+m13+m21+m22+m23)!
+  //
+  // * Likelihood sum over a 3rd-column-constant line is
+  //
+  //     (m11+m12+m13)! (m21+m22+m23)! (m13+m23)!    (m11+m12+m21+m22)!
+  //     ---------------------------------------- * ---------------------
+  //       (m11+m12+m13+m21+m22+m23)! m13! m23!     (m11+m12)! (m21+m22)!
+  //
+  //   i.e. the 2x2 likelihood after merging columns 1 and 2.
+  //
+  //   Converting to starting_prob units:
+  //
+  //                    1                           (m11+m12+m21+m22)!
+  //     ------------------------------- * ------------------------------------
+  //     m13! m23! (m11+m12)! (m21+m22)!   (m11+m21)! (m12+m22)! starting_probv
+  const double m1x = obs_m11 + obs_m12 + obs_m13;
+  const double m2x = obs_m21 + obs_m22 + obs_m23;
+  const double mx1 = obs_m11 + obs_m21;
+  const double mx2 = obs_m12 + obs_m22;
+  const double mx3 = obs_m13 + obs_m23;
+  const double mxx = m1x + m2x;
+  const dd_real lnprobf_ddr =
+    ddr_sub(ddr_add5_lfacts(m1x, m2x, mx1, mx2, mx3),
+            ddr_lfact(mxx));
+  const dd_real line_relative_lnprobf_ddr =
+    ddr_sub(ddr_lfact(mx1 + mx2),
+            ddr_add(ddr_add_lfacts(mx1, mx2), starting_lnprobv_ddr));
+
+  // tailp, orig_base_probl, and orig_base_probr are in starting_prob units.
+  for (uint32_t m13_decreasing = 0; m13_decreasing != 2; ++m13_decreasing) {
+    double m13 = obs_m13;
+    double m23 = obs_m23;
+    // left = small m11 and m22; right = large m11 and m22.
+    double l11 = orig_saved_l11;
+    double l12 = orig_saved_l12;
+    double l21 = orig_saved_l21;
+    double l22 = orig_saved_l22;
+    double r11 = orig_saved_r11;
+    double r12 = orig_saved_r12;
+    double r21 = orig_saved_r21;
+    double r22 = orig_saved_r22;
+    double base_probl = orig_base_probl;
+    double base_lnprobl = orig_base_lnprobl;
+    double base_epsl = orig_base_epsl;
+    double base_probr = orig_base_probr;
+    double base_lnprobr = orig_base_lnprobr;
+    double base_epsr = orig_base_epsr;
+    int32_t m13_decr_last;
+    if (m13_decreasing) {
+      m13_decr_last = MINV(obs_m13, obs_m21 + obs_m22);
+    } else {
+      m13_decr_last = -MINV(obs_m23, obs_m11 + obs_m12);
+    }
+    for (int32_t m13_decr = 0; m13_decr != m13_decr_last; ) {
+      m13_decr += m13_decreasing * 2 - 1;
+      double prob_mult;
+      if (m13_decreasing) {
+        m23 += 1;
+        // Need to be careful to not move l{11,12,21,22} to the right of the
+        // mode, or r{11,12,21,22} to the left of it.
+        if (l22) {
+          l12 += 1;
+          prob_mult = m13 * l22 / (m23 * l12);
+          l22 -= 1;
+        } else {
+          l11 += 1;
+          prob_mult = m13 * l21 / (m23 * l11);
+          l21 -= 1;
+        }
+        m13 -= 1;
+      } else {
+        m13 += 1;
+        if (l11) {
+          l21 += 1;
+          prob_mult = m23 * l11 / (m13 * l21);
+          l11 -= 1;
+        } else {
+          l22 += 1;
+          prob_mult = m23 * l12 / (m13 * l22);
+          l12 -= 1;
+        }
+        m23 -= 1;
+      }
+      if (base_probl == 0.0) {
+        const double lnprob_incr = log(prob_mult);
+        base_lnprobl += lnprob_incr;
+        base_epsl += 3 * k2m52;
+        if (fabs(lnprob_incr) >= 2) {
+          base_epsl += (trunc(fabs(lnprob_incr)) - 1) * k2m52;
+        }
+      } else {
+        base_probl *= prob_mult;
+        base_epsl += 2 * k2m52;
+      }
+      double tail_incr1 = 0.0;
+      uint32_t center_is_empty;
+      if (unlikely(Fisher23LnPTailsum(starting_lnprobv_ddr, obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, &base_probl, &base_lnprobl, &base_epsl, &l11, &l12, &l21, &l22, &tie_ct, &tail_incr1, &center_is_empty))) {
+        return 1;
+      }
+      if (center_is_empty) {
+        // All tables in this line, and all subsequent lines, are less probable
+        // than the initial table.
+        double m11_12 = m1x - m13;
+        double m21_22 = m2x - m23;
+        const dd_real line_adj_ddr = ddr_add4_lfacts(m13, m23, m11_12, m21_22);
+        double line_prob = exp(ddr_sub(line_relative_lnprobf_ddr, line_adj_ddr).x[0]);
+        if (m13_decreasing) {
+          while (1) {
+            const double preaddp = tailp;
+            tailp += line_prob;
+            if (tailp == preaddp) {
+              break;
+            }
+            m11_12 += 1;
+            m23 += 1;
+            line_prob *= m13 * m21_22 / (m23 * m11_12);
+            m13 -= 1;
+            m21_22 -= 1;
+          }
+        } else {
+          while (1) {
+            const double preaddp = tailp;
+            tailp += line_prob;
+            if (tailp == preaddp) {
+              break;
+            }
+            m13 += 1;
+            m21_22 += 1;
+            line_prob *= m11_12 * m23 / (m13 * m21_22);
+            m11_12 -= 1;
+            m23 -= 1;
+          }
+        }
+        break;
+      }
+      tailp += tail_incr1;
+      if (m13_decreasing) {
+        const double prev_m13 = m13 + 1;
+        if (r21) {
+          r11 += 1;
+          prob_mult = prev_m13 * r21 / (m23 * r11);
+          r21 -= 1;
+        } else {
+          r12 += 1;
+          prob_mult = prev_m13 * r22 / (m23 * r12);
+          r22 -= 1;
+        }
+      } else {
+        const double prev_m23 = m23 + 1;
+        if (r12) {
+          r22 += 1;
+          prob_mult = prev_m23 * r12 / (m13 * r22);
+          r12 -= 1;
+        } else {
+          r21 += 1;
+          prob_mult = prev_m23 * r11 / (m13 * r21);
+          r11 -= 1;
+        }
+      }
+      if (base_probr == 0.0) {
+        const double lnprob_incr = log(prob_mult);
+        base_lnprobr += lnprob_incr;
+        base_epsr += 3 * k2m52;
+        if (fabs(lnprob_incr) >= 2) {
+          base_epsr += (trunc(fabs(lnprob_incr)) - 1) * k2m52;
+        }
+      } else {
+        base_probr *= prob_mult;
+        base_epsr += 2 * k2m52;
+      }
+      double tail_incr2 = 0.0;
+      if (unlikely(Fisher23LnPTailsum(starting_lnprobv_ddr, obs_m12, obs_m11, obs_m13, obs_m22, obs_m21, obs_m23, &base_probr, &base_lnprobr, &base_epsr, &r12, &r11, &r22, &r21, &tie_ct, &tail_incr2, &center_is_empty))) {
+        return 1;
+      }
+      tailp += tail_incr2;
+    }
+  }
+  const double starting_lnprob =
+    ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
+  if (midp) {
+    tailp -= tie_ct * 0.5;
+  }
+  const double result = log(tailp) + starting_lnprob;
+  *resultp = result;
+  if (result > -k2m35) {
+    // true p-value should always be 1 here
+    // (possible todo: check boundary cases with total near 2^31)
+    *resultp = 0;
+  }
   return 0;
 }
 
