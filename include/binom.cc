@@ -103,19 +103,31 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
       *cmp_resultp = 0;
       return 0;
     }
-    // ...this case shouldn't really come up at all.
-    // If it does, we are plausibly dealing with a ratio very close to 1, where
-    // S_CAST(double, odds_ratio_numer) / S_CAST(double, odds_ratio_denom)
-    // actually rounds to 1.  We want to guarantee *dbl_ptr isn't off by more
-    // than 3 ULPs, so we work with ln_odds_ratio.
+    *cmp_resultp = ((odds_ratio_numer > odds_ratio_denom) == (odds_ratio_pow > 0))? 1 : -1;
+    // We want to guarantee *dbl_ptr isn't off by more than 3 ULPs (at least
+    // when the ratio is in [0.5, 2]), so we don't use plain double arithmetic
+    // past |odds_ratio_pow| == 1.
+    if ((odds_ratio_pow == -1) || (odds_ratio_pow == 1)) {
+      if (odds_ratio_pow == -1) {
+        swap_i64(&odds_ratio_numer, &odds_ratio_denom);
+      }
+      // We allow odds_ratio_numer and odds_ratio_denom > 2^53, so each
+      // cast-to-double can have 0.5 ULP rounding error, and then the division
+      // is another potential 0.5 ULP.
+      *dbl_ptr = S_CAST(double, odds_ratio_numer) / S_CAST(double, odds_ratio_denom);
+      return 0;
+    }
+    // Could use repeated squaring (i.e. port ddr_npwr()) instead if
+    // ln_odds_ratio not precomputed.
     dd_real ln_odds_ratio_ddr = *ln_odds_ratio_ddr_ptr;
     if (ln_odds_ratio_ddr.x[0] == DBL_MAX) {
+      // todo: error analysis of ddr_sloppy_div.  Not using it for now since
+      // this operation does look vulnerable to catastrophic cancellation.
       const dd_real odds_ratio_ddr = ddr_accurate_div(ddr_makei(odds_ratio_numer), ddr_makei(odds_ratio_denom));
       ln_odds_ratio_ddr = ddr_log(odds_ratio_ddr);
       *ln_odds_ratio_ddr_ptr = ln_odds_ratio_ddr;
     }
     *dbl_ptr = exp(ddr_muld(ln_odds_ratio_ddr, S_CAST(double, odds_ratio_pow)).x[0]);
-    *cmp_resultp = ((odds_ratio_numer > odds_ratio_denom) == (odds_ratio_pow > 0))? 1 : -1;
     return 0;
   }
   // possible todo: tune this threshold.
@@ -287,8 +299,8 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
 */
 }
 
-// - succ_odds_ratio must be initialized to r / (1-r) reduced to lowest terms,
-//   where r is the expected success rate.
+// - succ_odds_ratio must be initialized to p / (1-p) reduced to lowest terms,
+//   where p is the expected success rate.
 //
 // - starting_lnprobv_ddr is expected to either be initialized to
 //     log(succ_odds_ratio^obs_succ / (obs_succ! (obs_total - obs_succ)!)),
@@ -305,15 +317,15 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_total, int64_t succ_odds_rati
   // Binomial likelihood is
   //
   //        n!        k        n-k
-  //     --------- * r  * (1-r)
+  //     --------- * p  * (1-p)
   //     k! (n-k)!
   //
   //                        k
-  //        n!       [  r  ]         n
-  //   = --------- * [ --- ]  * (1-r)
-  //     k! (n-k)!   [ 1-r ]
+  //        n!       [  p  ]         n
+  //   = --------- * [ --- ]  * (1-p)
+  //     k! (n-k)!   [ 1-p ]
   //
-  // where k = # of successes and r is the expected success rate.
+  // where k = # of successes and p is the expected success rate.
   //
   // Thus, the likelihood ratio of interest is
   //
