@@ -38,7 +38,10 @@ endif
 %.o: %.cc $(CCHDR)
 	g++ -c $(CXXFLAGS) -o $@ $<
 
-all: fisher_demo hwe_demo
+all: binom_demo fisher_demo hwe_demo
+
+binom_demo: $(OBJ) binom.o binom_demo.o
+	g++ $(OBJ) binom.o binom_demo.o -o binom_demo $(LINKFLAGS)
 
 fisher_demo: $(OBJ) fisher_demo.o
 	g++ $(OBJ) fisher_demo.o -o fisher_demo $(LINKFLAGS)
@@ -50,5 +53,6 @@ hwe_demo: $(OBJ) hwe_demo.o
 clean:
 	rm -f *.o
 	rm -f include/*.o
+	rm -f binom_demo
 	rm -f fisher_demo
 	rm -f hwe_demo
