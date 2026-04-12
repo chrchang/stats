@@ -416,6 +416,106 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_total, int64_t succ_odds_rati
   return reterr;
 }
 
+// obs_tot assumed to be <2^31.  succ_odds_ratio_numer and
+// succ_odds_ratio_denom must be positive, reduced to lowest terms, have sum <
+// 2^63, and represent p/(1-p).
+BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, uint32_t midp, double* resultp) {
+  if (!obs_tot) {
+    *resultp = midp? -kLn2 : 0;
+    return 0;
+  }
+  double rate_mult_incr = 1;
+  double rate_mult_decr = 1;
+  if ((succ_odds_ratio_numer != 1) || (succ_odds_ratio_denom != 1)) {
+    // make sure these numbers aren't off by more than 0.5 ULP, even when
+    // numerator and/or denominator > 2^53.
+    const dd_real numer_ddr = ddr_makei(succ_odds_ratio_numer);
+    const dd_real denom_ddr = ddr_makei(succ_odds_ratio_denom);
+    rate_mult_incr = ddr_accurate_div(numer_ddr, denom_ddr).x[0];
+    rate_mult_decr = ddr_accurate_div(denom_ddr, numer_ddr).x[0];
+  }
+  double succ = obs_succ;
+  double fail = obs_tot - obs_succ;
+  // Normalize: succ <= mode.
+  if (succ > fail * rate_mult_incr) {
+    obs_succ = obs_tot - obs_succ;
+    swap_f64(&succ, &fail);
+    swap_f64(&rate_mult_incr, &rate_mult_decr);
+    swap_i64(&succ_odds_ratio_numer, &succ_odds_ratio_denom);
+  }
+  const double first_inward_mult = fail * rate_mult_incr / (succ + 1);
+  if (!midp) {
+    // Might we be at the mode?
+    if (first_inward_mult <= 1 + 2 * k2m52) {
+      if (first_inward_mult < 1 - 2 * k2m52) {
+        *resultp = 0;
+        return 0;
+      }
+      uint64_t numer_hi;
+      uint64_t numer_lo = multiply64to128(obs_tot - obs_succ, succ_odds_ratio_numer, &numer_hi);
+      uint64_t denom_hi;
+      uint64_t denom_lo = multiply64to128(obs_succ + 1, succ_odds_ratio_denom, &denom_hi);
+      if ((denom_hi > numer_hi) || ((denom_hi == numer_hi) && (denom_lo >= numer_lo))) {
+        *resultp = 0;
+        return 0;
+      }
+    }
+  }
+  double lastp = 1;
+  double tailp = 1;
+  // Iterate outward to floating-point precision limit.
+  while (1) {
+    fail += 1;
+    lastp *= rate_mult_decr * succ / fail;
+    succ -= 1;
+    const double preaddp = tailp;
+    tailp += lastp;
+    if (tailp == preaddp) {
+      break;
+    }
+  }
+  // In the common case, where we're close enough to the mode that float64
+  // underflow/overflow isn't an issue, use the original algorithm: sum all
+  // center relative-likelihoods, sum far-tail relative-likelihoods to
+  // floating-point precision limit, return log(tailp / (tailp + centerp)).
+  //
+  // Unfortunately, an extremal rate (e.g. (2^63 - 2)/(2^63 - 1), the maximum
+  // possible permitted value) makes center-sum overflow possible much closer
+  // to the mode than is the case for the Fisher/HWE exact tests; 17 steps
+  // could be enough.  So instead of checking whether we're a constant number
+  // of steps from the mode, we compute a lower bound on the number of
+  // non-overflowing inward steps we can take from the log of the
+  // first-inward-step multiplier (subsequent steps have smaller multipliers).
+  succ = obs_succ;
+  fail = obs_tot - obs_succ;
+  const double ln_mult = log(first_inward_mult);
+  double overflow_steps_lower_bound = 0x7fffffff;
+  // log(DBL_MAX / 0x7fffffff) = 688.295...
+  if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
+    overflow_steps_lower_bound = 688.295 / ln_mult;
+  }
+  if (succ + overflow_steps_lower_bound > (fail - overflow_steps_lower_bound) * rate_mult_incr) {
+    dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
+    dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
+    double one_plus_scaled_eps = 1;
+    double centerp = 0;
+    lastp = 1;
+    while (1) {
+      succ += 1;
+      lastp *= rate_mult_incr * fail / succ;
+      fail -= 1;
+      // rate_mult_incr is off by up to 0.5 ULP, and we have two multiplies and
+      // a divide.
+      one_plus_scaled_eps += 2 * k2m52;
+      if (lastp < one_plus_scaled_eps) {
+        // TODO
+      }
+    }
+  }
+  // TODO
+  return 0;
+}
+
 #ifdef __cplusplus
 }
 #endif
