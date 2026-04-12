@@ -240,7 +240,7 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
   uint64_t denom_bound2 = 1 + denom_term_ct;
   const uint64_t numer_limb_req = MAXV(numer_bound1, numer_bound2);
   const uint64_t denom_limb_req = MAXV(denom_bound1, denom_bound2);
-  const uint64_t new_ffac_limb_req = DivUp(CeilPow2(max_ffac_size), kInt32PerLimb);
+  const uint64_t new_ffac_limb_req = MAXV(DivUp(CeilPow2(max_ffac_size), kInt32PerLimb), MAXV(numer_odds_limb_ct, denom_odds_limb_ct));
   const uint64_t generic_wkspace_limb_req = MAXV(numer_limb_req, denom_limb_req);
   if (unlikely(generic_wkspace_limb_req > UINT32_MAX)) {
     return 1;
