@@ -372,7 +372,7 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
 //   where p is the expected success rate.
 //
 // - starting_lnprobv_ddr is expected to either be initialized to
-//     log(succ_odds_ratio^obs_succ / (obs_succ! (obs_total - obs_succ)!)),
+//     log(succ_odds_ratio^obs_succ / (obs_succ! (obs_tot - obs_succ)!)),
 //   or have x[0] initialized to DBL_MAX to indicate that that calculation
 //   hasn't happened.  In the latter case, it may be set to the former value if
 //   that is needed in the calculation.
@@ -382,7 +382,7 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
 //   likelihood.
 //
 // - Error is returned iff malloc fails.
-BoolErr BinomCompare(int32_t obs_succ, int32_t obs_total, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t succ, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
+BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t succ, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
   // Binomial likelihood is
   //
   //        n!        k        n-k
@@ -398,16 +398,16 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_total, int64_t succ_odds_rati
   //
   // Thus, the likelihood ratio of interest is
   //
-  //   obs_succ! (obs_total - obs_succ)!                  succ - obs_succ
-  //   --------------------------------- * succ_odds_ratio
-  //       succ! (obs_total - succ)!
+  //   obs_succ! (obs_tot - obs_succ)!                  succ - obs_succ
+  //   ------------------------------- * succ_odds_ratio
+  //       succ! (obs_tot - succ)!
 
   uint32_t numer_factorial_args[2];
   numer_factorial_args[0] = obs_succ;
-  numer_factorial_args[1] = obs_total - obs_succ;
+  numer_factorial_args[1] = obs_tot - obs_succ;
   uint32_t denom_factorial_args[2];
   denom_factorial_args[0] = succ;
-  denom_factorial_args[1] = obs_total - succ;
+  denom_factorial_args[1] = obs_tot - succ;
 
   mp_limb_t* gmp_wkspace = nullptr;
   uintptr_t gmp_wkspace_limb_ct = 0;
@@ -447,7 +447,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   if (!midp) {
     // Might we be at the mode?
     if (first_inward_mult <= 1 + 2 * k2m52) {
-      if (first_inward_mult < 1 - 2 * k2m52) {
+      if (first_inward_mult <= 1 - 2 * k2m52) {
         *resultp = 0;
         return 0;
       }
@@ -494,6 +494,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
   }
+  int32_t tie_ct = 1;
   if (succ + overflow_steps_lower_bound > (fail - overflow_steps_lower_bound) * rate_mult_incr) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
@@ -508,9 +509,26 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
       // a divide.
       one_plus_scaled_eps += 2 * k2m52;
       if (lastp < one_plus_scaled_eps) {
-        // TODO
+        if (lastp <= 2 - one_plus_scaled_eps) {
+          tailp += lastp;
+          break;
+        }
+        // Near-tie.  True value of lastp can be greater than, equal to, or
+        // less than 1.
+        intptr_t cmp_result;
+        if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lastp))) {
+          return 1;
+        }
+        one_plus_scaled_eps = 1 + 3 * k2m52;
+        if (cmp_result <= 0) {
+          tailp += lastp;
+          tie_ct += (cmp_result == 0);
+          break;
+        }
       }
+      centerp += lastp;
     }
+    // TODO
   }
   // TODO
   return 0;
