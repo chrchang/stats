@@ -377,6 +377,9 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
 //   hasn't happened.  In the latter case, it may be set to the former value if
 //   that is needed in the calculation.
 //
+// - ln_odds_ratio_ddr is expected to either be initialized to log(odds_ratio),
+//   or have x[0] initialized to DBL_MAX, etc.
+//
 // - *cmp_resultp is set to positive value if succ has higher likelihood than
 //   obs_succ, 0 if identical likelihood, and negative value if lower
 //   likelihood.
@@ -424,25 +427,29 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     *resultp = midp? -kLn2 : 0;
     return 0;
   }
-  double rate_mult_incr = 1;
-  double rate_mult_decr = 1;
+  dd_real rate_mult_incr_ddr = ddr_maked(1);
+  dd_real rate_mult_decr_ddr = ddr_maked(1);
   if ((succ_odds_ratio_numer != 1) || (succ_odds_ratio_denom != 1)) {
     // make sure these numbers aren't off by more than 0.5 ULP, even when
     // numerator and/or denominator > 2^53.
     const dd_real numer_ddr = ddr_makei(succ_odds_ratio_numer);
     const dd_real denom_ddr = ddr_makei(succ_odds_ratio_denom);
-    rate_mult_incr = ddr_accurate_div(numer_ddr, denom_ddr).x[0];
-    rate_mult_decr = ddr_accurate_div(denom_ddr, numer_ddr).x[0];
+    rate_mult_incr_ddr = ddr_accurate_div(numer_ddr, denom_ddr);
+    rate_mult_decr_ddr = ddr_accurate_div(denom_ddr, numer_ddr);
   }
   double succ = obs_succ;
   double fail = obs_tot - obs_succ;
   // Normalize: succ <= mode.
-  if (succ > fail * rate_mult_incr) {
+  if (succ > fail * rate_mult_incr_ddr.x[0]) {
     obs_succ = obs_tot - obs_succ;
     swap_f64(&succ, &fail);
-    swap_f64(&rate_mult_incr, &rate_mult_decr);
     swap_i64(&succ_odds_ratio_numer, &succ_odds_ratio_denom);
+    const dd_real swaptmp = rate_mult_incr_ddr;
+    rate_mult_incr_ddr = rate_mult_decr_ddr;
+    rate_mult_decr_ddr = swaptmp;
   }
+  const double rate_mult_incr = rate_mult_incr_ddr.x[0];
+  const double rate_mult_decr = rate_mult_decr_ddr.x[0];
   const double first_inward_mult = fail * rate_mult_incr / (succ + 1);
   if (!midp) {
     // Might we be at the mode?
@@ -528,8 +535,28 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
       }
       centerp += lastp;
     }
-    // TODO
+    // Continue down tail to floating-point precision limit.
+    while (1) {
+      succ += 1;
+      lastp *= rate_mult_incr * fail / succ;
+      fail -= 1;
+      const double preaddp = tailp;
+      tailp += lastp;
+      if (tailp == preaddp) {
+        break;
+      }
+    }
+    const double denom = tailp + centerp;
+    if (midp) {
+      tailp -= tie_ct * 0.5;
+    }
+    *resultp = log(tailp / denom);
+    return 0;
   }
+  dd_real ln_odds_ratio_ddr = ddr_log(rate_mult_incr_ddr);
+  dd_real starting_lnprobv_ddr =
+    ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
+            ddr_add_lfacts(succ, fail));
   // TODO
   return 0;
 }
