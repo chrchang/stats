@@ -475,7 +475,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     }
   }
   double lastp = 1;
-  double tailp = 1;
+  double tailp = 1 - midp * 0.5;
   // Iterate outward to floating-point precision limit.
   while (1) {
     fail += 1;
@@ -514,12 +514,11 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // possible for this to round up to just obs_tot
   const double obs_totd = obs_tot;
   const double modal_succ = obs_totd * rate_mult_incr / (1 + rate_mult_incr);
-  int32_t tie_ct = 1;
   if (succ + overflow_steps_lower_bound > modal_succ) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
     double one_plus_scaled_eps = 1;
-    double centerp = 0;
+    double centerp = midp * 0.5;
     lastp = 1;
     while (1) {
       succ += 1;
@@ -542,7 +541,10 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
           tailp += lastp;
-          tie_ct += (cmp_result == 0);
+          if (midp && (cmp_result == 0)) {
+            tailp -= 0.5;
+            centerp += 0.5;
+          }
           break;
         }
       }
@@ -559,11 +561,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
         break;
       }
     }
-    const double denom = tailp + centerp;
-    if (midp) {
-      tailp -= tie_ct * 0.5;
-    }
-    *resultp = log(tailp / denom);
+    *resultp = log(tailp / (tailp + centerp));
     return 0;
   }
   dd_real ln_odds_ratio_ddr = ddr_log(rate_mult_incr_ddr);
@@ -593,12 +591,13 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // I see a scenario where this branch executes frequently...)
   //
   // The current heuristic starts by reflecting (smallest_evaluated_succ +
-  // succ) * 0.5 across the mode, performing a full log-likelihood check at the
-  // nearest valid point.  Hopefully we find that we're in (starting_lnprob -
-  // tolerance, starting_lnprob], so we're at or near a table that actually
-  // contributes to the tail-sum; unlike the Fisher's and HWE cases, we can't
-  // fix the tolerance at 62 * kLn2, but we can compute a value >= 53 * kLn2
-  // large enough to guarantee at least one point falls inside.
+  // succ) * 0.5 across the (continuous) mode, performing a full log-likelihood
+  // check at the nearest valid point.  Hopefully we find that we're in
+  // (starting_lnprob - tolerance, starting_lnprob], so we're at or near a
+  // table that actually contributes to the tail-sum; unlike the Fisher's and
+  // HWE cases, we can't fix the tolerance at 62 * kLn2, but we can compute a
+  // value >= 53 * kLn2 large enough to guarantee at least one point falls
+  // inside.
   //
   // If not, we jump again, using Newton's method.
   // If succ is too low (i.e. current log-likelihood is too high), when we
@@ -618,7 +617,6 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
   if (ddr_geqd(rate_mult_incr_ddr, obs_totd)) {
-    tailp -= midp * 0.5;
     *resultp = starting_lnprob + log(tailp);
     return 0;
   }
@@ -628,15 +626,31 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     succ = obs_totd;
   }
 
-  // obs_tot is past the integer mode, and |log(L(obs_tot) / L(obs_tot-1))| is
-  // the largest gap between adjacent log-likelihoods on this tail.  Set
+  // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
+  // largest gap between adjacent log-likelihoods on this tail.  Set
   // |lnprob_diff_min| >= this value.
-  double lnprob_diff_min = log(rate_mult_incr / obs_totd);
+  double lnprob_diff_min = log(rate_mult_incr / obs_totd) * (1 + kSmallEpsilon);
   if (lnprob_diff_min > -53 * kLn2) {
     lnprob_diff_min = -53 * kLn2;
   }
 
   while (1) {
+    fail = obs_totd - succ;
+    const dd_real lnprobv_ddr =
+      ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
+              ddr_add_lfacts(succ, fail));
+    const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
+    if (lnprob_diff >= k2m53) {
+      if (succ == obs_totd) {
+        *resultp = starting_lnprob + log(tailp);
+        return 0;
+      }
+      ;;;
+    } else if (lnprob_diff > lnprob_diff_min) {
+      lastp = exp(lnprob_diff);
+      break;
+    } else {
+    }
   }
 
   return 0;

@@ -68,7 +68,7 @@ BoolErr HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int3
 }
 
 // obs_hets + obs_hom1 + obs_hom2 assumed to be <2^31.
-BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t midp, double* resultp) {
+BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) {
   // This function implements an exact SNP test of Hardy-Weinberg
   // Equilibrium as described in Wigginton, JE, Cutler, DJ, and
   // Abecasis, GR (2005) A Note on Exact Tests of Hardy-Weinberg
@@ -128,7 +128,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
   }
   const int32_t rare_ct = 2 * obs_homr + obs_hets;
   if (rare_ct < 2) {
-    *resultp = midp? -kLn2 : 0;
+    *resultp = midp * (-kLn2);
     return 0;
   }
   // MAF: rare_ct / allele_ct
@@ -141,15 +141,16 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
   const double maf = rare_ct / allele_ctd;
   // possible todo: check whether this type of expression is worth rewriting as
   // e.g. prefer_fma(rare_ct, -maf, rare_ct)
-  const double modal_nhet = rare_ct * (1 - maf);
+  // 'c' in cmodal_nhet is for 'continuous', i.e. the mode if we extend the
+  // likelihood function to all reals in [0, sample_ct].
+  const double cmodal_nhet = rare_ct * (1 - maf);
   double hets = obs_hets;
   double homr = obs_homr;
   double homc = obs_homc;
   double lastp = 1;
-  double tailp = 1;
-  int32_t tie_ct = 1;
-  if (hets > modal_nhet) {
-    const double het_delta = hets - modal_nhet;
+  double tailp = 1 - midp * 0.5;
+  if (hets > cmodal_nhet) {
+    const double het_delta = hets - cmodal_nhet;
     // From Feb 2024 - Feb 2026, (except for the p=1 fast path) we always
     // computed starting log-likelihood.  Then, if it was high enough, we
     // proceeded with computing 1 - [sum of center likelihoods]; otherwise we
@@ -197,14 +198,14 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       homr = obs_homr;
       homc = obs_homc;
       dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-      double centerp = 0;
+      double centerp = midp * 0.5;
       // No need for hets > 1 check, lastp checks do what we need.
       while (1) {
         homr += 1;
         homc += 1;
         lastp *= (hets * (hets - 1)) / (4 * homr * homc);
         hets -= 2;
-        // Number of center tables is maximized with obs_hets - modal_nhet ~=
+        // Number of center tables is maximized with obs_hets - cmodal_nhet ~=
         // 344, obs_homr = 0, obs_homc and obs_hets both large.
         // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited
         // to ~53000 tables.  Each lastp update involves 4 operations which can
@@ -224,7 +225,10 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
           }
           if (cmp_result <= 0) {
             tailp += lastp;
-            tie_ct += (cmp_result == 0);
+            if (midp && (cmp_result == 0)) {
+              tailp -= 0.5;
+              centerp += 0.5;
+            }
             break;
           }
         }
@@ -245,11 +249,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
           break;
         }
       }
-      const double denom = tailp + centerp;
-      if (midp) {
-        tailp -= tie_ct * 0.5;
-      }
-      *resultp = log(tailp / denom);
+      *resultp = log(tailp / (tailp + centerp));
       return 0;
     }
     // starting_lnprobv_ddr is guaranteed to be negative for hets >= 4, and no
@@ -270,12 +270,12 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     // wait until I see a scenario where this branch executes frequently...)
     //
     // The current heuristic starts by reflecting (obs_homr + homr) * 0.5
-    // across the mode, performing a full log-likelihood check at an adjacent
-    // valid point.  Hopefully we find that we're in (starting_lnprob - 62 *
-    // kLn2, starting_lnprob], so we're at or near a table that actually
-    // contributes to the tail-sum.  (This window is chosen to be wide enough
-    // to guarantee that at least one point falls inside when sample_ct <
-    // 2^31.)
+    // across the (continuous) mode, performing a full log-likelihood check at
+    // an adjacent valid point.  Hopefully we find that we're in
+    // (starting_lnprob - 62 * kLn2, starting_lnprob], so we're at or near a
+    // table that actually contributes to the tail-sum.  (This window is chosen
+    // to be wide enough to guarantee that at least one point falls inside when
+    // sample_ct < 2^31.)
     //
     // If not, we jump again, using Newton's method.
     // If homr is too low (i.e. current log-likelihood is too high), when we
@@ -292,14 +292,14 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     // the middle of the interval.
 
     // hets moves twice as fast as homr.  So if we add
-    //   0.5 * (hets + obs_hets) - modal_nhet
-    // to 0.5 * (homr + obs_homr), that reflects homr across the mode.
+    //   0.5 * (hets + obs_hets) - cmodal_nhet
+    // to 0.5 * (homr + obs_homr), that reflects homr across the cmode.
     const double max_homr = S_CAST(double, rare_ct >> 1);
     {
-      const double delta = 0.5 * (hets + obs_hets) - modal_nhet;
+      const double delta = 0.5 * (hets + obs_hets) - cmodal_nhet;
       homr = 0.5 * (homr + obs_homr) + delta;
       // Round up (to guarantee we've actually moved to the other side of the
-      // mode) and clamp.
+      // cmode) and clamp.
       homr = ceil_smalleps_limit32(homr, max_homr);
     }
     // 'f' in lnprobf refers to fixed component of log-likelihood (unchanged
@@ -322,12 +322,9 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       // guaranteed to enter the "lastp < 2 - one_minus_scaled_eps" branch for
       // positive lnprob_diff.
       if (lnprob_diff >= k2m53) {
-        if (homr >= max_homr) {
+        if (homr == max_homr) {
           // All tables on this tail are larger than the starting table.  Exit.
           // (This is possible when obs_hom1 == obs_hom2 == 0.)
-          if (midp) {
-            tailp -= 0.5;
-          }
           *resultp = starting_lnprob + log(tailp);
           return 0;
         }
@@ -354,7 +351,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     }
     // Sum toward center, until lastp >= 1.  (No more risk of double-counting
     // the starting table, since we don't enter this branch at all unless the
-    // starting table is >= 172 steps from the mode.)
+    // starting table is >= 172 steps from the cmode.)
     //
     // lastp should be accurate to 3 ULP as we enter this loop (max 1.5 ULP
     // observed error from exp, tiny bit over 0.5 from lnprob_diff, we round up
@@ -382,7 +379,9 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       }
       if (cmp_result <= 0) {
         tailp += lastp;
-        tie_ct += (cmp_result == 0);
+        if (midp && (cmp_result == 0)) {
+          tailp -= 0.5;
+        }
       }
     }
     // Sum away from center, until sums stop changing.
@@ -401,14 +400,11 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       }
       hets -= 2;
     }
-    if (midp) {
-      tailp -= tie_ct * 0.5;
-    }
     *resultp = starting_lnprob + log(tailp);
     return 0;
   }
   // Same as above, just with directions flipped.
-  const double het_delta = modal_nhet - hets;
+  const double het_delta = cmodal_nhet - hets;
   if ((!midp) && (het_delta < 2.0)) {
     // Fast path for p=1.
     if ((4LL * obs_homr) * obs_homc <= (obs_hets + 2LL) * (obs_hets + 1LL)) {
@@ -435,7 +431,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     homr = obs_homr;
     homc = obs_homc;
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-    double centerp = 0;
+    double centerp = midp * 0.5;
     // No need for hets > 1 check, lastp checks do what we need.
     while (1) {
       hets += 2;
@@ -458,7 +454,10 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         }
         if (cmp_result <= 0) {
           tailp += lastp;
-          tie_ct += (cmp_result == 0);
+          if (midp && (cmp_result == 0)) {
+            tailp -= 0.5;
+            centerp += 0.5;
+          }
           break;
         }
       }
@@ -476,11 +475,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         break;
       }
     }
-    const double denom = tailp + centerp;
-    if (midp) {
-      tailp -= tie_ct * 0.5;
-    }
-    *resultp = log(tailp / denom);
+    *resultp = log(tailp / (tailp + centerp));
     return 0;
   }
   const double c_minus_r = homc - homr;
@@ -489,10 +484,10 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
             ddr_add3_lfacts(obs_hets, obs_homr, obs_homc));
   // Jump to other tail.
   {
-    const double delta = modal_nhet - 0.5 * (hets + obs_hets);
+    const double delta = cmodal_nhet - 0.5 * (hets + obs_hets);
     homr = 0.5 * (homr + obs_homr) - delta;
     // Round down (to guarantee we've actually moved to the other side of the
-    // mode) and clamp.
+    // cmode) and clamp.
     homr = S_CAST(int32_t, homr);
     if (homr < 0) {
       homr = 0;
@@ -513,12 +508,9 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
               ddr_add3_lfacts(hets, homr, homc));
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprob_diff >= k2m53) {
-      if (homr <= 0) {
+      if (homr == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        if (midp) {
-          tailp -= 0.5;
-        }
         *resultp = starting_lnprob + log(tailp);
         return 0;
       }
@@ -558,7 +550,9 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     }
     if (cmp_result <= 0) {
       tailp += lastp;
-      tie_ct += (cmp_result == 0);
+      if (midp && (cmp_result == 0)) {
+        tailp -= 0.5;
+      }
     }
   }
   // Sum away from center, until sums stop changing.
@@ -576,9 +570,6 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     }
     homr -= 1;
     homc -= 1;
-  }
-  if (midp) {
-    tailp -= tie_ct * 0.5;
   }
   *resultp = starting_lnprob + log(tailp);
   return 0;
@@ -1112,7 +1103,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   // from the calculation earlier.  Returns *out_of_eqp=0 if these counts are
   // close enough to Hardy-Weinberg equilibrium, 1 otherwise.
   //
-  // Assumes ln_thresh < -708, otherwise the |curr_hets - modal_nhet| < 344
+  // Assumes ln_thresh < -708, otherwise the |curr_hets - cmodal_nhet| < 344
   // early-exit doesn't work.  (possible todo: make the 344 constant a function
   // of ln_thresh, and set it closer to optimally.)
   //
@@ -1131,11 +1122,11 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   const int32_t sample_ct = obs_hom1 + obs_hom2 + obs_hets;
   const double allele_ctd = S_CAST(double, sample_ct * 2LL);
   const double maf = rare_ct / allele_ctd;
-  const double modal_nhet = rare_ct * (1 - maf);
+  const double cmodal_nhet = rare_ct * (1 - maf);
   double hets = obs_hets;
   // Change this to "rare_ct < 2" if ln_thresh restriction is being loosened
   // (to e.g. compare results against HweThresh()).
-  if (fabs(hets - modal_nhet) < 344.0) {
+  if (fabs(hets - cmodal_nhet) < 344.0) {
     *out_of_eqp = 0;
     return 0;
   }
@@ -1171,7 +1162,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   const double tail_thresh = exp(ln_thresh - starting_lnprob);
   double tailp = 1 - midp * 0.5;
   double lastp = 1;
-  if (hets > modal_nhet) {
+  if (hets > cmodal_nhet) {
     // No center-sum (or p=1) code path, since it doesn't make sense to choose
     // a HWE threshold that makes these relevant; we should have already
     // returned 0.
@@ -1192,7 +1183,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
       homc -= 1;
     }
     {
-      const double delta = 0.5 * (hets + obs_hets) - modal_nhet;
+      const double delta = 0.5 * (hets + obs_hets) - cmodal_nhet;
       homr = 0.5 * (homr + obs_homr) + delta;
       homr = ceil_smalleps_limit32(homr, max_homr);
     }
@@ -1204,7 +1195,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
                 ddr_add3_lfacts(hets, homr, homc));
       const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
       if (lnprob_diff >= k2m53) {
-        if (homr >= max_homr) {
+        if (homr == max_homr) {
           *out_of_eqp = 1;
           return 0;
         }
@@ -1308,7 +1299,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     }
   }
   {
-    const double delta = modal_nhet - 0.5 * (hets + obs_hets);
+    const double delta = cmodal_nhet - 0.5 * (hets + obs_hets);
     homr = 0.5 * (homr + obs_homr) - delta;
     homr = S_CAST(int32_t, homr);
     if (homr < 0) {
