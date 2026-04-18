@@ -422,6 +422,10 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
 // obs_tot assumed to be <2^31.  succ_odds_ratio_numer and
 // succ_odds_ratio_denom must be positive, reduced to lowest terms, have sum <
 // 2^63, and represent p/(1-p).
+// Only the main loops are speed-optimized for now.  There is some setup
+// overhead for odds_ratio != 1 which is currently written to avoid
+// proliferation of special cases, but can be easily accelerated if we know
+// e.g. numerator and denominator < 2^31.
 BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, uint32_t midp, double* resultp) {
   if (!obs_tot) {
     *resultp = midp? -kLn2 : 0;
@@ -440,6 +444,8 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   double succ = obs_succ;
   double fail = obs_tot - obs_succ;
   // Normalize: succ <= mode.
+  // (even if there is rounding error, this is enough to guarantee that succ-1
+  // has lower likelihood than succ.)
   if (succ > fail * rate_mult_incr_ddr.x[0]) {
     obs_succ = obs_tot - obs_succ;
     swap_f64(&succ, &fail);
@@ -493,16 +499,23 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // of steps from the mode, we compute a lower bound on the number of
   // non-overflowing inward steps we can take from the log of the
   // first-inward-step multiplier (subsequent steps have smaller multipliers).
+  const double smallest_evaluated_succ = succ;
   succ = obs_succ;
   fail = obs_tot - obs_succ;
   const double ln_mult = log(first_inward_mult);
   double overflow_steps_lower_bound = 0x7fffffff;
-  // log(DBL_MAX / 0x7fffffff) = 688.295...
+  // log(DBL_MAX / (2^31 - 1)) = 688.295...
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
   }
+  // rate_mult_incr * (tot - modal_succ) / modal_succ = 1
+  // rate_mult_incr * (tot - modal_succ) = modal_succ
+  // rate_mult_incr * tot = modal_succ * (1 + rate_mult_incr)
+  // possible for this to round up to just obs_tot
+  const double obs_totd = obs_tot;
+  const double modal_succ = obs_totd * rate_mult_incr / (1 + rate_mult_incr);
   int32_t tie_ct = 1;
-  if (succ + overflow_steps_lower_bound > (fail - overflow_steps_lower_bound) * rate_mult_incr) {
+  if (succ + overflow_steps_lower_bound > modal_succ) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
     double one_plus_scaled_eps = 1;
@@ -557,7 +570,66 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
             ddr_add_lfacts(succ, fail));
-  // TODO
+  dd_real lnfail_ddr = {{-_ddr_log2.x[0], -_ddr_log2.x[1]}};
+  if (!ddr_is_zero(ln_odds_ratio_ddr)) {
+    // probable todo: this is a bit redundant with earlier initialization
+    const dd_real fail_ddr = ddr_makei(succ_odds_ratio_denom);
+    const dd_real succ_plus_fail_ddr = ddr_makeu64(S_CAST(uint64_t, succ_odds_ratio_numer) + S_CAST(uint64_t, succ_odds_ratio_denom));
+    lnfail_ddr = ddr_log(ddr_accurate_div(fail_ddr, succ_plus_fail_ddr));
+  }
+  const dd_real lnprobf_ddr =
+    ddr_add(ddr_lfact(obs_totd), ddr_muld(lnfail_ddr, obs_totd));
+  const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
+
+  // Now we want to jump near the other tail, without evaluating that many
+  // contingency table log-likelihoods along the way.
+  //
+  // Each full log-likelihood evaluation requires 2 ddr_lfact() calls.  Since
+  // they are now performed with extra precision, they require hundreds of
+  // floating-point operations, so we want to limit ourselves to 1-2 full
+  // evaluations most of the time.  (Possible todo: use lower-accuracy Lfact()
+  // to jump around, followed by ddr_lfact() when exiting the loop.  Should be
+  // an easy performance win, but there's a complexity cost so I'll wait until
+  // I see a scenario where this branch executes frequently...)
+  //
+  // The current heuristic starts by reflecting (smallest_evaluated_succ +
+  // succ) * 0.5 across the mode, performing a full log-likelihood check at the
+  // nearest valid point.  Hopefully we find that we're in (starting_lnprob -
+  // tolerance, starting_lnprob], so we're at or near a table that actually
+  // contributes to the tail-sum; unlike the Fisher's and HWE cases, we can't
+  // fix the tolerance at 62 * kLn2, but we can compute a value >= 53 * kLn2
+  // large enough to guarantee at least one point falls inside.
+  //
+  // If not, we jump again, using Newton's method.
+  // If succ is too low (i.e. current log-likelihood is too high), when we
+  // increase succ by 1, the likelihood gets multiplied by
+  //   rate_mult_incr * fail / (succ+1)
+  // i.e. we're adding the logarithm of this value to the log-likelihood.
+  // If succ is too high, when we decrease succ by 1, the likelihood gets
+  // multiplied by
+  //   rate_mult_decr * succ / (fail+1)
+  // We use the log of the first expression as the Newton's method f'(x) when
+  // we're jumping to higher succ, and the negative-log of the second
+  // expression when we're jumping to lower homr.
+  // f''(x) is always negative, so we can aim for starting_lnprob instead of
+  // the middle of the interval.
+
+  // L(obs_tot) / L(obs_tot-1) = rate_mult_incr * 1 / obs_tot
+  // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
+  // the remaining logic simpler.
+  if (ddr_geqd(rate_mult_incr_ddr, obs_totd)) {
+    tailp -= midp * 0.5;
+    *resultp = starting_lnprob + log(tailp);
+    return 0;
+  }
+
+  // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
+  // largest gap between adjacent log-likelihoods on this tail.  Set
+  // |lnprob_diff_min| >= this value.
+  double lnprob_diff_min = log(rate_mult_incr / obs_totd);
+  if (lnprob_diff_min < -53 * kLn2) {
+    lnprob_diff_min = -53 * kLn2;
+  }
   return 0;
 }
 

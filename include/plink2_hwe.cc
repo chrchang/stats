@@ -232,7 +232,8 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       }
       // Continue down tail to floating-point precision limit.
       // No need for hets > 1 check, tailp == preaddp check does what we need
-      // (even when hets is already -1 when entering the loop).
+      // (even when hets is already -1 when entering the loop: in that case
+      // lastp is 0).
       while (1) {
         homr += 1;
         homc += 1;
@@ -269,7 +270,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
     // wait until I see a scenario where this branch executes frequently...)
     //
     // The current heuristic starts by reflecting (obs_homr + homr) * 0.5
-    // across the mode, performing a full log-likelihood check at the nearest
+    // across the mode, performing a full log-likelihood check at an adjacent
     // valid point.  Hopefully we find that we're in (starting_lnprob - 62 *
     // kLn2, starting_lnprob], so we're at or near a table that actually
     // contributes to the tail-sum.  (This window is chosen to be wide enough

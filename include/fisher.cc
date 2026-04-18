@@ -199,7 +199,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
   // I see a scenario where this branch executes frequently...)
   //
   // The current heuristic starts by reflecting (obs_m21 + m21) * 0.5 across
-  // the mode, performing a full log-likelihood check at the nearest valid
+  // the mode, performing a full log-likelihood check at an adjacent valid
   // point.  (It is convenient to focus on m21 here, since m21=0 corresponds to
   // the outermost table on this tail.)  Hopefully we find that we're in
   // (starting_lnprob - 62 * kLn2, starting_lnprob], so we're at or near a
