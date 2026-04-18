@@ -623,13 +623,22 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     return 0;
   }
 
-  // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
-  // largest gap between adjacent log-likelihoods on this tail.  Set
+  succ = 2 * modal_succ - succ;
+  if (succ > obs_totd) {
+    succ = obs_totd;
+  }
+
+  // obs_tot is past the integer mode, and |log(L(obs_tot) / L(obs_tot-1))| is
+  // the largest gap between adjacent log-likelihoods on this tail.  Set
   // |lnprob_diff_min| >= this value.
   double lnprob_diff_min = log(rate_mult_incr / obs_totd);
-  if (lnprob_diff_min < -53 * kLn2) {
+  if (lnprob_diff_min > -53 * kLn2) {
     lnprob_diff_min = -53 * kLn2;
   }
+
+  while (1) {
+  }
+
   return 0;
 }
 

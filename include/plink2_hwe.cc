@@ -300,10 +300,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
       homr = 0.5 * (homr + obs_homr) + delta;
       // Round up (to guarantee we've actually moved to the other side of the
       // mode) and clamp.
-      homr = ceil32_smalleps(homr);
-      if (homr > max_homr) {
-        homr = max_homr;
-      }
+      homr = ceil_smalleps_limit32(homr, max_homr);
     }
     // 'f' in lnprobf refers to fixed component of log-likelihood (unchanged
     // when rare_ct and sample_ct are held constant), 'v' refers to variable
@@ -340,7 +337,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         // This may overshoot.  But the function is guaranteed to terminate
         // because we never overshoot (and we do always make progress on each
         // step) once we're on the other side.
-        homr += ceil64_smalleps(-lnprob_diff / ll_deriv);
+        homr += ceil_smalleps(-lnprob_diff / ll_deriv);
         if (homr > max_homr) {
           homr = max_homr;
         }
@@ -526,7 +523,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t mi
         return 0;
       }
       const double ll_deriv = log(4 * homr * homc / ((hets + 2) * (hets + 1)));
-      homr -= ceil64_smalleps(-lnprob_diff / ll_deriv);
+      homr -= ceil_smalleps(-lnprob_diff / ll_deriv);
       if (homr < 0) {
         homr = 0;
       }
@@ -1197,10 +1194,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     {
       const double delta = 0.5 * (hets + obs_hets) - modal_nhet;
       homr = 0.5 * (homr + obs_homr) + delta;
-      homr = ceil32_smalleps(homr);
-      if (homr > max_homr) {
-        homr = max_homr;
-      }
+      homr = ceil_smalleps_limit32(homr, max_homr);
     }
     while (1) {
       hets = rare_ct - homr * 2;
@@ -1215,7 +1209,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
           return 0;
         }
         const double ll_deriv = log(hets * (hets - 1) / (4 * (homr + 1) * (homc + 1)));
-        homr += ceil64_smalleps(-lnprob_diff / ll_deriv);
+        homr += ceil_smalleps(-lnprob_diff / ll_deriv);
         if (homr > max_homr) {
           homr = max_homr;
         }
@@ -1334,7 +1328,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
         return 0;
       }
       const double ll_deriv = log(4 * homr * homc / ((hets + 2) * (hets + 1)));
-      homr -= ceil64_smalleps(-lnprob_diff / ll_deriv);
+      homr -= ceil_smalleps(-lnprob_diff / ll_deriv);
       if (homr < 0) {
         homr = 0;
       }

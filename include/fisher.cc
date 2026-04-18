@@ -272,7 +272,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      m21 -= ceil64_smalleps(-lnprob_diff / ll_deriv);
+      m21 -= ceil_smalleps(-lnprob_diff / ll_deriv);
       if (m21 < 0) {
         m21 = 0;
       }
@@ -626,7 +626,7 @@ BoolErr Fisher23LnFirstLine(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
             } else {
               *orig_base_probl_ptr = 0;
               *orig_base_lnprobl_ptr = lnprob_diff;
-              *orig_base_epsl_ptr = ceil64_smalleps(lnprob_diff) * k2m52;
+              *orig_base_epsl_ptr = ceil_smalleps(lnprob_diff) * k2m52;
             }
             return 0;
           }
@@ -635,7 +635,7 @@ BoolErr Fisher23LnFirstLine(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
           // This may overshoot.  But the function is guaraneed to terminate
           // because we never overshoot (and we do always make progress on each
           // step) once we're on the other side.
-          m22 -= ceil64_smalleps(lnprob_diff / ll_deriv);
+          m22 -= ceil_smalleps(lnprob_diff / ll_deriv);
           if (m22 < min_m22) {
             m22 = min_m22;
           }
@@ -802,13 +802,13 @@ BoolErr Fisher23LnFirstLine(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
           } else {
             *orig_base_probr_ptr = 0;
             *orig_base_lnprobr_ptr = lnprob_diff;
-            *orig_base_epsr_ptr = ceil64_smalleps(lnprob_diff) * k2m52;
+            *orig_base_epsr_ptr = ceil_smalleps(lnprob_diff) * k2m52;
           }
           return 0;
         }
         // Derivative is w.r.t. m21.
         const double ll_deriv = log((m11 + 1) * (m22 + 1) / (m12 * m21));
-        m21 -= ceil64_smalleps(lnprob_diff / ll_deriv);
+        m21 -= ceil_smalleps(lnprob_diff / ll_deriv);
         if (m21 < min_m21) {
           m21 = min_m21;
         }
@@ -983,7 +983,7 @@ BoolErr Fisher23LnPTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint3
           *base_probp = 0;
           const double last_lnp = log(lastp);
           *base_lnprobp = last_lnp;
-          *base_epsp = cur_eps + ceil64_smalleps(last_lnp) * k2m52;
+          *base_epsp = cur_eps + ceil_smalleps(last_lnp) * k2m52;
         }
         return 0;
       }
