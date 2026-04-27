@@ -45,6 +45,12 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
   //   (obs_m11+j)! (obs_m12-j)! (obs_m21-j)! (obs_m22+j)!
   //
   // where j=m22_incr.
+  //
+  // Note that HWE kind of maps to this, via
+  //   m11 := obs_hets*0.5
+  //   m12 := obs_hom1
+  //   m21 := obs_hom2
+  //   m22 := (obs_hets-1)*0.5
   uint32_t numer_factorial_args[4];
   numer_factorial_args[0] = obs_m11;
   numer_factorial_args[1] = obs_m12;
@@ -69,7 +75,7 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
 // int <-> floating-point conversions.  (Yes, uint32 -> float64 should be fine
 // on 64-bit systems, but we may as well write this to also be efficient on
 // 32-bit systems when there's no real drawback to doing so.)
-BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t midp, double* resultp) {
+BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, double* resultp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
   // spurious index differences between Fisher22 and Fisher23.
@@ -99,7 +105,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
   double m21 = obs_m21;
   double m22 = obs_m22;
   double lastp = 1;
-  double tailp = 1;
+  double tailp = 1 - 0.5 * midp;
   while (1) {
     m12 += 1;
     m21 += 1;
@@ -123,7 +129,6 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
   //   ((172^172) / 172!)^4 ~= 5.3e+292
   // which leaves enough headroom to accumulate the rest of the center-sum and
   // represent intermediate values without overflowing.
-  int32_t tie_ct = 1;
   if ((obs_m11 + 172LL) * (obs_m22 + 172LL) >= (obs_m12 - 172LL) * (obs_m21 - 172LL)) {
     lastp = 1;
     m11 = obs_m11;
@@ -131,7 +136,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
     m21 = obs_m21;
     m22 = obs_m22;
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-    double centerp = 0;
+    double centerp = 0.5 * midp;
     while (1) {
       m11 += 1;
       m22 += 1;
@@ -158,7 +163,10 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
         }
         if (cmp_result <= 0) {
           tailp += lastp;
-          tie_ct += (cmp_result == 0);
+          if (midp && (cmp_result == 0)) {
+            tailp -= 0.5;
+            centerp += 0.5;
+          }
           break;
         }
       }
@@ -177,11 +185,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
         break;
       }
     }
-    const double denom = tailp + centerp;
-    if (midp) {
-      tailp -= tie_ct * 0.5;
-    }
-    *resultp = log(tailp / denom);
+    *resultp = log(tailp / (tailp + centerp));
     return 0;
   }
   dd_real starting_lnprobv_ddr =
@@ -314,7 +318,9 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
     }
     if (cmp_result <= 0) {
       tailp += lastp;
-      tie_ct += (cmp_result == 0);
+      if (midp && (cmp_result == 0)) {
+        tailp -= 0.5;
+      }
     }
   }
   // Sum away from center, until sums stop changing.
@@ -334,9 +340,6 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
     }
     m12 -= 1;
     m21 -= 1;
-  }
-  if (midp) {
-    tailp -= tie_ct * 0.5;
   }
   *resultp = starting_lnprob + log(tailp);
   return 0;
