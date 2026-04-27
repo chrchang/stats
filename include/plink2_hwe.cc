@@ -210,7 +210,11 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
         // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited
         // to ~53000 tables.  Each lastp update involves 4 operations which can
         // each introduce up to 0.5 ULP relative error under the default
-        // rounding mode.
+        // rounding mode.  One ULP <= 2^{-52};
+        //   (1 + 2^{-52})^k < 1 + (k+1)2^{-52}
+        // for k < tens of millions, so in most cases we can safely add
+        // error-bounds together as long as we add an extra 2^{-52} at the
+        // beginning.
         if (lastp < 1 + 53000 * 2 * k2m52) {
           if (lastp <= 1 - 53000 * 2 * k2m52) {
             tailp += lastp;
@@ -440,8 +444,8 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
       homc -= 1;
       // If we're 172 steps from the center, number of center tables is limited
       // to ~2*172 = 344, when obs_homr ~= obs_homc.
-      if (lastp < 1 + 344 * 2 * k2m52) {
-        if (lastp <= 1 - 344 * 2 * k2m52) {
+      if (lastp < 1 + (344 * 2 + 1) * k2m52) {
+        if (lastp <= 1 - (344 * 2 + 1) * k2m52) {
           tailp += lastp;
           break;
         }
@@ -638,7 +642,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
   // be <= 1 if it's in the tail.
   const double center_div_tail_thresh = (1 - pval_thresh) / pval_thresh;
   const double centerp_exit_thresh = u31tod(1 + (rare_copies >> 1)) * (center_div_tail_thresh * kExactTestBias);
-  double scaled_one_plus_eps = kExactTestBias;
+  double scaled_one_plus_eps = kExactTestBias * (1 + k2m52);
 
   // Expected het count:
   //   2 * rarefreq * (1 - rarefreq) * genotypes
@@ -892,7 +896,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
   double tailp2 = 0;
   const double center_div_tail_thresh = (1 - pval_thresh) / pval_thresh;
   const double centerp_exit_thresh = u31tod(1 + (rare_copies >> 1)) * (center_div_tail_thresh * kExactTestBias);
-  double scaled_one_plus_eps = kExactTestBias;
+  double scaled_one_plus_eps = kExactTestBias * (1 + k2m52);
   if (obs_hets * genotypes2 > rare_copies * (genotypes2 - rare_copies)) {
     if (obs_hets < 2) {
       *out_of_eqp = 0;
