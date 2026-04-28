@@ -1023,6 +1023,7 @@ BoolErr Fisher23LnPTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint3
     m21_tail = m21;
     m22_tail = m22;
     const double lastp_tail = lastp;
+    uint32_t tie_ct_incr = 0;
     while (1) {
       if (lastp > 1 - cur_eps) {
         if (lastp >= 1 + cur_eps) {
@@ -1036,22 +1037,23 @@ BoolErr Fisher23LnPTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint3
         if (cmp_result > 0) {
           break;
         }
-        *tie_ctp += (cmp_result == 0);
+        tie_ct_incr += (cmp_result == 0);
       }
       total += lastp;
       m11 += 1;
       m22 += 1;
       const double prob_mult = m12 * m21 / (m11 * m22);
       if (prob_mult <= 1 + 2 * k2m52) {
-        if (prob_mult < 1 - 2 * k2m52) {
-          *center_is_emptyp = 1;
-          return 0;
-        }
         const int64_t m11_i = S_CAST(int32_t, m11);
         const int64_t m12_i = S_CAST(int32_t, m12);
         const int64_t m21_i = S_CAST(int32_t, m21);
         const int64_t m22_i = S_CAST(int32_t, m22);
-        if (m12_i * m21_i <= m11_i * m22_i) {
+        const int64_t prob_mult_numer = m12_i * m21_i;
+        const int64_t prob_mult_denom = m11_i * m22_i;
+        if (prob_mult_numer <= prob_mult_denom) {
+          if (tie_ct_incr) {
+            *tie_ctp += tie_ct_incr + (prob_mult_numer == prob_mult_denom);
+          }
           *center_is_emptyp = 1;
           return 0;
         }
@@ -1062,6 +1064,7 @@ BoolErr Fisher23LnPTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint3
       cur_eps += 2 * k2m52;
     }
     *base_probp = lastp;
+    *tie_ctp += tie_ct_incr;
     lastp = lastp_tail;
   }
   *base_epsp = cur_eps;
