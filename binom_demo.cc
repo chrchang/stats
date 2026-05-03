@@ -35,12 +35,13 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   double value = frexp(dxx, &pow);
   int64_t numer = S_CAST(int64_t, value * S_CAST(double, 1LL << 53));
   int rshift = ctzu64(numer);
-  pow += rshift;
-  if (pow < -62) {
+  pow += 53 - rshift;
+  if (pow > 62) {
     return 1;
   }
+  assert(pow >= 0);
   *numerp = numer >> rshift;
-  *denomp = ldexp(1.0, pow);
+  *denomp = 1LL << S_CAST(uint32_t, pow);
   return 0;
 }
 
@@ -81,7 +82,7 @@ int main(int argc, char** argv) {
           goto main_ret_MALFORMED_INPUT;
         }
         double logp;
-        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom, midp, &logp))) {
+        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom - rate_numer, midp, &logp))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
@@ -161,7 +162,7 @@ int main(int argc, char** argv) {
           goto main_ret_MALFORMED_INPUT;
         }
         double logp;
-        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom, midp, &logp))) {
+        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom - rate_numer, midp, &logp))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
