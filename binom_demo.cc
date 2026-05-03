@@ -31,17 +31,29 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   if ((dxx <= 0.0) || (!(dxx < 1.0))) {
     return 1;
   }
-  int pow;
-  double value = frexp(dxx, &pow);
+  int neg_denom_pow;
+  double value = frexp(dxx, &neg_denom_pow);
   int64_t numer = S_CAST(int64_t, scalbn(value, 53));
-  int rshift = ctzu64(numer);
-  pow = 53 - rshift - pow;
-  if (pow > 62) {
-    return 1;
+  uint32_t rshift = ctzu64(numer);
+  numer = numer >> rshift;
+  uint32_t denom_pow = 53 - rshift - neg_denom_pow;
+  if (denom_pow > 62) {
+    uint32_t extra_rshift = denom_pow - 62;
+    // tolerate dropping down to float32 accuracy (29 fewer mantissa bits).
+    if (rshift + extra_rshift > 29) {
+      return 1;
+    }
+    numer = numer >> extra_rshift;
+    if (numer == 0) {
+      return 1;
+    }
+    // numer may now be even, reduce to lowest terms.
+    rshift = ctzu64(numer);
+    numer = numer >> rshift;
+    denom_pow = 62 - rshift;
   }
-  assert(pow >= 0);
-  *numerp = numer >> rshift;
-  *denomp = 1LL << S_CAST(uint32_t, pow);
+  *numerp = numer;
+  *denomp = 1LL << denom_pow;
   return 0;
 }
 
