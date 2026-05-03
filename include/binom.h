@@ -24,6 +24,8 @@ namespace plink2 {
 
 BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp);
 
+double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp);
+
 #ifdef __cplusplus
 }
 #endif

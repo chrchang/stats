@@ -371,13 +371,17 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
     // leftward until we either know the p-value > 1 - 2^{-54} (at which point
     // we return 0), or remaining left likelihoods are smaller than the
     // precision limit.
-    double right_sum = m12 * m21 / ((m11 + 1) * (m22 + 1));
+    const double first_right_mult = m12 * m21 / ((m11 + 1) * (m22 + 1));
     // r + r^2 + ... = r / (1-r)
-    // const double right_upper_bound = right_sum / (1 - right_sum);
+    const double right_upper_bound = 0.5 * midp + first_right_mult / (1 - first_right_mult);
+    if (right_upper_bound == 0.0) {
+      // p-value is exactly 1 when m12*m21==0 and midp is false
+      return 0;
+    }
 
     // Rescale our starting lastp so that we overflow to INFINITY when we'd
     // want to early-exit and return 0; this saves us a comparison in the loop.
-    const double left_rescale = (DBL_MAX / (1LL << 54)) * (1 - right_sum) / right_sum;
+    const double left_rescale = (DBL_MAX / (1LL << 54)) / right_upper_bound;
     double lastp = left_rescale;
     double left_sum = left_rescale;
     while (1) {
@@ -398,11 +402,12 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
     left_sum /= left_rescale;
 
     // Now compute the right-sum to the precision limit.
+    double right_sum = first_right_mult;
     m11 = obs_m11 + 1.0;
     m12 = obs_m12 - 1;
     m21 = obs_m21 - 1;
     m22 = obs_m22 + 1;
-    lastp = right_sum;
+    lastp = first_right_mult;
     while (1) {
       m11 += 1;
       m22 += 1;
@@ -415,6 +420,8 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
         break;
       }
     }
+    // For one-sided test, slightly more convenient to exclude midp term from
+    // left_sum and right_sum since it just cancels out in denom
     return log1p((-0.5 * midp - right_sum) / (right_sum + left_sum));
   }
   // We're to the left of the mode, and are responsible for tiny p-values.
@@ -473,7 +480,7 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
             ddr_lfact(mxx));
   const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
   double lastp = 1;
-  double left_sum = 1;
+  double left_sum = 1 - 0.5 * midp;
   while (1) {
     m12 += 1;
     m21 += 1;
@@ -486,7 +493,7 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       break;
     }
   }
-  return starting_lnprob + log(left_sum - 0.5 * midp);
+  return starting_lnprob + log(left_sum);
 }
 
 // Switch between log- and regular representations at kSwitchThresh.

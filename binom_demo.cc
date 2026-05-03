@@ -5,16 +5,6 @@
 #include <errno.h>
 #include <string.h>
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
-double binom_1sided(int32_t succ, int32_t obs, double rate);
-
-#if defined(__cplusplus)
-}
-#endif
-
 #ifdef __cplusplus
 namespace plink2 {
 #endif
@@ -176,59 +166,68 @@ int main(int argc, char** argv) {
         fputs("Error: # successes > # observations.\n", stderr);
         goto main_ret_INVALID_CMDLINE;
       }
+      double logp;
       if (argc == 4) {
         int64_t rate_numer;
         int64_t rate_denom;
         if (unlikely(ParseProbFrac(argv[3], &rate_numer, &rate_denom))) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
-          goto main_ret_MALFORMED_INPUT;
+          goto main_ret_INVALID_CMDLINE;
         }
-        double logp;
         if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom - rate_numer, midp, &logp))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
-        if (midp) {
-          fputs("mid", stdout);
-        }
-        fputs("p-value: ", stdout);
-        char buf[80];
-        char* write_iter = lntoa_g(logp, buf);
-        memcpy_k2(write_iter, "\n");
-        fputs(buf, stdout);
       } else {
-        double rate;
-        if (unlikely((sscanf(argv[3], "%lg", &rate) != 1) || (rate <= 0) || (rate >= 1))) {
-          fprintf(stderr, "Error: Invalid expected success rate '%s'.\n", argv[3]);
-          goto main_ret_INVALID_CMDLINE;
+        double succ_odds_ratio;
+        if (strchr(argv[3], '/')) {
+          int64_t rate_numer;
+          int64_t rate_denom;
+          if (unlikely(ParseProbFrac(argv[3], &rate_numer, &rate_denom))) {
+            fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
+            goto main_ret_INVALID_CMDLINE;
+          }
+          succ_odds_ratio = u63tod(rate_numer) / u63tod(rate_denom - rate_numer);
+        } else {
+          double rate;
+          if (unlikely((sscanf(argv[3], "%lg", &rate) != 1) || (!(rate > 0.0)) || (1 - rate <= 0.0))) {
+            fprintf(stderr, "Error: Invalid expected success rate '%s'.\n", argv[3]);
+            goto main_ret_INVALID_CMDLINE;
+          }
+          succ_odds_ratio = rate / (1 - rate);
         }
         if (unlikely(argv[4][1] || ((argv[4][0] != '+') && (argv[4][0] != '-')))) {
           fputs("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n", stderr);
           goto main_ret_INVALID_CMDLINE;
         }
-        if (unlikely(midp)) {
-          fputs("Error: 1-sided demo does not currently support mid-p adjustment.\n", stderr);
-          goto main_ret_INVALID_CMDLINE;
-        }
-        double p_value;
-        if (argv[4][0] == '+') {
-          p_value = binom_1sided(obs - succ, obs, 1 - rate);
-        } else {
-          p_value = binom_1sided(succ, obs, rate);
-        }
-        printf("P-value: %g\n", p_value);
+        logp = BinomOneSidedLnP(succ, obs, succ_odds_ratio, (argv[4][0] == '+'), midp);
+        fputs("One-sided ", stdout);
       }
+      if (midp) {
+        fputs("mid", stdout);
+      }
+      fputs("p-value: ", stdout);
+      char buf[80];
+      char* write_iter = lntoa_g(logp, buf);
+      memcpy_k2(write_iter, "\n");
+      fputs(buf, stdout);
     } else if (argc != 2) {
       fputs(
 "Binomial test                                 https://github.com/chrchang/stats\n"
 "(C) 2013-2026 Christopher Chang     GNU Lesser General Public License version 3\n\n"
-"  binom_demo <succ ct> <total obs ct> <expected succ rate> ['+' | '-' | 'midp']\n"
-"  binom_demo <filename>\n\n"
-"If a filename is provided, each line of the file is expected to contain an ID\n"
-"in the first column, and then 3 values (in succ-obs-rate order).\n"
+"  binom_demo <succ ct> <total obs ct> <expected succ rate> ['+' | '-'] ['midp']\n"
+"  binom_demo <filename> ['midp']\n\n"
 "Rates can be entered as fractions (e.g. '3/10', no spaces allowed).  When a\n"
 "rate is entered as a decimal, it is first parsed as a float64 (with the usual\n"
-"potential for rounding error) and then converted to a fraction.\n", stdout);
+"potential for rounding error), and then converted to a fraction with a\n"
+"power-of-2 denominator.\n\n"
+"If the optional 4th parameter is '+', a 1-sided test is performed where the\n"
+"alternative hypothesis is that #succ is greater than expected; similarly, '-'\n"
+"invokes the 1-sided test with the #succ-less-than-expected alternative.\n"
+"With neither, the 2-sided test is performed.\n\n"
+"If a filename is provided, each line of the file is expected to contain an ID\n"
+"in the first column, and then 3 values (in succ-obs-rate order; one-sided test)\n"
+"not currently supported here).\n", stdout);
       reterr = kPglRetSkipped;
     } else {
       test_file = fopen(argv[1], "r");

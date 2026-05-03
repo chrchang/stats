@@ -431,32 +431,26 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     *resultp = midp? -kLn2 : 0;
     return 0;
   }
-  dd_real rate_mult_incr_ddr = ddr_maked(1);
-  dd_real rate_mult_decr_ddr = ddr_maked(1);
-  if ((succ_odds_ratio_numer != 1) || (succ_odds_ratio_denom != 1)) {
-    // make sure these numbers aren't off by more than 0.5 ULP, even when
-    // numerator and/or denominator > 2^53.
-    const dd_real numer_ddr = ddr_makei(succ_odds_ratio_numer);
-    const dd_real denom_ddr = ddr_makei(succ_odds_ratio_denom);
-    rate_mult_incr_ddr = ddr_accurate_div(numer_ddr, denom_ddr);
-    rate_mult_decr_ddr = ddr_accurate_div(denom_ddr, numer_ddr);
-  }
   double succ = obs_succ;
   double fail = obs_tot - obs_succ;
   // Normalize: succ <= mode.
   // (even if there is rounding error, this is enough to guarantee that succ-1
   // has lower likelihood than succ.)
-  if (succ > fail * rate_mult_incr_ddr.x[0]) {
+  if (succ * S_CAST(double, succ_odds_ratio_denom) > fail * S_CAST(double, succ_odds_ratio_numer)) {
     obs_succ = obs_tot - obs_succ;
     swap_f64(&succ, &fail);
     swap_i64(&succ_odds_ratio_numer, &succ_odds_ratio_denom);
-    const dd_real swaptmp = rate_mult_incr_ddr;
-    rate_mult_incr_ddr = rate_mult_decr_ddr;
-    rate_mult_decr_ddr = swaptmp;
   }
-  const double rate_mult_incr = rate_mult_incr_ddr.x[0];
-  const double rate_mult_decr = rate_mult_decr_ddr.x[0];
-  const double first_inward_mult = fail * rate_mult_incr / (succ + 1);
+  dd_real succ_odds_ratio_ddr = ddr_maked(1);
+  if ((succ_odds_ratio_numer != 1) || (succ_odds_ratio_denom != 1)) {
+    // make sure these numbers aren't off by more than 0.5 ULP, even when
+    // numerator and/or denominator > 2^53.
+    const dd_real numer_ddr = ddr_makei(succ_odds_ratio_numer);
+    const dd_real denom_ddr = ddr_makei(succ_odds_ratio_denom);
+    succ_odds_ratio_ddr = ddr_accurate_div(numer_ddr, denom_ddr);
+  }
+  const double succ_odds_ratio = succ_odds_ratio_ddr.x[0];
+  const double first_inward_mult = fail * succ_odds_ratio / (succ + 1);
   if (!midp) {
     // Might we be at the mode?
     if (first_inward_mult <= 1 + 2 * k2m52) {
@@ -479,7 +473,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // Iterate outward to floating-point precision limit.
   while (1) {
     fail += 1;
-    lastp *= rate_mult_decr * succ / fail;
+    lastp *= succ / (succ_odds_ratio * fail);
     succ -= 1;
     const double preaddp = tailp;
     tailp += lastp;
@@ -508,12 +502,12 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
   }
-  // rate_mult_incr * (tot - modal_succ) / modal_succ = 1
-  // rate_mult_incr * (tot - modal_succ) = modal_succ
-  // rate_mult_incr * tot = modal_succ * (1 + rate_mult_incr)
+  // succ_odds_ratio * (tot - modal_succ) / modal_succ = 1
+  // succ_odds_ratio * (tot - modal_succ) = modal_succ
+  // succ_odds_ratio * tot = modal_succ * (1 + succ_odds_ratio)
   // possible for modal_succ to round up to just obs_tot
   const double obs_totd = obs_tot;
-  const double modal_succ = obs_totd * rate_mult_incr / (1 + rate_mult_incr);
+  const double modal_succ = obs_totd * succ_odds_ratio / (1 + succ_odds_ratio);
   if (succ + overflow_steps_lower_bound > modal_succ) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
@@ -522,9 +516,9 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     lastp = 1;
     while (1) {
       succ += 1;
-      lastp *= rate_mult_incr * fail / succ;
+      lastp *= succ_odds_ratio * fail / succ;
       fail -= 1;
-      // rate_mult_incr is off by up to 0.5 ULP, and we have two multiplies and
+      // succ_odds_ratio is off by up to 0.5 ULP, and we have two multiplies and
       // a divide.
       one_plus_scaled_eps += 2 * k2m52;
       if (lastp < one_plus_scaled_eps) {
@@ -553,7 +547,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     // Continue down tail to floating-point precision limit.
     while (1) {
       succ += 1;
-      lastp *= rate_mult_incr * fail / succ;
+      lastp *= succ_odds_ratio * fail / succ;
       fail -= 1;
       const double preaddp = tailp;
       tailp += lastp;
@@ -564,7 +558,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     *resultp = log(tailp / (tailp + centerp));
     return 0;
   }
-  dd_real ln_odds_ratio_ddr = ddr_log(rate_mult_incr_ddr);
+  dd_real ln_odds_ratio_ddr = ddr_log(succ_odds_ratio_ddr);
   dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
             ddr_add_lfacts(succ, fail));
@@ -602,21 +596,21 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // If not, we jump again, using Newton's method.
   // If succ is too low (i.e. current log-likelihood is too high), when we
   // increase succ by 1, the likelihood gets multiplied by
-  //   rate_mult_incr * fail / (succ+1)
+  //   succ_odds_ratio * fail / (succ+1)
   // i.e. we're adding the logarithm of this value to the log-likelihood.
   // If succ is too high, when we decrease succ by 1, the likelihood gets
   // multiplied by
-  //   rate_mult_decr * succ / (fail+1)
+  //   succ / (succ_odds_ratio * (fail+1))
   // We use the log of the first expression as the Newton's method f'(x) when
   // we're jumping to higher succ, and the negative-log of the second
   // expression when we're jumping to lower homr.
   // f''(x) is always negative, so we can aim for starting_lnprob instead of
   // the middle of the interval.
 
-  // L(obs_tot) / L(obs_tot-1) = rate_mult_incr * 1 / obs_tot
+  // L(obs_tot) / L(obs_tot-1) = succ_odds_ratio * 1 / obs_tot
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
-  if (ddr_geqd(rate_mult_incr_ddr, obs_totd)) {
+  if (ddr_geqd(succ_odds_ratio_ddr, obs_totd)) {
     *resultp = starting_lnprob + log(tailp);
     return 0;
   }
@@ -630,7 +624,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
   // largest gap between adjacent log-likelihoods on this tail.  Set
   // |lnprob_diff_min| >= this value.
-  double lnprob_diff_min = log(rate_mult_incr / obs_totd) * (1 + kSmallEpsilon);
+  double lnprob_diff_min = log(succ_odds_ratio / obs_totd) * (1 + kSmallEpsilon);
   if (lnprob_diff_min > -53 * kLn2) {
     lnprob_diff_min = -53 * kLn2;
   }
@@ -674,7 +668,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   while (lastp <= one_minus_scaled_eps) {
     tailp += lastp;
     fail += 1;
-    lastp *= rate_mult_decr * succ / fail;
+    lastp *= succ / (succ_odds_ratio * fail);
     succ -= 1;
     one_minus_scaled_eps -= 2 * k2m52;
   }
@@ -696,7 +690,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   fail = obs_totd - succ;
   while (1) {
     succ += 1;
-    lastp *= rate_mult_incr * fail / succ;
+    lastp *= succ_odds_ratio * fail / succ;
     const double preaddp = tailp;
     tailp += lastp;
     if (tailp == preaddp) {
@@ -705,6 +699,118 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     fail -= 1;
   }
   *resultp = starting_lnprob + log(tailp);
+  return 0;
+}
+
+// succ_odds_ratio assumed to be in (10^{-298}, 10^298) or so.
+// Just returns 0 if the log-p-value > 1 - 2^{-54} since additional precision
+// in that direction is expected to be irrelevant.  (Reverse the test direction
+// when you do actually want that precision.)
+double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp) {
+  // In this case, there's no need to detect likelihood ties, so
+  // succ_odds_ratio can just be a float64.
+
+  // Normalize to alternative hypothesis = #succ-less-than-expected, so the
+  // remainder is essentially a cmf calculation with parameter succ.
+  if (succ_is_greater_alt) {
+    obs_succ = obs_tot - obs_succ;
+    succ_odds_ratio = 1.0 / succ_odds_ratio;
+  }
+  double succ = obs_succ;
+  double fail = obs_tot - obs_succ;
+  if (succ > fail * succ_odds_ratio) {
+    // We're at or to the right of the mode.
+    // Start by computing an upper bound on the right-sum, and then iterating
+    // leftward until we either know the p-value > 1 - 2^{-54} (at which point
+    // we return 0), or remaining left likelihoods are smaller than the
+    // precision limit.
+    const double first_right_mult = succ_odds_ratio * fail / (succ + 1);
+    // r + r^2 + ... = r / (1-r)
+    const double right_upper_bound = 0.5 * midp + first_right_mult / (1 - first_right_mult);
+    if (right_upper_bound == 0.0) {
+      // p-value is exactly 1 when fail==0 and midp is false
+      return 0;
+    }
+
+    // Rescale our starting lastp so that we overflow to INFINITY when we'd
+    // want to early-exit and return 0; this saves us a comparison in the loop.
+    const double left_rescale = (DBL_MAX / (1LL << 54)) / right_upper_bound;
+    double lastp = left_rescale;
+    double left_sum = left_rescale;
+    while (1) {
+      fail += 1;
+      lastp *= succ / (succ_odds_ratio * fail);
+      succ -= 1;
+      const double preaddp = left_sum;
+      left_sum += lastp;
+      if (left_sum == preaddp) {
+        break;
+      }
+    }
+    if (left_sum == INFINITY) {
+      return 0;
+    }
+    left_sum /= left_rescale;
+
+    // Now compute the right-sum to the precision limit;
+    double right_sum = first_right_mult;
+    succ = obs_succ + 1.0;
+    fail = obs_tot - obs_succ - 1;
+    lastp = first_right_mult;
+    while (1) {
+      succ += 1;
+      lastp *= succ_odds_ratio * fail / succ;
+      fail -= 1;
+      const double preaddp = right_sum;
+      right_sum += lastp;
+      if (right_sum == preaddp) {
+        break;
+      }
+    }
+    // For one-sided test, slightly more convenient to exclude midp term from
+    // left_sum and right_sum since it just cancels out in denom
+    return log1p((-0.5 * midp - right_sum) / (right_sum + left_sum));
+  }
+  // We're to the left of the mode, and are responsible for tiny p-values.
+  // If we're close enough to the mode that a simple left_sum / (left_sum +
+  // right_sum) calculation doesn't risk overflow with the initial
+  // relative-likelihood set to 1, just do that.
+  // Otherwise... if the problem instance isn't *that* large, we could use
+  // Lfact() to compute the starting log-likelihood and eat a big catastrophic
+  // cancellation error, but I'll start with just the slow-and-accurate
+  // calculation.
+  const double ln_first_inward_mult = log(succ_odds_ratio * fail / (succ + 1));
+  double overflow_steps_lower_bound = 0x7fffffff;
+  // log(DBL_MAX / (2^31 - 1)) = 688.295...
+  if (ln_first_inward_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
+    overflow_steps_lower_bound = 688.295 / ln_first_inward_mult;
+  }
+  const double obs_totd = obs_tot;
+  const double modal_succ = obs_totd * succ_odds_ratio / (1 + succ_odds_ratio);
+  if (succ + overflow_steps_lower_bound > modal_succ) {
+    double lastp = 1;
+    double right_sum = 0;
+    while (1) {
+      succ += 1;
+      lastp *= succ_odds_ratio * fail / succ;
+      fail -= 1;
+      const double preaddp = right_sum;
+      right_sum += lastp;
+      if (right_sum == preaddp) {
+        break;
+      }
+    }
+    succ = obs_succ;
+    fail = obs_tot - obs_succ;
+    lastp = 1;
+    double left_sum = 1;
+    while (1) {
+      fail += 1;
+      lastp *= succ / (succ_odds_ratio * fail);
+    }
+    return log((left_sum - 0.5 * midp) / (left_sum + right_sum));
+  }
+  // TODO
   return 0;
 }
 
