@@ -420,13 +420,13 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
 }
 
 // obs_tot assumed to be <2^31.  succ_odds_ratio_numer and
-// succ_odds_ratio_denom must be positive, reduced to lowest terms, have sum <
-// 2^63, and represent p/(1-p).
+// succ_odds_ratio_{numer,denom} must be positive, reduced to lowest terms,
+// have sum < 2^63, and represent p/(1-p).
 // Only the main loops are speed-optimized for now.  There is some setup
 // overhead for odds_ratio != 1 which is currently written to avoid
 // proliferation of special cases, but can be easily accelerated if we know
 // e.g. numerator and denominator < 2^31.
-BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, uint32_t midp, double* resultp) {
+BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) {
   if (!obs_tot) {
     *resultp = midp? -kLn2 : 0;
     return 0;
@@ -497,7 +497,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // to the mode than is the case for the Fisher/HWE exact tests; 17 steps
   // could be enough.  So instead of checking whether we're a constant number
   // of steps from the mode, we compute a lower bound on the number of
-  // non-overflowing inward steps we can take from the log of the
+  // non-overflowing inward steps we can take, using the log of the
   // first-inward-step multiplier (subsequent steps have smaller multipliers).
   const double smallest_evaluated_succ = succ;
   succ = obs_succ;
@@ -511,13 +511,13 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   // rate_mult_incr * (tot - modal_succ) / modal_succ = 1
   // rate_mult_incr * (tot - modal_succ) = modal_succ
   // rate_mult_incr * tot = modal_succ * (1 + rate_mult_incr)
-  // possible for this to round up to just obs_tot
+  // possible for modal_succ to round up to just obs_tot
   const double obs_totd = obs_tot;
   const double modal_succ = obs_totd * rate_mult_incr / (1 + rate_mult_incr);
   if (succ + overflow_steps_lower_bound > modal_succ) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
-    double one_plus_scaled_eps = 1;
+    double one_plus_scaled_eps = 1 + k2m52;
     double centerp = midp * 0.5;
     lastp = 1;
     while (1) {
@@ -625,6 +625,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   if (succ > obs_totd) {
     succ = obs_totd;
   }
+  succ = S_CAST(int32_t, succ);
 
   // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
   // largest gap between adjacent log-likelihoods on this tail.  Set
@@ -641,18 +642,69 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
               ddr_add_lfacts(succ, fail));
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprob_diff >= k2m53) {
-      if (succ == obs_totd) {
+      if (fail == 0) {
         *resultp = starting_lnprob + log(tailp);
         return 0;
       }
-      ;;;
+      const double ll_deriv = ln_odds_ratio_ddr.x[0] + log(fail / (succ + 1));
+      // Round up, to guarantee that we make progress.
+      // (lnprob_diff is positive and ll_deriv is negative.)
+      // This may overshoot.  But the function is guaranteed to terminate
+      // because we never overshoot (and we do always make progress on each
+      // step) once we're on the other side.
+      succ += ceil_smalleps(-lnprob_diff / ll_deriv);
+      if (succ > obs_totd) {
+        succ = obs_totd;
+      }
     } else if (lnprob_diff > lnprob_diff_min) {
       lastp = exp(lnprob_diff);
       break;
     } else {
+      const double ll_deriv = ln_odds_ratio_ddr.x[0] + log((fail + 1) / succ);
+      // Round down, to guarantee we don't overshoot.
+      // |lnprob_diff| >= |lnprob_diff_min| > |ll_deriv| so we're guaranteed
+      // to make progress.
+      succ -= S_CAST(int64_t, lnprob_diff / ll_deriv);
     }
   }
-
+  // Sum toward center, until lastp >= 1.
+  double one_minus_scaled_eps = 1 - 3 * k2m52;
+  const double lastp_tail = lastp;
+  const double succ_tail = succ;
+  while (lastp <= one_minus_scaled_eps) {
+    tailp += lastp;
+    fail += 1;
+    lastp *= rate_mult_decr * succ / fail;
+    succ -= 1;
+    one_minus_scaled_eps -= 2 * k2m52;
+  }
+  if (lastp < 2 - one_minus_scaled_eps) {
+    intptr_t cmp_result;
+    if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lastp))) {
+      return 1;
+    }
+    if (cmp_result <= 0) {
+      tailp += lastp;
+      if (midp && (cmp_result == 0)) {
+        tailp -= 0.5;
+      }
+    }
+  }
+  // Sum away from center, until sums stop changing.
+  lastp = lastp_tail;
+  succ = succ_tail;
+  fail = obs_totd - succ;
+  while (1) {
+    succ += 1;
+    lastp *= rate_mult_incr * fail / succ;
+    const double preaddp = tailp;
+    tailp += lastp;
+    if (tailp == preaddp) {
+      break;
+    }
+    fail -= 1;
+  }
+  *resultp = starting_lnprob + log(tailp);
   return 0;
 }
 

@@ -22,6 +22,8 @@
 namespace plink2 {
 #endif
 
+BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp);
+
 #ifdef __cplusplus
 }
 #endif

@@ -264,9 +264,6 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        if (midp) {
-          tailp -= 0.5;
-        }
         *resultp = starting_lnprob + log(tailp);
         return 0;
       }
