@@ -41,8 +41,8 @@ endif
 
 all: binom_demo fisher_demo hwe_demo
 
-binom_demo: $(OBJ) binom.o binom_demo.o
-	g++ $(OBJ) binom.o binom_demo.o -o binom_demo $(LINKFLAGS)
+binom_demo: $(OBJ) binom_demo.o
+	g++ $(OBJ) binom_demo.o -o binom_demo $(LINKFLAGS)
 
 fisher_demo: $(OBJ) fisher_demo.o
 	g++ $(OBJ) fisher_demo.o -o fisher_demo $(LINKFLAGS)

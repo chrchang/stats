@@ -807,11 +807,40 @@ double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_rati
     while (1) {
       fail += 1;
       lastp *= succ / (succ_odds_ratio * fail);
+      succ -= 1;
+      const double preaddp = left_sum;
+      left_sum += lastp;
+      if (left_sum == preaddp) {
+        break;
+      }
     }
     return log((left_sum - 0.5 * midp) / (left_sum + right_sum));
   }
-  // TODO
-  return 0;
+  const dd_real succ_odds_ratio_ddr = ddr_maked(succ_odds_ratio);
+  const dd_real starting_lnprobv_ddr =
+    ddr_sub(ddr_muld(ddr_log(succ_odds_ratio_ddr), succ),
+            ddr_add_lfacts(succ, fail));
+  dd_real lnfail_ddr = {{-_ddr_log2.x[0], -_ddr_log2.x[1]}};
+  if (succ_odds_ratio != 1.0) {
+    // log(1 / (1 + succ_odds_ratio)) = -log(1 + succ_odds_ratio)
+    lnfail_ddr = ddr_negate(ddr_log(ddr_addd(succ_odds_ratio_ddr, 1.0)));
+  }
+  const dd_real lnprobf_ddr =
+    ddr_add(ddr_lfact(obs_totd), ddr_muld(lnfail_ddr, obs_totd));
+  const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
+  double lastp = 1;
+  double left_sum = 1 - 0.5 * midp;
+  while (1) {
+    fail += 1;
+    lastp *= succ / (succ_odds_ratio * fail);
+    succ -= 1;
+    const double preaddp = left_sum;
+    left_sum += lastp;
+    if (left_sum == preaddp) {
+      break;
+    }
+  }
+  return starting_lnprob + log(left_sum);
 }
 
 #ifdef __cplusplus
