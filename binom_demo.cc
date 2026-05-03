@@ -33,9 +33,9 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   }
   int pow;
   double value = frexp(dxx, &pow);
-  int64_t numer = S_CAST(int64_t, value * S_CAST(double, 1LL << 53));
+  int64_t numer = S_CAST(int64_t, scalbn(value, 53));
   int rshift = ctzu64(numer);
-  pow += 53 - rshift;
+  pow = 53 - rshift - pow;
   if (pow > 62) {
     return 1;
   }
