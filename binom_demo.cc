@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
         int64_t rate_numer;
         int64_t rate_denom;
         if (unlikely(ParseProbFrac(argv[3], &rate_numer, &rate_denom))) {
-          fprintf(stderr, "Error: Invalid rate '%s'.\n", argv[3]);
+          fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
           goto main_ret_MALFORMED_INPUT;
         }
         double logp;
@@ -225,7 +225,10 @@ int main(int argc, char** argv) {
 "  binom_demo <success ct> <total obs ct> <expected succ rate> <+ | - | midp>\n"
 "  binom_demo <filename>\n\n"
 "If a filename is provided, each line of the file is expected to contain an ID\n"
-"in the first column, and then 3 values (in succ-obs-rate order).\n", stdout);
+"in the first column, and then 3 values (in succ-obs-rate order).\n"
+"Rates can be entered as fractions (e.g. '3/10', no spaces allowed).  When a\n"
+"rate is entered as a decimal, it is first parsed as a float64 (with the usual\n"
+"potential for rounding error) and then converted to a fraction.\n", stdout);
       reterr = kPglRetSkipped;
     } else {
       test_file = fopen(argv[1], "r");
@@ -260,7 +263,7 @@ int main(int argc, char** argv) {
         int64_t rate_numer;
         int64_t rate_denom;
         if (unlikely(ParseProbFrac(ratestr, &rate_numer, &rate_denom))) {
-          fprintf(stderr, "Error: Invalid rate '%s' on line %" PRIuPTR " of %s.\n", ratestr, line_idx, argv[1]);
+          fprintf(stderr, "Error: Invalid or unsupported rate '%s' on line %" PRIuPTR " of %s.\n", ratestr, line_idx, argv[1]);
           goto main_ret_MALFORMED_INPUT;
         }
         double logp;
