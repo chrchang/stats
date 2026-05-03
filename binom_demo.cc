@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
       fputs(
 "Binomial test                                 https://github.com/chrchang/stats\n"
 "(C) 2013-2026 Christopher Chang     GNU Lesser General Public License version 3\n\n"
-"  binom_demo <success ct> <total obs ct> <expected succ rate> <+ | - | midp>\n"
+"  binom_demo <succ ct> <total obs ct> <expected succ rate> ['+' | '-' | 'midp']\n"
 "  binom_demo <filename>\n\n"
 "If a filename is provided, each line of the file is expected to contain an ID\n"
 "in the first column, and then 3 values (in succ-obs-rate order).\n"
