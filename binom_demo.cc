@@ -19,10 +19,98 @@ double binom_1sided(int32_t succ, int32_t obs, double rate);
 namespace plink2 {
 #endif
 
+// This may move to plink2_base.
+static inline BoolErr ScanmovU64Finish(const char** str_iterp, uint64_t* valp) {
+  const char* str_iter = *str_iterp;
+  // limit is 20 digits, we've already read one
+  const char* str_limit = &(str_iter[20]);
+  uint64_t val = *valp;
+  while (1) {
+    // a little bit of unrolling seems to help
+    const uint64_t cur_digit = ctou64(*str_iter++) - 48;
+    if (cur_digit >= 10) {
+      break;
+    }
+    const uint64_t cur_digit2 = ctou64(*str_iter++) - 48;
+    if (str_iter == str_limit) {
+      if (unlikely((cur_digit2 < 10) || ((val >= (UINT64_MAX / 10)) && ((val > (UINT64_MAX / 10)) || (cur_digit > (UINT64_MAX % 10)))))) {
+        return 1;
+      }
+      val = val * 10 + cur_digit;
+      break;
+    }
+    if (cur_digit2 >= 10) {
+      val = val * 10 + cur_digit;
+      break;
+    }
+    val = val * 100 + cur_digit * 10 + cur_digit2;
+  }
+  *valp = val;
+  *str_iterp = &(str_iter[-1]);
+  return 0;
+}
+
+BoolErr ScanmovU64(const char** str_iterp, uint64_t* valp) {
+  const char* str_iter = *str_iterp;
+  *valp = ctou32(*str_iter++) - 48;
+  if (*valp >= 10) {
+    if (unlikely(*valp != 0xfffffffbU)) {
+      return 1;
+    }
+    *valp = ctou32(*str_iter++) - 48;
+    if (unlikely(*valp >= 10)) {
+      return 1;
+    }
+  }
+  while (!(*valp)) {
+    *valp = ctou32(*str_iter++) - 48;
+    if (unlikely((*valp) >= 10)) {
+      return 1;
+    }
+  }
+  *str_iterp = str_iter;
+  return ScanmovU64Finish(str_iterp, valp);
+}
+
+// Assumes large > small.
+void EuclideanAlgU64(uint64_t* smallp, uint64_t* largep) {
+  uint64_t small = *smallp;
+  uint64_t large = *largep;
+  while (small > 1) {
+    const uint64_t modulus = large % small;
+    if (modulus == 0) {
+      // small is now the GCD.
+      *smallp /= small;
+      *largep /= small;
+      return;
+    }
+    small = modulus;
+    large = small;
+  }
+  return;
+}
+
 BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   // Returns error on parse failure, value isn't in (0, 1), or the value can't
   // be represented with in-range denom.
-  // todo: allow e.g. "1/10"
+  const char* slash_ptr = strchr(fracstr, '/');
+  if (slash_ptr) {
+    const char* numer_iter = fracstr;
+    const char* denom_iter = &(slash_ptr[1]);
+    uint64_t numer;
+    uint64_t denom;
+    if (ScanmovU64(&numer_iter, &numer) || ScanmovU64(&denom_iter, &denom) || (numer_iter != slash_ptr) || (denom_iter[0] != '\0') || (numer == 0) || (numer >= denom)) {
+      return 1;
+    }
+    // Reduce to lowest terms.
+    EuclideanAlgU64(&numer, &denom);
+    if (denom >= (1LLU << 63)) {
+      return 1;
+    }
+    *numerp = numer;
+    *denomp = denom;
+    return 0;
+  }
   double dxx;
   if (sscanf(fracstr, "%lg", &dxx) != 1) {
     return 1;
@@ -34,6 +122,8 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   int neg_denom_pow;
   double value = frexp(dxx, &neg_denom_pow);
   int64_t numer = S_CAST(int64_t, scalbn(value, 53));
+  // Reduce to lowest terms.
+  // Don't need Euclidean algorithm, since denominator is a power of 2.
   uint32_t rshift = ctzu64(numer);
   numer = numer >> rshift;
   uint32_t denom_pow = 53 - rshift - neg_denom_pow;
