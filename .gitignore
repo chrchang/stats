@@ -1,5 +1,9 @@
 *~
 *.o
+/Python/src/dist/
+/Python/src/exact_tests.egg-info/
+/Python/src/exact_tests.*.so
+/Python/src/exact_tests/exact.cpp
 binom_demo
 hwe_demo
 fisher_demo

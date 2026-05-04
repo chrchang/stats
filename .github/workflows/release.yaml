@@ -1,0 +1,115 @@
+name: Release exact_tests
+
+on: [workflow_dispatch]
+
+jobs:
+  build_wheels:
+    name: Build wheels for ${{ matrix.arch }} ${{ matrix.os }} py3.${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [10, 11, 12, 13, 14]
+        os: [ubuntu-latest, macos-latest]
+        arch: [x86_64, aarch64, universal2]
+        exclude:
+          - os: ubuntu-latest
+            arch: universal2
+          - os: macos-latest
+            arch: x86_64
+          - os: macos-latest
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up QEMU for aarch64 emulation
+        if: runner.os == 'Linux' && matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.2.1
+        with:
+          package-dir: ./Python
+        env:
+          CIBW_SKIP: "*-musllinux_* pp3*-manylinux_aarch64"
+          CIBW_BUILD: ${{ format('*p3{0}-*', matrix.python) }}
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: "pytest {package}/tests"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ startsWith(matrix.os, 'ubuntu') && 'ubuntu' || 'macos' }}-${{ matrix.arch }}-3${{ matrix.python }}
+          path: ./wheelhouse/*.whl
+
+  merge_wheels:
+    runs-on: ubuntu-latest
+    needs: build_wheels
+    steps:
+      - name: Merge wheel artifacts into a single artifact
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: wheels
+          pattern: wheels-*
+          delete-merged: true
+
+  build_sdist:
+    runs-on: ubuntu-latest
+    env:
+      # The maximum supported version of python that is not
+      # "end-of-life," "prerelease," or "feature": https://devguide.python.org/versions
+      job_python_version: "3.14"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ env.job_python_version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.job_python_version }}
+
+      - name: Create source distribution
+        working-directory: ./Python
+        run: |
+          pip install build
+          python -m build --sdist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: ./Python/dist/exact_tests-*.tar.gz
+
+      - name: Install and test
+        working-directory: ./Python
+        run: |
+          pip install --no-cache-dir --no-binary=exact_tests dist/exact_tests-*.tar.gz pytest
+          pytest -s tests/
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'chrchang'
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Get artifacts
+        uses: actions/download-artifact@v5
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Publish distribution to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: github.ref != 'refs/heads/master'
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish distribution to PyPI
+        if: github.ref == 'refs/heads/master'
+        uses: pypa/gh-action-pypi-publish@release/v1
