@@ -18,7 +18,6 @@ readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU Lesser General Public License v3.0 only (LGPL-3.0-only)",
     "Operating System :: OS Independent",
 ]
 license = "LGPL-3.0-only"
