@@ -1,7 +1,7 @@
 stats
 =====
 
-Functions for calculating binomial, Hardy-Weinberg equilibrium, and Fisher
+Functions for calculating binomial, Hardy-Weinberg equilibrium, and Fisher's
 2x2/2x3 exact test log-p and log-midp values.  They are accurate and efficient:
 
 - High-precision and interval arithmetic are used to ensure likelihood

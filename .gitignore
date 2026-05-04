@@ -4,6 +4,7 @@
 /Python/src/exact_tests.egg-info/
 /Python/src/exact_tests.*.so
 /Python/src/exact_tests/exact.cpp
+/Python/src/exact_tests/__pycache__/
 binom_demo
 hwe_demo
 fisher_demo
