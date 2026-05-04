@@ -432,7 +432,6 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
   // Lfact() to compute the starting log-likelihood and eat a big catastrophic
   // cancellation error, but I'll start with just the slow-and-accurate
   // calculation.
-  const double m11_minus_m22 = obs_m11 - obs_m22;
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
   const double mx2 = obs_m12 + obs_m22;
