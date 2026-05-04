@@ -1,0 +1,8 @@
+[build-system]
+requires = [
+    # pin setuptools on pypy to work around bug: https://github.com/pypa/distutils/issues/283 https://github.com/pypa/cibuildwheel/issues/1983
+    "setuptools < 72.2; platform_python_implementation == 'PyPy'",
+    "setuptools ; platform_python_implementation != 'PyPy'",
+    "Cython>=3.1.0",
+]
+build-backend = "setuptools.build_meta"

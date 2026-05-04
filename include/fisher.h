@@ -28,6 +28,16 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
 
 BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp);
 
+// Probable todos:
+// - Function implementing 2xk for k>2, recursion can just follow how
+//   Fisher23LnP builds on 2x2
+// - Function implementing jxk for 3<=j<=k; recursive function can take a
+//   parameter specifying the column number in the bottom row to iterate over
+//   (bottom-row values further to the right are locked during the function
+//   call).  I expect the function would rarely be worth using over simulation
+//   when j>3 (complexity is roughly O(n^{(j-1)(k-1)/2})), but O(n^2) for j=k=3
+//   seems likely to be a good deal.
+
 #ifdef __cplusplus
 }
 #endif
