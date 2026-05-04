@@ -1,6 +1,6 @@
 *~
 *.o
-/Python/src/dist/
+/Python/dist/
 /Python/src/exact_tests.egg-info/
 /Python/src/exact_tests.*.so
 /Python/src/exact_tests/exact.cpp
