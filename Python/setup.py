@@ -32,7 +32,7 @@ setuptools.setup(
     version="0.1.0",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
-    description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher exact tests.",
+    description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/chrchang/stats",
@@ -41,7 +41,7 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"
+        "License :: OSI Approved :: GNU Lesser General Public License v3.0 only (LGPL-3.0-only)"
         "Operating System :: OS Independent",
     ],
     package_dir={"": "src"},

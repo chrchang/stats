@@ -22,7 +22,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 #   "two-sided": default, must be this if table is larger than 2x2.
 #   "less": alt hypothesis is that table[0][0] is smaller than expected.
 #   "greater": alt hypothesis is that table[0][0] is larger than expected.
-def fisher(table, str alternative = "two-sided", bint midp = 0, bint logp = 0):
+cpdef double fisher(table, str alternative = "two-sided", bint midp = 0, bint logp = 0):
     cdef uint32_t nrow = len(table)
     if nrow < 2:
         raise RuntimeError("table has less than 2 rows.")

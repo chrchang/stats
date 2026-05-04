@@ -40,6 +40,6 @@ Licensing:
   (https://github.com/BL-highprecision/QD ) is under the include/LICENSE.QD
   BSD-3-Clause-LBNL license.
 - binom_demo.cc, fisher_demo.cc, hwe_demo.cc, and all of include/ except the
-  aforementioned bit of plink2_highprec are covered by LGPLv3 (see the
+  aforementioned bit of plink2_highprec are covered by LGPL-3.0-only (see the
   COPYING.LESSER file).
-- mini-gmp/ is dual-licensed under LGPLv3 and GPLv2.
+- mini-gmp/ is dual-licensed under LGPL-3.0-only and GPL-2.0-only.
