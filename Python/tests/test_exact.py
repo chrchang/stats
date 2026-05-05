@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import exact_tests
+import math
 import pytest
 
 # These test cases were scraped from
@@ -16,7 +17,8 @@ scipy_binom_cases = [
     # R is obviously wrong here, k=10080000 has higher likelihood!
     # (10079999, 21000000, 0.48, "two-sided", 1.0, 1e-10),
     (10079990, 21000000, 0.48, "two-sided", 0.9966892187965, 1e-10),
-    # ...and I'd bet against R here, too.
+    # ...and I'd bet against R here, too.  todo: show what R is doing wrong
+    # here.
     # (10080009, 21000000, 0.48, "two-sided", 0.9970377203856, 1e-10),
     (10080017, 21000000, 0.48, "two-sided", 0.9940754817328, 1e-9),
     (9, 21, 0.48, "two-sided", 0.6689672431939, 1e-10),
@@ -117,6 +119,11 @@ def test_binom():
     for test_case in scipy_binom_cases:
         pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative=test_case[3])
         assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=0), str(test_case)
+    # possible todo: port test_binomtest2, test_binomtest3
+    pval = exact_tests.binom(0, 8, midp=True)
+    logp = exact_tests.binom(0, 8, midp=True, logp=True)
+    assert pval == pytest.approx(1/256, rel=1e-13, abs=0), "midp"
+    assert logp == pytest.approx(math.log(1/256), rel=1e-13, abs=0), "logp"
 
 
 def test_fisher():
@@ -127,4 +134,6 @@ def test_fisher():
         pval = exact_tests.fisher(test_case[0], alternative=test_case[1])
         assert pval == pytest.approx(test_case[2], rel=1e-13, abs=0), str(test_case)
     pval = exact_tests.fisher([[4, 0], [0, 4]], midp=True)
-    assert pval == pytest.approx(1 / 70, rel=1e-13, abs=0), "midp"
+    logp = exact_tests.fisher([[4, 0], [0, 4]], midp=True, logp=True)
+    assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
+    assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"

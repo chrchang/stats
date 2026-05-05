@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport exp
 import fractions
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 cdef extern from "../include/binom.h" namespace "plink2":
     ctypedef uint32_t BoolErr
@@ -69,6 +69,9 @@ def binom(int32_t k, int32_t n, object p=0.5, str alternative = "two-sided", bin
         return ln_result
     else:
         return exp(ln_result)
+
+# Probable todo: dbinom and qbinom functions.  (And I guess a pbinom function
+# which is a wrapper around alternative="less".)
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
