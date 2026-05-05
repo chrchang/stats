@@ -2,8 +2,8 @@ exact_tests
 ===========
 
 This package provides binomial, Hardy-Weinberg equilibrium, and Fisher's exact
-test functions.  (Only 2x2 and 2x3 FET implemented right now; the rest is
-coming soon.)  The functions are accurate and efficient:
+test functions.  (Only binomial test and 2x2 and 2x3 FET implemented right now;
+the rest is coming soon.)  The functions are accurate and efficient:
 
 - High-precision and interval arithmetic are used to ensure likelihood
   near-ties are correctly resolved.  Log-(mid)p-values are available when you
@@ -45,6 +45,11 @@ You can test the package with `pytest`.
 ```
 import exact_tests
 
+exact_tests.binom(3, n=15, p=0.1, alternative="greater")
+exact_tests.binom(2, 29, 0.1)
+exact_tests.binom(2, 29, "0.1")
+exact_tests.binom(2, 29, "0.1", midp=True)
+exact_tests.binom(100, 10000, "0.000001", logp=True)
 exact_tests.fisher([[4, 0], [0, 4]], alternative="greater", midp=True)
 exact_tests.fisher([[10000, 20000], [30000, 40000], [50000, 60000]], logp=True)
 ```

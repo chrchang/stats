@@ -28,11 +28,11 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 # positive denominator < 2^63, or valid input to the fractions.Fraction()
 # constructor (e.g. float, string, decimal.Decimal).  Note that float values
 # smaller than 1/512 may convert to a fraction with too large of a denominator;
-# a workaround is to pass in
-#   fractions.Fraction(p).limit_denominator(2**63 - 1)
-# when that's a problem.  (This conversion isn't done automatically because it
-# would water down what this function promises about likelihood ties and
-# near-ties.)
+# if an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a
+# string, otherwise a generic workaround is to pass in
+#   fractions.Fraction(p).limit_denominator(2**63 - 1).
+# (The latter conversion isn't done automatically because it would water down
+# what this function promises about likelihood ties and near-ties.)
 #
 # For the one-sided tests, p is expected to be a float in (2^{-63}, 1), or
 # valid input to the float() constructor.  (Likelihood-ties don't matter in
@@ -45,10 +45,10 @@ def binom(int32_t k, int32_t n, object p=0.5, str alternative = "two-sided", bin
         if not isinstance(p, fractions.Fraction):
             p = fractions.Fraction(p)
         numer, denom = p.as_integer_ratio()
-        if numer <= 0 or numer >= denom:
+        if numer * (2**63) <= denom or numer >= denom:
             raise RuntimeError("p must be in (2^{-63}, 1).")
         if denom >= 2**63:
-            raise RuntimeError("for the two-sided test, p must be precisely representable as a fraction with denominator < 2^63; one workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
+            raise RuntimeError("for the two-sided test, p must be precisely representable as a fraction with denominator < 2^63; if an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
         if BinomLnP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, &ln_result):
             raise MemoryError()
         if logp:
