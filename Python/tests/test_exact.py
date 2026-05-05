@@ -6,6 +6,10 @@ import pytest
 # scipy/stats/tests/data/fisher_exact_results_from_r.py , which were in turn
 # gathered from R 3.6.2 (Dec 2019).
 # SciPy has the BSD-3-Clause license.
+#
+# Possible todo: write a function which performs the entire calculation with
+# double-double arithmetic, so we have easy access to ground truth (within 1
+# ULP, anyway) for these and other test cases.
 scipy_fisher22_cases = [
     ([[100, 2], [1000, 5]], "two-sided", 0.1300759363430016),
     ([[2, 7], [8, 2]], "two-sided", 0.02301413756522116),
@@ -52,8 +56,8 @@ scipy_fisher22_cases = [
     ]
 
 def test_fisher():
-    # 1e-13 is close to a thousand ULPs; good implementations should agree to
-    # that relative tolerance for small cases (such as the scipy cases where no
+    # 1e-13 is several hundred ULPs; good implementations should agree to that
+    # relative tolerance for small cases (such as the scipy cases where no
     # table sum > 3000).
     for test_case in scipy_fisher22_cases:
         pval = exact_tests.fisher(test_case[0], alternative=test_case[1])

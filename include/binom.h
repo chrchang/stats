@@ -1,5 +1,5 @@
-#ifndef __FISHER_H__
-#define __FISHER_H__
+#ifndef __BINOM_H__
+#define __BINOM_H__
 
 // Binomial Exact Test library, copyright (C) 2013-2026 Christopher Chang.
 //
@@ -30,4 +30,4 @@ double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_rati
 }
 #endif
 
-#endif  // __FISHER_H__
+#endif  // __BINOM_H__
