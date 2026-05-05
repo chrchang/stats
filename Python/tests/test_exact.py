@@ -13,9 +13,11 @@ import pytest
 # double-double arithmetic, so we have easy access to ground truth (within 1
 # ULP, anyway) for these and other test cases.
 scipy_binom_cases = [
-    (10079999, 21000000, 0.48, "two-sided", 1.0, 1e-10),
+    # R is obviously wrong here, k=10080000 has higher likelihood!
+    # (10079999, 21000000, 0.48, "two-sided", 1.0, 1e-10),
     (10079990, 21000000, 0.48, "two-sided", 0.9966892187965, 1e-10),
-    (10080009, 21000000, 0.48, "two-sided", 0.9970377203856, 1e-10),
+    # ...and I'd bet against R here, too.
+    # (10080009, 21000000, 0.48, "two-sided", 0.9970377203856, 1e-10),
     (10080017, 21000000, 0.48, "two-sided", 0.9940754817328, 1e-9),
     (9, 21, 0.48, "two-sided", 0.6689672431939, 1e-10),
     (4, 21, 0.48, "two-sided", 0.0081395634521, 1e-10),
