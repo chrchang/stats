@@ -115,6 +115,13 @@ scipy_fisher22_cases = [
     ([[190, 800], [200, 900]], "greater", 0.2959825901308897),
     ]
 
+# These test cases were created by walking through the R HardyWeinberg
+# package's vignettes (for v1.7.9, using R 4.5.2) and recording results.
+# Entries are of the form (hom1, hets, hom2, alternative, midp, p_want).
+r_HWE_cases = [
+    (298, 489, 213, "two-sided", True, 0.6330965),
+    ]
+
 
 def test_binom():
     for test_case in scipy_binom_cases:
@@ -138,3 +145,9 @@ def test_fisher():
     logp = exact_tests.fisher([[4, 0], [0, 4]], midp=True, logp=True)
     assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
     assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
+
+
+def test_HWE():
+    for test_case in r_HWE_cases:
+        pval = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
+        assert pval == pytest.approx(test_case[5], rel=1e-6, abs=0), str(test_case)
