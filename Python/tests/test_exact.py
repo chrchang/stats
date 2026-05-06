@@ -115,23 +115,30 @@ scipy_fisher22_cases = [
     ([[190, 800], [200, 900]], "greater", 0.2959825901308897),
     ]
 
-# These test cases were created by walking through the R HardyWeinberg
-# package's vignettes (for v1.7.9, using R 4.5.2) and recording results.
+# First four test cases are from the R HardyWeinberg package's vignettes.
+# Tests #5-8 are from https://github.com/jeremymcrae/snphwe .
 # Entries are of the form (hom1, hets, hom2, alternative, midp, p_want).
 r_HWE_cases = [
     (298, 489, 213, "two-sided", True, 0.6330965),
+    (230, 314, 107, "two-sided", True, 0.9676001),
+    (298, 489, 213, "two-sided", False, 0.6556635),
+    (230, 314, 107, "two-sided", False, 1.0),
+    (10, 500, 5000, "two-sided", False, 0.65157189991),
+    (20, 1000, 5000, "two-sided", False, 1.26598491e-5),
+    (200000, 200000, 200000, "two-sided", False, 0.0),
+    (495000, 4990, 10, "two-sided", False, 0.570223198305),
     ]
 
 
 def test_binom():
     for test_case in scipy_binom_cases:
         pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative=test_case[3])
-        assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=0), str(test_case)
+        assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=2.23e-308), str(test_case)
     # possible todo: port test_binomtest2, test_binomtest3
     pval = exact_tests.binom(0, 8, midp=True)
     logp = exact_tests.binom(0, 8, midp=True, logp=True)
-    assert pval == pytest.approx(1/256, rel=1e-13, abs=0), "midp"
-    assert logp == pytest.approx(math.log(1/256), rel=1e-13, abs=0), "logp"
+    assert pval == pytest.approx(1/256, rel=1e-13, abs=2.23e-308), "midp"
+    assert logp == pytest.approx(math.log(1/256), rel=1e-13, abs=2.23e-308), "logp"
 
 
 def test_fisher():
@@ -140,14 +147,16 @@ def test_fisher():
     # table sum > 3000).
     for test_case in scipy_fisher22_cases:
         pval = exact_tests.fisher(test_case[0], alternative=test_case[1])
-        assert pval == pytest.approx(test_case[2], rel=1e-13, abs=0), str(test_case)
+        assert pval == pytest.approx(test_case[2], rel=1e-13, abs=2.23e-308), str(test_case)
     pval = exact_tests.fisher([[4, 0], [0, 4]], midp=True)
     logp = exact_tests.fisher([[4, 0], [0, 4]], midp=True, logp=True)
-    assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
-    assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
+    assert pval == pytest.approx(1/70, rel=1e-13, abs=2.23e-308), "midp"
+    assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=2.23e-308), "logp"
 
 
 def test_HWE():
     for test_case in r_HWE_cases:
         pval = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
-        assert pval == pytest.approx(test_case[5], rel=1e-6, abs=0), str(test_case)
+        logp = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4], logp=True)
+        assert pval == pytest.approx(test_case[5], rel=1e-6, abs=2.23e-308), str(test_case)
+        assert math.exp(logp) == pytest.approx(pval, rel=1e-13, abs=2.23e-308), str("logp")
