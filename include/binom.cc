@@ -25,6 +25,41 @@
 namespace plink2 {
 #endif
 
+double LnBinomCoeff(int32_t n, int32_t k) {
+  if ((k == 0) || (k == n)) {
+    return 0;
+  }
+  return ddr_sub(ddr_lfact(n),
+                 ddr_add_lfacts(k, n-k)).x[0];
+}
+
+// Assumes 0 <= k <= n, 0 < p < 1.
+// If p is too close to 1 to be well-represented by a float64, pass in (n-k, n,
+// 1-p) instead.
+double LnBinomMass(int32_t k, int32_t n, double p) {
+  dd_real p_ddr = ddr_maked(p);
+  const dd_real q_ddr = ddr_sub(ddr_maked(1), p_ddr);
+  if (k == 0) {
+    // don't need to preserve original p_ddr
+    p_ddr = q_ddr;
+  }
+  dd_real ln_p_ddr = _ddr_log2;
+  if (p != 0.5) {
+    ln_p_ddr = ddr_log(p_ddr);
+  }
+  const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
+  if (k == n) {
+    return k_ln_p_ddr.x[0];
+  }
+  dd_real ln_q_ddr = _ddr_log2;
+  if (p != 0.5) {
+    ln_q_ddr = ddr_log(q_ddr);
+  }
+  const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
+  return ddr_sub(ddr_add3(k_ln_p_ddr, nmk_ln_q_ddr, ddr_lfact(n)),
+                 ddr_add_lfacts(k, n-k)).x[0];
+}
+
 // Assumes exponent > 0.
 void mul_by_u63_to_u31_pow(uint64_t base, uint32_t exponent, mp_limb_t* num, uint32_t* num_limb_ctp, mp_limb_t* tmppow, mp_limb_t* numcopy) {
   uint32_t num_limb_ct = *num_limb_ctp;

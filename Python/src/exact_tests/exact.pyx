@@ -8,6 +8,8 @@ __version__ = "0.3.0"
 cdef extern from "../include/binom.h" namespace "plink2":
     ctypedef uint32_t BoolErr
 
+    double LnBinomMass(int32_t k, int32_t n, double p) nogil
+
     BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) nogil
 
     double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp)
@@ -57,8 +59,7 @@ def binom(int32_t k, int32_t n, object p=0.5, str alternative="two-sided", bint 
             raise MemoryError()
         if logp:
             return ln_result
-        else:
-            return exp(ln_result)
+        return exp(ln_result)
     cdef bint k_is_greater_alt = (alternative == "greater")
     if alternative != "less" and not k_is_greater_alt:
         raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
@@ -66,16 +67,38 @@ def binom(int32_t k, int32_t n, object p=0.5, str alternative="two-sided", bint 
     # strictly speaking, BinomOneSidedLnP() still works with p as small as
     # 10^{-298}, but let's minimize the difference between the one-sided and
     # two-sided interface for now.
-    if pfloat <= 1.0842021724855044e-19 or pfloat >= 1:
+    if pfloat <= 1.0842021724855044e-19 or not pfloat < 1:
         raise RuntimeError("p must be in (2^{-63}, 1).")
     ln_result = BinomOneSidedLnP(k, n, pfloat / (1 - pfloat), k_is_greater_alt, midp)
     if logp:
         return ln_result
-    else:
-        return exp(ln_result)
+    return exp(ln_result)
 
-# Probable todo: dbinom and qbinom functions.  (And I guess a pbinom function
-# which is a wrapper around alternative="less".)
+# Returns likelihood of exactly k successes.
+# Not intended to be as general as R dbinom().
+def dbinom(int32_t k, int32_t n, double p, bint logp=0):
+    if k < 0 or k > n:
+        raise RuntimeError("k must be nonnegative and <= n.")
+    if p <= 0.0 or not p < 1.0:
+        raise RuntimeError("p must be in (0, 1).")
+    cdef double ln_result = LnBinomMass(k, n, p)
+    if logp:
+        return ln_result
+    return exp(ln_result)
+
+# Returns cumulative mass function, e.g. pbinom(n, n) is 1 for nonnegative n.
+# Not intended to be as general as R pbinom().
+def pbinom(int32_t k, int32_t n, double p, bint logp=0):
+    if k < 0 or k > n:
+        raise RuntimeError("k must be nonnegative and <= n.")
+    if p <= 0.0 or not p < 1.0:
+        raise RuntimeError("p must be in (0, 1).")
+    cdef double ln_result = BinomOneSidedLnP(k, n, p / (1-p), 0, 0)
+    if logp:
+        return ln_result
+    return exp(ln_result)
+
+# Todo: qbinom function.
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
