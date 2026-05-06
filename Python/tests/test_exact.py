@@ -66,6 +66,14 @@ scipy_binom_cases = [
     (50, 100, 0.1, "two-sided", 5.8320387857343647e-024, 1e-10),
     ]
 
+# This test case was scraped from
+#   scipy/stats/tests/test_discrete_distns.py
+# (obvious todo: add more tests)
+# Entries are of the form (k, n, p, p_want)
+scipy_dbinom_cases = [
+    (996, 1000, 0.01, 0.0),
+    ]
+
 # These test cases were scraped from
 #   scipy/stats/tests/data/fisher_exact_results_from_r.py
 # which were in turn gathered from R 3.6.2.
@@ -139,6 +147,19 @@ def test_binom():
     logp = exact_tests.binom(0, 8, midp=True, logp=True)
     assert pval == pytest.approx(1/256, rel=1e-13, abs=2.23e-308), "midp"
     assert logp == pytest.approx(math.log(1/256), rel=1e-13, abs=2.23e-308), "logp"
+
+
+def test_dbinom():
+    for test_case in scipy_dbinom_cases:
+        pval = exact_tests.dbinom(test_case[0], test_case[1], test_case[2])
+        assert pval == pytest.approx(test_case[3], rel=1e-10, abs=2.23e-308), str(test_case)
+
+
+def test_pbinom():
+    for test_case in scipy_binom_cases:
+        if test_case[3] == "less":
+            pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative="less")
+            assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=2.23e-308)
 
 
 def test_fisher():
