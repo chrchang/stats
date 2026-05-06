@@ -518,8 +518,8 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
       succ += 1;
       lastp *= succ_odds_ratio * fail / succ;
       fail -= 1;
-      // succ_odds_ratio is off by up to 0.5 ULP, and we have two multiplies and
-      // a divide.
+      // succ_odds_ratio is off by up to 0.5 ULP, and we have two multiplies
+      // and a divide.
       one_plus_scaled_eps += 2 * k2m52;
       if (lastp < one_plus_scaled_eps) {
         if (lastp <= 2 - one_plus_scaled_eps) {

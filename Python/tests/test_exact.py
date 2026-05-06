@@ -17,8 +17,9 @@ scipy_binom_cases = [
     # R is obviously wrong here, k=10080000 has higher likelihood!
     # (10079999, 21000000, 0.48, "two-sided", 1.0, 1e-10),
     (10079990, 21000000, 0.48, "two-sided", 0.9966892187965, 1e-10),
-    # ...and I'd bet against R here, too.  todo: show what R is doing wrong
-    # here.
+    # R is wrong here as well: it treats k=10079991 as
+    # equal-or-lesser-likelihood than k=10080009 when it actually has
+    # ~0.00000689% greater likelihood.
     # (10080009, 21000000, 0.48, "two-sided", 0.9970377203856, 1e-10),
     (10080017, 21000000, 0.48, "two-sided", 0.9940754817328, 1e-9),
     (9, 21, 0.48, "two-sided", 0.6689672431939, 1e-10),

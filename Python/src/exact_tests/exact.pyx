@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport exp
 import fractions
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 cdef extern from "../include/binom.h" namespace "plink2":
     ctypedef uint32_t BoolErr
@@ -19,6 +19,10 @@ cdef extern from "../include/fisher.h" namespace "plink2":
     double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp) nogil
 
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
+
+
+cdef extern from "../include/plink2_hwe.h" namespace "plink2":
+    BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) nogil
 
 
 # n must be in [1, 2^31 - 1], and k must be in [0, n].
@@ -37,7 +41,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 # For the one-sided tests, p is expected to be a float in (2^{-63}, 1), or
 # valid input to the float() constructor.  (Likelihood-ties don't matter in
 # this case.)
-def binom(int32_t k, int32_t n, object p=0.5, str alternative = "two-sided", bint midp = 0, bint logp = 0):
+def binom(int32_t k, int32_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
     cdef double ln_result
@@ -130,6 +134,36 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
                     raise MemoryError()
         else:
              raise RuntimeError("tables larger than 2x3 not yet supported")
+    if logp:
+        return ln_result
+    return exp(ln_result)
+
+
+# "HWE" is short for Hardy-Weinberg Equilibrium.
+#
+# hom1, hets, and hom2 must be nonnegative, and add up to <2^31.
+#
+# alternative="less" and alternative="greater" refer to the heterozygote count.
+# (alternative="greater" has more practical value in identifying
+# variant-calling errors without throwing out variants affected by the Wahlund
+# effect.)  These one-sided tests are not implemented yet.
+#
+# Variants with k>2 alleles can be evaluated with k one-vs.-rest tests.
+def HWE(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", bint midp=0, bint logp=0):
+    cdef int64_t total = <int64_t>(hom1) + <int64_t>(hets) + <int64_t>(hom2)
+    if hom1 < 0 or hets < 0 or hom2 < 0 or total > 0x7fffffff:
+        raise RuntimeError("hom1, hets, and hom2 must be nonnegative and sum to <2^31")
+    cdef bint hets_is_greater_alt = 0
+    cdef double ln_result
+    if alternative != "two-sided":
+        hets_is_greater_alt = (alternative == "greater")
+        if alternative != "less" and not hets_is_greater_alt:
+            raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
+        raise RuntimeError("one-sided tests not implemented yet")
+    else:
+        # note different parameter order
+        if HweLnP(hets, hom1, hom2, midp, &ln_result):
+            raise MemoryError()
     if logp:
         return ln_result
     return exp(ln_result)
