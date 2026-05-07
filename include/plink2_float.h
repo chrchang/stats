@@ -28,6 +28,9 @@
 #ifndef DBL_MAX
 #  define DBL_MAX 1.7976931348623157e308
 #endif
+#ifndef DBL_MIN
+#  define DBL_MIN 2.2250738585072014e-308
+#endif
 #ifndef FLT_MAX
 #  define FLT_MAX S_CAST(float, 3.40282347e38)
 #endif
@@ -217,6 +220,17 @@ HEADER_INLINE double ceil_smalleps_limit32(double xx, double limit) {
 
 HEADER_INLINE double ceil_smalleps(double xx) {
   return S_CAST(int64_t, (xx + 1) * (1 - kSmallEpsilon));
+}
+
+HEADER_INLINE double flush_if_denormal(double xx) {
+  if (fabs(xx) < DBL_MIN) {
+    return 0.0;
+  }
+  return xx;
+}
+
+HEADER_INLINE double exp_flush(double xx) {
+  return flush_if_denormal(exp(xx));
 }
 
 #ifdef __cplusplus

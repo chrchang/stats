@@ -22,13 +22,13 @@
 namespace plink2 {
 #endif
 
-double LnBinomCoeff(int32_t n, int32_t k);
+double LnBinomCoeff(int64_t n, int64_t k);
 
-double LnBinomMass(int32_t k, int32_t n, double p);
+double LnBinomMass(int64_t k, int64_t n, double p);
 
 BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp);
 
-double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp);
+double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp);
 
 #ifdef __cplusplus
 }

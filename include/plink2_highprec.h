@@ -400,6 +400,7 @@ HEADER_INLINE dd_real ddr_add5(const dd_real a, const dd_real b, const dd_real c
   return ddr_add(ddr_add(ddr_add(ddr_add(a, b), c), d), e);
 }
 
+// Assumes xx is a nonnegative integer < 2^52.
 dd_real ddr_lfact(double xx);
 
 HEADER_INLINE dd_real ddr_add_lfacts(const double a, const double b) {

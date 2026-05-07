@@ -417,6 +417,8 @@ dd_real ddr_log(const dd_real a) {
   return x;
 }
 
+// Assumes xx is a nonnegative integer < 2^52; if we ever need more range,
+// replace ddr_muld(logn, xx + 0.5) with a ddr_mul() operation.
 dd_real ddr_lfact(double xx) {
   // It can be shown from the Euler-Maclaurin approximation that
   //   ln (n!) = n ln n - n + 0.5 ln (2*pi*n) + n^{-1}/12 - n^{-3}/360
@@ -765,6 +767,7 @@ BoolErr CompareFactorialProducts(uint32_t ffac_ct, int64_t pow2, int64_t numer_p
   if (max_ffac_size == 0) {
     // All factorials cancel out.
     *cmp_resultp = pow2;
+    // bugfix (4 May 2026): forgot that this was in non-log units
     *dbl_ptr = ldexp(1.0, pow2);
     return 0;
   }

@@ -25,7 +25,8 @@
 namespace plink2 {
 #endif
 
-double LnBinomCoeff(int32_t n, int32_t k) {
+// Assumes n < 2^52.
+double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
@@ -33,17 +34,17 @@ double LnBinomCoeff(int32_t n, int32_t k) {
                  ddr_add_lfacts(k, n-k)).x[0];
 }
 
-// Assumes 0 <= k <= n, 0 < p < 1.
+// Assumes 0 <= k <= n < 2^52, 0 < p < 1.
 // If p is too close to 1 to be well-represented by a float64, pass in (n-k, n,
 // 1-p) instead.
-double LnBinomMass(int32_t k, int32_t n, double p) {
+double LnBinomMass(int64_t k, int64_t n, double p) {
   dd_real p_ddr = ddr_maked(p);
   const dd_real q_ddr = ddr_sub(ddr_maked(1), p_ddr);
   if (k == 0) {
     // don't need to preserve original p_ddr
     p_ddr = q_ddr;
   }
-  dd_real ln_p_ddr = _ddr_log2;
+  dd_real ln_p_ddr = ddr_negate(_ddr_log2);
   if (p != 0.5) {
     ln_p_ddr = ddr_log(p_ddr);
   }
@@ -51,7 +52,7 @@ double LnBinomMass(int32_t k, int32_t n, double p) {
   if (k == n) {
     return k_ln_p_ddr.x[0];
   }
-  dd_real ln_q_ddr = _ddr_log2;
+  dd_real ln_q_ddr = ddr_negate(_ddr_log2);
   if (p != 0.5) {
     ln_q_ddr = ddr_log(q_ddr);
   }
@@ -737,14 +738,14 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   return 0;
 }
 
-// succ_odds_ratio assumed to be in (10^{-298}, 10^298) or so.
-// Just returns 0 if the log-p-value > 1 - 2^{-54} since additional precision
-// in that direction is expected to be irrelevant.  (Reverse the test direction
-// when you do actually want that precision.)
-double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp) {
-  // In this case, there's no need to detect likelihood ties, so
-  // succ_odds_ratio can just be a float64.
-
+// Requires 0 <= obs_succ <= obs_tot <= 2^53; should always work for
+// succ_odds_ratio in (10^{-291}, 10^291) but may start breaking a bit past
+// that.  (Larger obs_succ and obs_tot are allowed than for the 2-sided test
+// because there's no risk of needing to expand gigantic ratios of factorials
+// to handle likelihood near-ties correctly.  For the same reason, a tiny
+// rounding error in representing succ_odds_ratio can't be consequential, so we
+// don't go through the trouble of exposing an exact-fraction interface.)
+double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp) {
   // Normalize to alternative hypothesis = #succ-less-than-expected, so the
   // remainder is essentially a cmf calculation with parameter succ.
   if (succ_is_greater_alt) {
@@ -756,9 +757,10 @@ double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_rati
   if (succ > fail * succ_odds_ratio) {
     // We're at or to the right of the mode.
     // Start by computing an upper bound on the right-sum, and then iterating
-    // leftward until we either know the p-value > 1 - 2^{-54} (at which point
-    // we return 0), or remaining left likelihoods are smaller than the
-    // precision limit.
+    // leftward until we either know the p-value > 1 - DBL_MIN (at which point
+    // we just return 0, don't want to risk imposing a surprising
+    // denormal-handling performance penalty for no good reason), or remaining
+    // left likelihoods are smaller than the precision limit.
     const double first_right_mult = succ_odds_ratio * fail / (succ + 1);
     // r + r^2 + ... = r / (1-r)
     const double right_upper_bound = 0.5 * midp + first_right_mult / (1 - first_right_mult);
@@ -769,7 +771,7 @@ double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_rati
 
     // Rescale our starting lastp so that we overflow to INFINITY when we'd
     // want to early-exit and return 0; this saves us a comparison in the loop.
-    const double left_rescale = (DBL_MAX / (1LL << 54)) / right_upper_bound;
+    const double left_rescale = (DBL_MAX * DBL_MIN) / right_upper_bound;
     double lastp = left_rescale;
     double left_sum = left_rescale;
     while (1) {
@@ -815,10 +817,10 @@ double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_rati
   // cancellation error, but I'll start with just the slow-and-accurate
   // calculation.
   const double ln_first_inward_mult = log(succ_odds_ratio * fail / (succ + 1));
-  double overflow_steps_lower_bound = 0x7fffffff;
-  // log(DBL_MAX / (2^31 - 1)) = 688.295...
-  if (ln_first_inward_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
-    overflow_steps_lower_bound = 688.295 / ln_first_inward_mult;
+  double overflow_steps_lower_bound = 1LL << 53;
+  // log(DBL_MAX / 2^53) = 673.0459...
+  if (ln_first_inward_mult > (673.0459 / S_CAST(double, 1LL << 53))) {
+    overflow_steps_lower_bound = 673.0459 / ln_first_inward_mult;
   }
   const double obs_totd = obs_tot;
   const double modal_succ = obs_totd * succ_odds_ratio / (1 + succ_odds_ratio);

@@ -1,18 +1,18 @@
 # cython: language_level=3
 from libc.stdint cimport int64_t, uint32_t, int32_t
-from libc.math cimport exp
+from libc.math cimport NAN
 import fractions
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 cdef extern from "../include/binom.h" namespace "plink2":
     ctypedef uint32_t BoolErr
 
-    double LnBinomMass(int32_t k, int32_t n, double p) nogil
+    double LnBinomMass(int64_t k, int64_t n, double p) nogil
 
     BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) nogil
 
-    double BinomOneSidedLnP(int32_t obs_succ, int32_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp)
+    double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp)
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -23,80 +23,135 @@ cdef extern from "../include/fisher.h" namespace "plink2":
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
 
 
+cdef extern from "../include/plink2_float.h" namespace "plink2":
+    cdef enum:
+        kLn2
+
+    double exp_flush(double xx) nogil
+
+
 cdef extern from "../include/plink2_hwe.h" namespace "plink2":
     BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) nogil
 
 
-# n must be in [1, 2^31 - 1], and k must be in [0, n].
+# n must be in [0, 2^31) for the two-sided test, and [0, 2^52) for one-sided
+# tests.  k must be in [0, n].
 #
 # For the two-sided test, to enable precise classification of likelihood ties
-# and near-ties, p is expected to be a fractions.Fraction in (2^{-63}, 1) with
-# positive denominator < 2^63, or valid input to the fractions.Fraction()
-# constructor (e.g. float, string, decimal.Decimal).  Note that float values
-# smaller than 1/512 may convert to a fraction with too large of a denominator;
-# if an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a
-# string, otherwise a generic workaround is to pass in
+# and near-ties, p is expected to be a fractions.Fraction equal to 0 or in
+# (2^{-63}, 1] with positive denominator < 2^63, or valid input to the
+# fractions.Fraction() constructor (e.g. float, string, decimal.Decimal).  Note
+# that float values smaller than 1/512 may convert to a fraction with too large
+# of a denominator; if an exact decimal value (e.g. 0.0001) is intended, it can
+# be passed in as a string, otherwise a generic workaround is to pass in
 #   fractions.Fraction(p).limit_denominator(2**63 - 1).
 # (The latter conversion isn't done automatically because it would water down
 # what this function promises about likelihood ties and near-ties.)
 #
-# For the one-sided tests, p is expected to be a float in (2^{-63}, 1), or
-# valid input to the float() constructor.  (Likelihood-ties don't matter in
-# this case.)
-def binom(int32_t k, int32_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
+# For the one-sided tests, p is expected to be a float equal to 0 or in
+# [2^{-960}, 1], or valid input to the float() constructor.  (Likelihood-ties
+# don't matter in this case.)  2^{-960} isn't a precise bound, but it's a
+# decently round number for the function contracts here.
+def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
     cdef double ln_result
     if alternative == "two-sided":
+        if n > 0x7fffffff:
+            raise RuntimeError("n must be less than 2^31 for alternative='two-sided'.")
         if not isinstance(p, fractions.Fraction):
             p = fractions.Fraction(p)
         numer, denom = p.as_integer_ratio()
-        if numer * (2**63) <= denom or numer >= denom:
-            raise RuntimeError("p must be in (2^{-63}, 1).")
-        if denom >= 2**63:
-            raise RuntimeError("for the two-sided test, p must be precisely representable as a fraction with denominator < 2^63; if an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
-        if BinomLnP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, &ln_result):
-            raise MemoryError()
+        if denom == 1:
+            # Degenerate cases.
+            if numer != 0 and numer != 1:
+                raise RuntimeError("p must be 0, or in (2^{-63}, 1].")
+            if (numer == 0 and k == 0) or (numer == 1 and k == n):
+                if midp:
+                    ln_result = -kLn2
+                else:
+                    ln_result = 0.0
+            else:
+                if not logp:
+                    return 0.0
+                ln_result = NAN
+        else:
+            if numer * (2**63) <= denom or numer >= denom:
+                raise RuntimeError("p must be 0, or in (2^{-63}, 1].")
+            if denom >= 2**63:
+                raise RuntimeError("for the two-sided test, p must be precisely representable as a fraction with denominator < 2^63; if an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
+            if BinomLnP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, &ln_result):
+                raise MemoryError()
         if logp:
             return ln_result
-        return exp(ln_result)
+        return exp_flush(ln_result)
     cdef bint k_is_greater_alt = (alternative == "greater")
     if alternative != "less" and not k_is_greater_alt:
         raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
+    if n >= (1LL << 52):
+        raise RuntimeError("n must be less than 2^52.")
     cdef double pfloat = float(p)
-    # strictly speaking, BinomOneSidedLnP() still works with p as small as
-    # 10^{-298}, but let's minimize the difference between the one-sided and
-    # two-sided interface for now.
-    if pfloat <= 1.0842021724855044e-19 or not pfloat < 1:
-        raise RuntimeError("p must be in (2^{-63}, 1).")
-    ln_result = BinomOneSidedLnP(k, n, pfloat / (1 - pfloat), k_is_greater_alt, midp)
+    if pfloat == 0.0 or pfloat == 1.0:
+        # Degenerate cases.
+        pass
+    else:
+        if pfloat < 0.5**960 or not pfloat <= 1.0:
+            raise RuntimeError("p must be 0, or in (2^{-960}, 1].")
+        ln_result = BinomOneSidedLnP(k, n, pfloat / (1 - pfloat), k_is_greater_alt, midp)
     if logp:
         return ln_result
-    return exp(ln_result)
+    return exp_flush(ln_result)
 
 # Returns likelihood of exactly k successes.
 # Not intended to be as general as R dbinom().
-def dbinom(int32_t k, int32_t n, double p, bint logp=0):
+def dbinom(int64_t k, int64_t n, double p=0.5, bint logp=0):
+    if n < 0 or n >= (1LL << 52):
+        raise RuntimeError("n must be in [0, 2^52).")
+    if p < 0.0 or not p <= 1.0:
+        raise RuntimeError("p must be in [0, 1].")
     if k < 0 or k > n:
-        raise RuntimeError("k must be nonnegative and <= n.")
-    if p <= 0.0 or not p < 1.0:
-        raise RuntimeError("p must be in (0, 1).")
+        if logp:
+            return NAN
+        return 0.0
+    if p == 0.0 or p == 1.0:
+        if (p == 0.0 and k == 0) or (p == 1.0 and k == n):
+            if logp:
+                return 0.0
+            return 1.0
+        if logp:
+            return NAN
+        return 0.0
     cdef double ln_result = LnBinomMass(k, n, p)
     if logp:
+        # This can only return a denormal if p was already denormal, so
+        # flushing is less relevant.
         return ln_result
-    return exp(ln_result)
+    return exp_flush(ln_result)
 
-# Returns cumulative mass function, e.g. pbinom(n, n) is 1 for nonnegative n.
+# Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 # Not intended to be as general as R pbinom().
-def pbinom(int32_t k, int32_t n, double p, bint logp=0):
-    if k < 0 or k > n:
-        raise RuntimeError("k must be nonnegative and <= n.")
-    if p <= 0.0 or not p < 1.0:
-        raise RuntimeError("p must be in (0, 1).")
-    cdef double ln_result = BinomOneSidedLnP(k, n, p / (1-p), 0, 0)
+def pbinom(int64_t k, int64_t n, double p=0.5, bint logp=0):
+    if n < 0 or n >= (1LL << 52):
+        raise RuntimeError("n must be in [0, 2^52).")
+    if p != 0.0 and (p < 0.5**960  or not p <= 1.0):
+        raise RuntimeError("p must be 0, or in (2^{-960}, 1].")
+    cdef double ln_result
+    if k < 0:
+        # Degenerate cases.
+        if not logp:
+            return 0.0
+        ln_result = NAN
+    elif k >= n or p == 0.0:
+        ln_result = 0.0
+    elif p == 1.0:
+        if not logp:
+            return 0.0
+        ln_result = NAN
+    else:
+        ln_result = BinomOneSidedLnP(k, n, p / (1-p), 0, 0)
     if logp:
         return ln_result
-    return exp(ln_result)
+    return exp_flush(ln_result)
 
 # Todo: qbinom function.
 
@@ -159,7 +214,7 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
              raise RuntimeError("tables larger than 2x3 not yet supported")
     if logp:
         return ln_result
-    return exp(ln_result)
+    return exp_flush(ln_result)
 
 
 # "HWE" is short for Hardy-Weinberg Equilibrium.
@@ -189,4 +244,4 @@ def HWE(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", b
             raise MemoryError()
     if logp:
         return ln_result
-    return exp(ln_result)
+    return exp_flush(ln_result)

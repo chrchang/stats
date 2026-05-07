@@ -2,6 +2,9 @@
 import exact_tests
 import math
 import pytest
+import sys
+
+DBL_MIN = sys.float_info.min
 
 # These test cases were scraped from
 #   scipy/stats/tests/test_morestats.py
@@ -67,11 +70,13 @@ scipy_binom_cases = [
     ]
 
 # This test case was scraped from
-#   scipy/stats/tests/test_discrete_distns.py
+#   scipy/stats/tests/test_{discrete_distns,multivariate}.py
 # (obvious todo: add more tests)
 # Entries are of the form (k, n, p, p_want)
 scipy_dbinom_cases = [
     (996, 1000, 0.01, 0.0),
+    (3, 7, 0.3, 0.2268944999999999),
+    (6, 14, 0.1, 0.0012926930316300004),
     ]
 
 # These test cases were scraped from
@@ -141,25 +146,109 @@ r_HWE_cases = [
 def test_binom():
     for test_case in scipy_binom_cases:
         pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative=test_case[3])
-        assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=2.23e-308), str(test_case)
+        assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN), str(test_case)
     # possible todo: port test_binomtest2, test_binomtest3
-    pval = exact_tests.binom(0, 8, midp=True)
-    logp = exact_tests.binom(0, 8, midp=True, logp=True)
-    assert pval == pytest.approx(1/256, rel=1e-13, abs=2.23e-308), "midp"
-    assert logp == pytest.approx(math.log(1/256), rel=1e-13, abs=2.23e-308), "logp"
+    assert exact_tests.binom(0, 8, midp=True) == pytest.approx(1/256, rel=1e-13, abs=0)
+    assert exact_tests.binom(0, 0) == 1.0
+    assert exact_tests.binom(0, 0, midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 0.0) == 1.0
+    assert exact_tests.binom(0, 2, 0.0, midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 1.0) == 0.0
+    assert exact_tests.binom(0, 2, 1.0, midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(0, 2, 1.0, logp=True))
+    assert math.isnan(exact_tests.binom(0, 2, 1.0, midp=True, logp=True))
+    assert exact_tests.binom(1, 2, 0.0) == 0.0
+    assert exact_tests.binom(1, 2, 0.0, midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(1, 2, 0.0, logp=True))
+    assert math.isnan(exact_tests.binom(1, 2, 0.0, midp=True, logp=True))
+    assert exact_tests.binom(1, 2, 1.0) == 0.0
+    assert exact_tests.binom(1, 2, 1.0, midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(1, 2, 1.0, logp=True))
+    assert math.isnan(exact_tests.binom(1, 2, 1.0, midp=True, logp=True))
+    assert exact_tests.binom(2, 2, 0.0) == 0.0
+    assert exact_tests.binom(2, 2, 0.0, midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(2, 2, 0.0, logp=True))
+    assert math.isnan(exact_tests.binom(2, 2, 0.0, midp=True, logp=True))
+    assert exact_tests.binom(2, 2, 1.0) == 1.0
+    assert exact_tests.binom(2, 2, 1.0, midp=True) == 0.5
+    assert exact_tests.binom(0, 1022) == pytest.approx(0.5 ** 1021, rel=1e-13, abs=0)
+    # Tests are intended to be agnostic to denormal-flushing behavior.
+    #
+    # In this case, true value of exact_tests.binom(0, 1023) is DBL_MIN, we
+    # return 0 in my testing since computed log-pvalue is a tad smaller than
+    # log(DBL_MIN) and we flush the would-be denormal to zero, that's
+    # acceptable.
+    #
+    # Returning a number within a small relative error of DBL_MIN would also be
+    # acceptable.  But I'd rather not allow returning something like 1.75 *
+    # DBL_MIN, so I've set up this test accordingly.
+    pval = exact_tests.binom(0, 1023)
+    if pval != 0.0:
+        assert pval == pytest.approx(0.5 ** 1022, rel=1e-13, abs=0)
+
+    # True value is small enough that zero should be returned even if we don't
+    # flush denormals.
+    assert exact_tests.binom(0, 1077) == 0.0
+
+    # huge-magnitude log
+    assert exact_tests.binom(0, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2), rel=1e-13, abs=0)
+    assert exact_tests.binom(1, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2) + math.log(999999999), rel=1e-13, abs=0)
+    # tiny-magnitude log, unimportant case but may as well capture that we get
+    # it right
+    assert exact_tests.binom(6851, 9999, alternative="less", logp=True) == pytest.approx(-7.346619758438343e-308, abs=0)
+    assert exact_tests.binom(6852, 9999, alternative="less", logp=True) == pytest.approx(-3.3723516527696143e-308, abs=0)
+    # accept either denormal or flush-to-zero
+    assert exact_tests.binom(6853, 9999, alternative="less", logp=True) == pytest.approx(0.0, abs=DBL_MIN)
+
+    assert exact_tests.binom(9998, 9999, alternative="less", logp=True) == 0.0
+    # probable todo: test exception-throwing cases
 
 
 def test_dbinom():
     for test_case in scipy_dbinom_cases:
         pval = exact_tests.dbinom(test_case[0], test_case[1], test_case[2])
-        assert pval == pytest.approx(test_case[3], rel=1e-10, abs=2.23e-308), str(test_case)
+        assert pval == pytest.approx(test_case[3], rel=1e-10, abs=DBL_MIN), str(test_case)
+    assert exact_tests.dbinom(0, 0) == 1.0
+    assert exact_tests.dbinom(-1, 0) == 0.0
+    assert math.isnan(exact_tests.dbinom(-1, 0, logp=True))
+    assert exact_tests.dbinom(1, 0) == 0.0
+    assert math.isnan(exact_tests.dbinom(1, 0, logp=True))
+    assert exact_tests.dbinom(0, 2, 0.0) == 1.0
+    assert exact_tests.dbinom(1, 2, 0.0) == 0.0
+    assert math.isnan(exact_tests.dbinom(1, 2, 0.0, logp=True))
+    assert exact_tests.dbinom(2, 2, 0.0) == 0.0
+    assert math.isnan(exact_tests.dbinom(2, 2, 0.0, logp=True))
+    assert exact_tests.dbinom(0, 2, 1.0) == 0.0
+    assert math.isnan(exact_tests.dbinom(0, 2, 1.0, logp=True))
+    assert exact_tests.dbinom(1, 2, 1.0) == 0.0
+    assert math.isnan(exact_tests.dbinom(1, 2, 1.0, logp=True))
+    assert exact_tests.dbinom(2, 2, 1.0) == 1.0
+    assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-13, abs=0)
+    assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-13, abs=0)
 
 
 def test_pbinom():
     for test_case in scipy_binom_cases:
         if test_case[3] == "less":
             pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative="less")
-            assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=2.23e-308)
+            assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
+    assert exact_tests.pbinom(0, 0) == 1.0
+    assert exact_tests.pbinom(-1, 0) == 0.0
+    assert math.isnan(exact_tests.pbinom(-1, 0, logp=True))
+    assert exact_tests.pbinom(1, 0) == 1.0
+    assert exact_tests.pbinom(0, 2, 0.0) == 1.0
+    assert exact_tests.pbinom(0, 2, 1.0) == 0.0
+    assert math.isnan(exact_tests.pbinom(0, 2, 1.0, logp=True))
+    assert exact_tests.pbinom(1, 2, 0.0) == 1.0
+    assert exact_tests.pbinom(1, 2, 1.0) == 0.0
+    assert math.isnan(exact_tests.pbinom(1, 2, 1.0, logp=True))
+    assert exact_tests.pbinom(2, 2, 0.0) == 1.0
+    assert exact_tests.pbinom(2, 2, 1.0) == 1.0
+    assert exact_tests.pbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-13, abs=0)
+    assert exact_tests.pbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(1000000000), rel=1e-13, abs=0)
+    assert exact_tests.pbinom(6851, 9999, logp=True) == pytest.approx(-7.346619758438343e-308, abs=0)
+    assert exact_tests.pbinom(6852, 9999, logp=True) == pytest.approx(-3.3723516527696143e-308, abs=0)
+    assert exact_tests.pbinom(6853, 9999, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
 
 def test_fisher():
@@ -168,16 +257,16 @@ def test_fisher():
     # table sum > 3000).
     for test_case in scipy_fisher22_cases:
         pval = exact_tests.fisher(test_case[0], alternative=test_case[1])
-        assert pval == pytest.approx(test_case[2], rel=1e-13, abs=2.23e-308), str(test_case)
+        assert pval == pytest.approx(test_case[2], rel=1e-13, abs=DBL_MIN), str(test_case)
     pval = exact_tests.fisher([[4, 0], [0, 4]], midp=True)
     logp = exact_tests.fisher([[4, 0], [0, 4]], midp=True, logp=True)
-    assert pval == pytest.approx(1/70, rel=1e-13, abs=2.23e-308), "midp"
-    assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=2.23e-308), "logp"
+    assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
+    assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
 
 
 def test_HWE():
     for test_case in r_HWE_cases:
         pval = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
         logp = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4], logp=True)
-        assert pval == pytest.approx(test_case[5], rel=1e-6, abs=2.23e-308), str(test_case)
-        assert math.exp(logp) == pytest.approx(pval, rel=1e-13, abs=2.23e-308), str("logp")
+        assert pval == pytest.approx(test_case[5], rel=1e-6, abs=0), str(test_case)
+        assert math.exp(logp) == pytest.approx(pval, rel=1e-13, abs=0), str("logp")
