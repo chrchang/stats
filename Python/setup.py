@@ -29,7 +29,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.3.1",
+    version="0.3.2",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",
@@ -46,7 +46,7 @@ setuptools.setup(
     ],
     package_dir={"": "src"},
     packages=setuptools.find_namespace_packages(where="src"),
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     libraries=[clib],
     ext_modules=cythonize(ext_modules),
 )

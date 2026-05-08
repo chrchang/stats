@@ -3,12 +3,25 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
+
+cdef extern from "../include/plink2_highprec.h" namespace "plink2":
+    cdef struct dd_real_struct:
+        double x[2]
+
+    int32_t ddr_is_zero(const dd_real_struct a)
+
+    int32_t ddr_is_one(const dd_real_struct a)
+
+    int32_t ddr_ltd(const dd_real_struct a, double b)
+
+    int32_t ddr_leqd(const dd_real_struct a, double b)
+
 
 cdef extern from "../include/binom.h" namespace "plink2":
     ctypedef uint32_t BoolErr
 
-    double LnBinomMass(int64_t k, int64_t n, double p) nogil
+    double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
     BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) nogil
 
@@ -34,24 +47,51 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
     BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) nogil
 
 
+# For dbinom() and pbinom(), we want to be able to deliver <1 ULP relative
+# error (at least for n < ~10^10, p >= 2^{-53}) for the calculation the caller
+# actually wants; and similarly, qbinom() should be based on a cmf
+# approximation with at least 53-bit accuracy.
+#
+# Of course, a calculation with e.g. p=1/3 is a reasonable thing to want, yet
+# 1/3 cannot be precisely represented by a float64.  We won't achieve our goal
+# if we force the caller to misrepresent p by up to 0.5 ULPs up front.
+#
+# So these functions allow p to be a numbers.Number(), we convert it to a
+# dd_real ("double-double") with ~106 effective mantissa bits instead of the
+# usual 53, and then we perform the underlying calculation with >53 bits of
+# precision unless n is too large for that to be practical.
+cdef dd_real_struct DdrMake(object p):
+    cdef dd_real_struct p_ddr
+    if isinstance(p, float):
+        p_ddr.x[0] = p
+        p_ddr.x[1] = 0.0
+    else:
+        p_ddr.x[0] = float(p)
+        p_ddr.x[1] = float(p - p_ddr.x[0])
+    return p_ddr
+
+
 # n must be in [0, 2^31) for the two-sided test, and [0, 2^52) for one-sided
-# tests.  k must be in [0, n].
+# tests.  k must be in [0, n].  p must be in [0, 1].
 #
-# For the two-sided test, to enable precise classification of likelihood ties
-# and near-ties, p is expected to be a fractions.Fraction equal to 0 or in
-# (2^{-63}, 1] with positive denominator < 2^63, or valid input to the
-# fractions.Fraction() constructor (e.g. float, string, decimal.Decimal).  Note
-# that float values smaller than 1/512 may convert to a fraction with too large
-# of a denominator; if an exact decimal value (e.g. 0.0001) is intended, it can
-# be passed in as a string, otherwise a generic workaround is to pass in
-#   fractions.Fraction(p).limit_denominator(2**63 - 1).
-# (The latter conversion isn't done automatically because it would water down
-# what this function promises about likelihood ties and near-ties.)
+# For the two-sided test, p should be automatically convertible to a
+# fractions.Fraction with denominator < 2^63.  This may require you to clarify
+# your intent when passing in p < 1/512:
+# - If an exact decimal value (e.g. 0.0001) is intended, you can pass it in as
+#   a string.
+# - If another sort of exact fraction is intended, pass in
+#     fractions.Fraction(numer, denom)
+# - Otherwise, you can use the generic approximation
+#     fractions.Fraction(p).limit_denominator(2**63 - 1)
+# The benefit of this interface is that it enables *perfect* handling of
+# likelihood near-ties; we aren't limited to even qbinom()'s ~53 bits.
 #
-# For the one-sided tests, p is expected to be a float equal to 0 or in
-# [2^{-960}, 1], or valid input to the float() constructor.  (Likelihood-ties
-# don't matter in this case.)  2^{-960} isn't a precise bound, but it's a
-# decently round number for the function contracts here.
+# Since there is negligible practical difference between ~45-bit and 53-bit
+# p-value precision, the implementation aims for the former rather than the
+# latter.  (This may seem inconsistent with the finicky handling of likelihood
+# near-ties, but there's an important distinction: in the rare scenarios where
+# a likelihood near-tie does show up, handling it incorrectly results in
+# *large* relative error.)
 def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
@@ -93,18 +133,27 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
     cdef double pfloat = float(p)
     if pfloat == 0.0 or pfloat == 1.0:
         # Degenerate cases.
-        pass
+        if (pfloat == 0.0 and k == 0) or (pfloat == 1.0 and k == n):
+            if midp:
+                ln_result = -kLn2
+            else:
+                ln_result = 0.0
+        else:
+            if not logp:
+                return 0.0
+            ln_result = NAN
     else:
         if pfloat < 0.5**960 or not pfloat <= 1.0:
-            raise RuntimeError("p must be 0, or in (2^{-960}, 1].")
+            raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
         ln_result = BinomOneSidedLnP(k, n, pfloat / (1 - pfloat), k_is_greater_alt, midp)
     if logp:
         return ln_result
     return exp_flush(ln_result)
 
-# Returns likelihood of exactly k successes.
-# Not intended to be as general as R dbinom().
-def dbinom(int64_t k, int64_t n, double p=0.5, bint logp=0):
+
+# Returns likelihood of exactly k successes.  Relative error should be <1 ULP
+# unless n is huge.
+def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     if p < 0.0 or not p <= 1.0:
@@ -121,34 +170,39 @@ def dbinom(int64_t k, int64_t n, double p=0.5, bint logp=0):
         if logp:
             return NAN
         return 0.0
-    cdef double ln_result = LnBinomMass(k, n, p)
-    if logp:
-        # This can only return a denormal if p was already denormal, so
-        # flushing is less relevant.
-        return ln_result
-    return exp_flush(ln_result)
+    cdef dd_real_struct p_ddr = DdrMake(p)
+    return BinomMass(k, n, p_ddr, logp)
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
-# Not intended to be as general as R pbinom().
-def pbinom(int64_t k, int64_t n, double p=0.5, bint logp=0):
+#
+# If sloppy=True, this is essentially equivalent to a binom() call with
+# alternative="less", which uses a fast, comparatively sloppy algorithm that
+# doesn't try to get the last few mantissa bits right.
+# Otherwise, relative error should be <1 ULP unless n is huge.
+# (er, non-sloppy calculation not actually implemented yet, coming soon)
+def pbinom(int64_t k, int64_t n, object p=0.5, bint logp=0, bint sloppy=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    if p != 0.0 and (p < 0.5**960  or not p <= 1.0):
-        raise RuntimeError("p must be 0, or in (2^{-960}, 1].")
+    cdef dd_real_struct p_ddr = DdrMake(p)
+    if not ddr_is_zero(p_ddr) and (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
+        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
     cdef double ln_result
     if k < 0:
         # Degenerate cases.
         if not logp:
             return 0.0
         ln_result = NAN
-    elif k >= n or p == 0.0:
+    elif k >= n or ddr_is_zero(p_ddr):
         ln_result = 0.0
-    elif p == 1.0:
+    elif ddr_is_one(p_ddr):
         if not logp:
             return 0.0
         ln_result = NAN
     else:
-        ln_result = BinomOneSidedLnP(k, n, p / (1-p), 0, 0)
+        if not sloppy:
+            # TODO
+            pass
+        ln_result = BinomOneSidedLnP(k, n, p_ddr.x[0] / (1-p_ddr.x[0]), 0, 0)
     if logp:
         return ln_result
     return exp_flush(ln_result)

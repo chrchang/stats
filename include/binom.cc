@@ -35,30 +35,35 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
-// If p is too close to 1 to be well-represented by a float64, pass in (n-k, n,
+// If p is too close to 1 to be well-represented by a dd_real, pass in (n-k, n,
 // 1-p) instead.
-double LnBinomMass(int64_t k, int64_t n, double p) {
-  dd_real p_ddr = ddr_maked(p);
+double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
   const dd_real q_ddr = ddr_sub(ddr_maked(1), p_ddr);
   if (k == 0) {
     // don't need to preserve original p_ddr
     p_ddr = q_ddr;
   }
   dd_real ln_p_ddr = ddr_negate(_ddr_log2);
-  if (p != 0.5) {
+  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
     ln_p_ddr = ddr_log(p_ddr);
   }
   const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
+  dd_real ln_prob_ddr;
   if (k == n) {
-    return k_ln_p_ddr.x[0];
+    ln_prob_ddr = k_ln_p_ddr;
+  } else {
+    dd_real ln_q_ddr = ddr_negate(_ddr_log2);
+    if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
+      ln_q_ddr = ddr_log(q_ddr);
+    }
+    const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
+    ln_prob_ddr = ddr_sub(ddr_add3(k_ln_p_ddr, nmk_ln_q_ddr, ddr_lfact(n)),
+                          ddr_add_lfacts(k, n-k));
   }
-  dd_real ln_q_ddr = ddr_negate(_ddr_log2);
-  if (p != 0.5) {
-    ln_q_ddr = ddr_log(q_ddr);
+  if (logp) {
+    return ln_prob_ddr.x[0];
   }
-  const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
-  return ddr_sub(ddr_add3(k_ln_p_ddr, nmk_ln_q_ddr, ddr_lfact(n)),
-                 ddr_add_lfacts(k, n-k)).x[0];
+  return ddr_exp(ln_prob_ddr).x[0];
 }
 
 // Assumes exponent > 0.
@@ -651,7 +656,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
     return 0;
   }
 
-  succ = 2 * modal_succ - succ;
+  succ = 2 * modal_succ - (succ + smallest_evaluated_succ) * 0.5;
   if (succ > obs_totd) {
     succ = obs_totd;
   }
@@ -738,7 +743,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   return 0;
 }
 
-// Requires 0 <= obs_succ <= obs_tot <= 2^53; should always work for
+// Requires 0 <= obs_succ <= obs_tot < 2^52; should always work for
 // succ_odds_ratio in (10^{-291}, 10^291) but may start breaking a bit past
 // that.  (Larger obs_succ and obs_tot are allowed than for the 2-sided test
 // because there's no risk of needing to expand gigantic ratios of factorials
@@ -817,10 +822,10 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
   // cancellation error, but I'll start with just the slow-and-accurate
   // calculation.
   const double ln_first_inward_mult = log(succ_odds_ratio * fail / (succ + 1));
-  double overflow_steps_lower_bound = 1LL << 53;
-  // log(DBL_MAX / 2^53) = 673.0459...
-  if (ln_first_inward_mult > (673.0459 / S_CAST(double, 1LL << 53))) {
-    overflow_steps_lower_bound = 673.0459 / ln_first_inward_mult;
+  double overflow_steps_lower_bound = 1LL << 52;
+  // log(DBL_MAX / 2^52) = 673.739...
+  if (ln_first_inward_mult > (673.739 / S_CAST(double, 1LL << 52))) {
+    overflow_steps_lower_bound = 673.739 / ln_first_inward_mult;
   }
   const double obs_totd = obs_tot;
   const double modal_succ = obs_totd * succ_odds_ratio / (1 + succ_odds_ratio);
@@ -879,6 +884,21 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
   }
   return starting_lnprob + log(left_sum);
 }
+
+// Supports n up to 2^52 - 1, and aims for quantile relative error < 2^{-54}
+// for non-huge values of n.
+// - The initial relative-likelihood should be accurate to at least ~60 bits.
+// - We evaluate the inner part of the tailsum, let's say lastp >= 2^{-12},
+//   with full dd_real accuracy.  Past that point it should be fine to drop
+//   down to regular float64 accuracy.
+// The goal is to support a higher-level qbinom() function where e.g.
+//   qbinom(fractions.Fraction(1, 9), 2, fractions.Fraction(2/3))
+// can be trusted to be 0, and
+//   qbinom(fractions.Fraction(2**53 + 1, (2**53) * 9), 2, fractions.Fraction(2/3))
+// can be trusted to be 1.
+int32_t Qbinom(dd_real ln_quantile_ddr, int64_t n, dd_real p_ddr) {
+}
+
 
 #ifdef __cplusplus
 }

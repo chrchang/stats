@@ -9,13 +9,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exact_tests"
-version = "0.3.1"
+version = "0.3.2"
 authors = [
   { name="Christopher Chang", email="chrchang@alumni.caltech.edu" },
 ]
 description = "Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

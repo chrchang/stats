@@ -17,6 +17,7 @@
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "plink2_base.h"
+#include "plink2_highprec.h"
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -24,7 +25,7 @@ namespace plink2 {
 
 double LnBinomCoeff(int64_t n, int64_t k);
 
-double LnBinomMass(int64_t k, int64_t n, double p);
+double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp);
 
 BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp);
 
