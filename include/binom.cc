@@ -749,7 +749,7 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
 }
 
 // ibeta_fraction2_ln_eps() and dependencies adapted from Boost 1.91.0.
-static const double kLentzFpmin = 1.0e-30;
+static const double kLentzFpmin = DBL_MIN * 16;
 
 // We want more than 6 digits of accuracy here.
 static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
@@ -802,12 +802,31 @@ double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   return s1;
 }
 
-double ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
+dd_real ddr_expm1(const dd_real a) {
+  // Just aims for ~70-bit accuracy.
+  if (fabs(a.x[0]) < 1.0 / (1LL << 35)) {
+    // e^x - 1 = x + (x^2)/2 + (x^3)/6 + ...
+    return ddr_add(a, ddr_muld(ddr_mul(a, a), 0.5));
+  }
+  return ddr_addd(ddr_exp(a), -1.0);
+}
+
+dd_real ddr_log1p(const dd_real a) {
+  // Just aims for ~70-bit accuracy.
+  if (fabs(a.x[0]) < 1.0 / (1LL << 35)) {
+    // log(1+x) = x - (x^2)/2 + (x^3)/3 - ...
+    return ddr_add(a, ddr_muld(ddr_mul(a, a), -0.5));
+  }
+  return ddr_log(ddr_addd(a, 1.0));
+}
+
+dd_real ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
   // returns log((x^a)(y^b) / Beta(a,b))
   //
   // normalized always true
   // prefix always 1
   // aa and bb always large
+  printf("%.17g %.17g %.17g %.17g\n", aa, bb, xx, yy);
   double cc = aa + bb;
   const double gh = kLanczosDoubleG - 0.5;
   const double agh = aa + gh;
@@ -822,44 +841,45 @@ double ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
   const double numer_c = lanczos_sum_d_expg_scaled_imp(cc, &denom_c);
   double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
   result *= sqrt(agh * bgh * kRecipE / cgh);
-  double result_ln = log(result);
+  // Need to represent log-probability with more than 53 bits to preserve
+  // enough accracy without sacrificing range.
+  dd_real result_ln_ddr = ddr_log(ddr_maked(result));
   double l1 = ((xx * bb - yy * aa) - yy * gh) / agh;
   double l2 = ((yy * aa - xx * bb) - xx * gh) / bgh;
   // Can't skip this anymore.
   if ((MINV(fabs(l1), fabs(l2)) < 0.2) && (l1 * l2 <= 0) && (MAXV(fabs(l1), fabs(l2)) < 0.5)) {
     const uint32_t small_a = (aa < bb);
     const double ratio = bb / aa;
-    double l3;
+    dd_real l3_ddr;
     if ((small_a && (ratio * l2 < 0.1)) || ((!small_a) && (l1 > 0.1 * ratio))) {
-      l3 = expm1(ratio * log1p(l2));
-      l3 = l1 + l3 + l3 * l1;
-      l3 = aa * log1p(l3);
+      l3_ddr = ddr_expm1(ddr_muld(ddr_log1p(ddr_maked(l2)), ratio));
+      l3_ddr = ddr_add3(ddr_maked(l1), l3_ddr, ddr_muld(l3_ddr, l1));
+      l3_ddr = ddr_muld(ddr_log1p(l3_ddr), aa);
     } else {
-      l3 = expm1(log1p(l1) / ratio);
-      l3 = l2 + l3 + l3 * l2;
-      l3 = bb * log1p(l3);
+      l3_ddr = ddr_expm1(ddr_muld(ddr_log1p(ddr_maked(l1)), aa / bb));
+      l3_ddr = ddr_add3(ddr_maked(l2), l3_ddr, ddr_muld(l3_ddr, l2));
+      l3_ddr = ddr_muld(ddr_log1p(l3_ddr), bb);
     }
-    result_ln += l3;
+    result_ln_ddr = ddr_add(result_ln_ddr, l3_ddr);
   } else {
-    result_ln += aa * log1p(l1) + bb * log1p(l2);
+    result_ln_ddr = ddr_addd(result_ln_ddr, aa * log1p(l1) + bb * log1p(l2));
   }
-  return result_ln;
+  return result_ln_ddr;
 }
 
 double ibeta_fraction2_ln_eps(double aa, double bb, double xx, double yy, uint32_t inv, double eps) {
   // normalized always true, min(aa, bb) >= 40, max much larger
 
-  double result_ln = ibeta_power_terms_d_ln(aa, bb, xx, yy);
+  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, xx, yy);
 
   // see Boost continued_fraction_b()
   // const double ay_minus_bx_plus1 = aa * yy - prefer_fma(bb, xx, -1.0);
   const double ay_minus_bx_plus1 = aa * yy - bb * xx + 1.0;
   double ff = (aa * ay_minus_bx_plus1) / (aa + 1.0);
-  if (fabs(ff) < kLentzFpmin) {
+  if (ff == 0.0) {
     ff = kLentzFpmin;
   }
   double cc = ff;
-  const double a_plus_b = aa + bb;
   double dd = 0.0;
   double mm = 1.0;
   while (1) {
@@ -870,19 +890,22 @@ double ibeta_fraction2_ln_eps(double aa, double bb, double xx, double yy, uint32
     cur_b += ((aa + mm) * (ay_minus_bx_plus1 + mm * (2 - xx))) / (aa + 2 * mm + 1);
     mm += 1.0;
     dd = cur_b + cur_a * dd;
-    if (fabs(dd) < kLentzFpmin) {
+    if (dd == 0.0) {
       dd = kLentzFpmin;
     }
     cc = cur_b + cur_a / cc;
-    if (fabs(cc) < kLentzFpmin) {
+    if (cc == 0.0) {
       cc = kLentzFpmin;
     }
     dd = 1.0 / dd;
     const double delta = cc * dd;
     ff *= delta;
     if (fabs(delta - 1.0) <= eps) {
-      result_ln -= log(ff);
-      return inv? log1p(-exp(result_ln)) : result_ln;
+      result_ln_ddr = ddr_add(result_ln_ddr, ddr_negate(ddr_log(ddr_maked(ff))));
+      if (!inv) {
+        return result_ln_ddr.x[0];
+      }
+      return ddr_log1p(ddr_negate(ddr_exp(result_ln_ddr))).x[0];
     }
   }
 }
@@ -929,9 +952,8 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
     // succ_odds_ratio = p / (1-p)
     // succ_odds_ratio + 1 = 1 / (1-p)
     // 1-p = 1 / (succ_odds_ratio + 1)
-    const dd_real p_ddr = ddr_divd(ddr_maked(succ_odds_ratio), succ_odds_ratio + 1);
-    double xx = p_ddr.x[0];
     double yy = 1.0 / (succ_odds_ratio + 1);
+    double xx = 1.0 - yy;
     uint32_t inv = 1;
     double lambda;
     if (aa < bb) {
@@ -944,6 +966,8 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
       swap_f64(&xx, &yy);
       inv = !inv;
     }
+    // TODO: use_asym branch
+    /*
     uint32_t use_asym = 0;
     const double ma = MAXV(aa, bb);
     const double xa = (ma == aa)? xx : yy;
@@ -958,12 +982,13 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
         }
       }
     }
-    // TODO: use_asym branch
+    */
 
     // We're targeting ~45-bit accuracy, so use epsilon=2^{-46}.
     double ln_result = ibeta_fraction2_ln_eps(aa, bb, xx, yy, inv, 1.0 / (1LL << 46));
     if (midp) {
       // Subtract 0.5 * pmf(k, n, p).
+      const dd_real p_ddr = ddr_divd(ddr_maked(succ_odds_ratio), succ_odds_ratio + 1);
       ln_result = lndiff(ln_result, binom_ln_prob_internal(obs_succ, obs_tot, p_ddr).x[0] - kLn2);
     }
     return ln_result;
