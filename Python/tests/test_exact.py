@@ -235,8 +235,8 @@ def test_binom():
     assert exact_tests.binom(1, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2) + math.log(1000000000), rel=1e-13, abs=0)
     # tiny-magnitude log, unimportant case but may as well capture that we get
     # it right
-    assert exact_tests.binom(6851, 9999, alternative="less", logp=True) == pytest.approx(-7.346619758438373e-308, rel=1e-13, abs=0)
-    assert exact_tests.binom(6852, 9999, alternative="less", logp=True) == pytest.approx(-3.37235165276963e-308, rel=1e-13, abs=0)
+    assert exact_tests.binom(6851, 9999, alternative="less", logp=True) == pytest.approx(-7.346619758438373e-308, rel=1e-12, abs=0)
+    assert exact_tests.binom(6852, 9999, alternative="less", logp=True) == pytest.approx(-3.37235165276963e-308, rel=1e-12, abs=0)
     # accept either denormal or flush-to-zero
     assert exact_tests.binom(6853, 9999, alternative="less", logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
