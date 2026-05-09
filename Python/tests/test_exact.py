@@ -149,6 +149,7 @@ def test_binom():
         assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN), str(test_case)
     # possible todo: port test_binomtest2, test_binomtest3
     assert exact_tests.binom(0, 8, midp=True) == pytest.approx(1/256, rel=1e-13, abs=0)
+
     assert exact_tests.binom(0, 0) == 1.0
     assert exact_tests.binom(0, 0, midp=True) == 0.5
     assert exact_tests.binom(0, 2, 0.0) == 1.0
@@ -171,6 +172,45 @@ def test_binom():
     assert math.isnan(exact_tests.binom(2, 2, 0.0, midp=True, logp=True))
     assert exact_tests.binom(2, 2, 1.0) == 1.0
     assert exact_tests.binom(2, 2, 1.0, midp=True) == 0.5
+
+    assert exact_tests.binom(0, 0, alternative="less") == 1.0
+    assert exact_tests.binom(0, 0, alternative="less", midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 0.0, alternative="less") == 1.0
+    assert exact_tests.binom(0, 2, 0.0, alternative="less", midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 1.0, alternative="less") == 0.0
+    assert exact_tests.binom(0, 2, 1.0, alternative="less", midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(0, 2, 1.0, alternative="less", logp=True))
+    assert math.isnan(exact_tests.binom(0, 2, 1.0, alternative="less", midp=True, logp=True))
+    assert exact_tests.binom(1, 2, 0.0, alternative="less") == 1.0
+    assert exact_tests.binom(1, 2, 0.0, alternative="less", midp=True) == 1.0
+    assert exact_tests.binom(1, 2, 1.0, alternative="less") == 0.0
+    assert exact_tests.binom(1, 2, 1.0, alternative="less", midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(1, 2, 1.0, alternative="less", logp=True))
+    assert math.isnan(exact_tests.binom(1, 2, 1.0, alternative="less", midp=True, logp=True))
+    assert exact_tests.binom(2, 2, 0.0, alternative="less") == 1.0
+    assert exact_tests.binom(2, 2, 0.0, alternative="less", midp=True) == 1.0
+    assert exact_tests.binom(2, 2, 1.0, alternative="less") == 1.0
+    assert exact_tests.binom(2, 2, 1.0, alternative="less", midp=True) == 0.5
+
+    assert exact_tests.binom(0, 0, alternative="greater") == 1.0
+    assert exact_tests.binom(0, 0, alternative="greater", midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 0.0, alternative="greater") == 1.0
+    assert exact_tests.binom(0, 2, 0.0, alternative="greater", midp=True) == 0.5
+    assert exact_tests.binom(0, 2, 1.0, alternative="greater") == 1.0
+    assert exact_tests.binom(0, 2, 1.0, alternative="greater", midp=True) == 1.0
+    assert exact_tests.binom(1, 2, 0.0, alternative="greater") == 0.0
+    assert exact_tests.binom(1, 2, 0.0, alternative="greater", midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(1, 2, 0.0, alternative="greater", logp=True))
+    assert math.isnan(exact_tests.binom(1, 2, 0.0, alternative="greater", midp=True, logp=True))
+    assert exact_tests.binom(1, 2, 1.0, alternative="greater") == 1.0
+    assert exact_tests.binom(1, 2, 1.0, alternative="greater", midp=True) == 1.0
+    assert exact_tests.binom(2, 2, 0.0, alternative="greater") == 0.0
+    assert exact_tests.binom(2, 2, 0.0, alternative="greater", midp=True) == 0.0
+    assert math.isnan(exact_tests.binom(2, 2, 0.0, alternative="greater", logp=True))
+    assert math.isnan(exact_tests.binom(2, 2, 0.0, alternative="greater", midp=True, logp=True))
+    assert exact_tests.binom(2, 2, 1.0, alternative="greater") == 1.0
+    assert exact_tests.binom(2, 2, 1.0, alternative="greater", midp=True) == 0.5
+
     assert exact_tests.binom(0, 1022) == pytest.approx(0.5 ** 1021, rel=1e-13, abs=0)
     # Tests are intended to be agnostic to denormal-flushing behavior.
     #
@@ -192,11 +232,11 @@ def test_binom():
 
     # huge-magnitude log
     assert exact_tests.binom(0, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2), rel=1e-13, abs=0)
-    assert exact_tests.binom(1, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2) + math.log(999999999), rel=1e-13, abs=0)
+    assert exact_tests.binom(1, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2) + math.log(1000000000), rel=1e-13, abs=0)
     # tiny-magnitude log, unimportant case but may as well capture that we get
     # it right
-    assert exact_tests.binom(6851, 9999, alternative="less", logp=True) == pytest.approx(-7.346619758438343e-308, abs=0)
-    assert exact_tests.binom(6852, 9999, alternative="less", logp=True) == pytest.approx(-3.3723516527696143e-308, abs=0)
+    assert exact_tests.binom(6851, 9999, alternative="less", logp=True) == pytest.approx(-7.346619758438373e-308, rel=1e-13, abs=0)
+    assert exact_tests.binom(6852, 9999, alternative="less", logp=True) == pytest.approx(-3.37235165276963e-308, rel=1e-13, abs=0)
     # accept either denormal or flush-to-zero
     assert exact_tests.binom(6853, 9999, alternative="less", logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
@@ -223,8 +263,8 @@ def test_dbinom():
     assert exact_tests.dbinom(1, 2, 1.0) == 0.0
     assert math.isnan(exact_tests.dbinom(1, 2, 1.0, logp=True))
     assert exact_tests.dbinom(2, 2, 1.0) == 1.0
-    assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-13, abs=0)
-    assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-13, abs=0)
+    assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
+    assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
 
 
 def test_pbinom():
@@ -244,10 +284,10 @@ def test_pbinom():
     assert math.isnan(exact_tests.pbinom(1, 2, 1.0, logp=True))
     assert exact_tests.pbinom(2, 2, 0.0) == 1.0
     assert exact_tests.pbinom(2, 2, 1.0) == 1.0
-    assert exact_tests.pbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-13, abs=0)
-    assert exact_tests.pbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(1000000000), rel=1e-13, abs=0)
-    assert exact_tests.pbinom(6851, 9999, logp=True) == pytest.approx(-7.346619758438343e-308, abs=0)
-    assert exact_tests.pbinom(6852, 9999, logp=True) == pytest.approx(-3.3723516527696143e-308, abs=0)
+    assert exact_tests.pbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
+    assert exact_tests.pbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(1000000000), rel=1e-15, abs=0)
+    assert exact_tests.pbinom(6851, 9999, logp=True) == pytest.approx(-7.346619758438373e-308, rel=1e-15, abs=0)
+    assert exact_tests.pbinom(6852, 9999, logp=True) == pytest.approx(-3.37235165276963e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(6853, 9999, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
 

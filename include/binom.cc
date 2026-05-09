@@ -34,32 +34,35 @@ double LnBinomCoeff(int64_t n, int64_t k) {
                  ddr_add_lfacts(k, n-k)).x[0];
 }
 
-// Assumes 0 <= k <= n < 2^52, 0 < p < 1.
-// If p is too close to 1 to be well-represented by a dd_real, pass in (n-k, n,
-// 1-p) instead.
-double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
+// Currently assumes k < n.
+dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
   const dd_real q_ddr = ddr_sub(ddr_maked(1), p_ddr);
+  dd_real ln_q_ddr = ddr_negate(_ddr_log2);
+  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
+    ln_q_ddr = ddr_log(q_ddr);
+  }
+  const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
   if (k == 0) {
-    // don't need to preserve original p_ddr
-    p_ddr = q_ddr;
+    return nmk_ln_q_ddr;
   }
   dd_real ln_p_ddr = ddr_negate(_ddr_log2);
   if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
     ln_p_ddr = ddr_log(p_ddr);
   }
   const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
-  dd_real ln_prob_ddr;
+  return ddr_sub(ddr_add3(k_ln_p_ddr, nmk_ln_q_ddr, ddr_lfact(n)),
+                 ddr_add_lfacts(k, n-k));
+}
+
+// Assumes 0 <= k <= n < 2^52, 0 < p < 1.
+// If p is too close to 1 to be well-represented by a dd_real, pass in (n-k, n,
+// 1-p) instead.
+double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
   if (k == n) {
-    ln_prob_ddr = k_ln_p_ddr;
-  } else {
-    dd_real ln_q_ddr = ddr_negate(_ddr_log2);
-    if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
-      ln_q_ddr = ddr_log(q_ddr);
-    }
-    const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
-    ln_prob_ddr = ddr_sub(ddr_add3(k_ln_p_ddr, nmk_ln_q_ddr, ddr_lfact(n)),
-                          ddr_add_lfacts(k, n-k));
+    k = 0;
+    p_ddr = ddr_sub(ddr_maked(1), p_ddr);
   }
+  const dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr);
   if (logp) {
     return ln_prob_ddr.x[0];
   }
@@ -743,19 +746,180 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   return 0;
 }
 
+// ibeta_fraction2_ln_eps() and dependencies modified from alpha 6
+// plink2_stats.cc (which contained ports of the corresponding Boost
+// functions).
+static const double kLentzFpmin = 1.0e-30;
+
+// We want more than 6 digits of accuracy here.
+static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
+static const double kLanczosDoubleSumExpgNumer[13] = {56906521.913471564, 103794043.11634455, 86363131.288138591, 43338889.324676138, 14605578.087685068, 3481712.1549806459, 601859.61716810988, 75999.293040145426, 6955.9996025153761, 449.94455690631681, 19.519927882476175, 0.50984166556566762, 0.0060618423462489065};
+
+// this depends on the polynomial coefficients above
+static const double kLanczosDoubleG = 6.0246800407767296;
+
+double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
+  double s1;
+  double s2;
+  // zz currently guaranteed to be >1.
+  /*
+  if (zz <= 1) {
+    s1 = kLanczosDoubleSumExpgNumer[12];
+    s2 = kLanczosDoubleSumDenom[12];
+    for (int32_t ii = 11; ii >= 0; --ii) {
+      s1 *= zz;
+      s2 *= zz;
+      s1 += kLanczosDoubleSumExpgNumer[S_CAST(uint32_t, ii)];
+      s2 += kLanczosDoubleSumDenom[S_CAST(uint32_t, ii)];
+    }
+  } else {
+  */
+  zz = 1 / zz;
+  s1 = kLanczosDoubleSumExpgNumer[0];
+  s2 = kLanczosDoubleSumDenom[0];
+  for (uint32_t uii = 1; uii != 13; ++uii) {
+    s1 *= zz;
+    s2 *= zz;
+    s1 += kLanczosDoubleSumExpgNumer[uii];
+    s2 += kLanczosDoubleSumDenom[uii];
+  }
+  // }
+  *s2_ptr = s2;
+  return s1;
+}
+
+double ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
+  // returns log((x^a)(y^b) / Beta(a,b))
+  //
+  // normalized always true
+  // prefix always 1
+  double cc = aa + bb;
+
+  const double agh = aa + kLanczosDoubleG - 0.5;
+  const double bgh = bb + kLanczosDoubleG - 0.5;
+  const double cgh = cc + kLanczosDoubleG - 0.5;
+  double numer_a;
+  double denom_a = lanczos_sum_d_expg_scaled_imp(aa, &numer_a);
+  double numer_b;
+  double denom_b = lanczos_sum_d_expg_scaled_imp(bb, &numer_b);
+  double denom_c;
+  double numer_c = lanczos_sum_d_expg_scaled_imp(cc, &denom_c);
+  double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
+  result *= sqrt(agh * bgh * kRecipE / cgh);
+  double result_ln = log(result);
+  double l1 = (xx * bb - yy * agh) / agh;
+  double l2 = (yy * aa - xx * bgh) / bgh;
+  // Since we're returning log(result) rather than the original result (thus,
+  // no intermediate overflow/underflow problems), and we only need 6 digits of
+  // precision, we shouldn't need any of the numerous cases in the Boost code.
+  return result_ln + aa * log1p(l1) + bb * log1p(l2);
+}
+
+double ibeta_fraction2_ln_eps(double aa, double bb, double xx, double yy, uint32_t inv, double eps) {
+  // normalized always true, min(aa, bb) >= 40, max much larger
+
+  double result_ln = ibeta_power_terms_d_ln(aa, bb, xx, yy);
+
+  // see Boost continued_fraction_b()
+  const double ay_minus_bx_plus1 = aa * yy - prefer_fma(bb, xx, -1.0);
+  double cc = (aa * ay_minus_bx_plus1) / (aa + 1.0);
+  if (fabs(cc) < kLentzFpmin) {
+    cc = kLentzFpmin;
+  }
+  const double a_plus_b = aa + bb;
+  const double x2 = xx * xx;
+  result_ln -= log(cc);
+  double dd = 0.0;
+  double mm = 0.0;
+  while (1) {
+    double cur_a = (aa + mm) * (a_plus_b + mm);
+    mm += 1.0;
+    cur_a *= mm * (bb - mm) * x2;
+    double denom = aa + 2 * mm - 1.0;
+    cur_a /= denom * denom;
+    double cur_b = prefer_fma(mm * (bb - mm), xx / (aa + 2 * mm - 1.0), mm);
+    cur_b += ((aa + mm) * prefer_fma(mm, 2.0 - xx, ay_minus_bx_plus1)) / (aa + 2 * mm + 1.0);
+    dd = cur_b + cur_a * dd;
+    if (fabs(dd) < kLentzFpmin) {
+      dd = kLentzFpmin;
+    }
+    cc = cur_b + cur_a / cc;
+    if (fabs(cc) < kLentzFpmin) {
+      cc = kLentzFpmin;
+    }
+    dd = 1.0 / dd;
+    const double delta = cc * dd;
+    result_ln -= log(delta);
+    if (fabs(delta - 1.0) <= eps) {
+      return inv? log1p(-exp(result_ln)) : result_ln;
+    }
+  }
+}
+
+// Returns log(exp(xx) - exp(yy)), assuming xx > yy.
+double lndiff(double xx, double yy) {
+  // log(exp(xx) - exp(yy))
+  // = log(exp(xx) * (1 - exp(yy-xx)))
+  // = xx + log(1 - exp(yy-xx))
+  const double ln_ratio = yy - xx;
+  if (ln_ratio < -54 * kLn2) {
+    // yy is too small to matter.
+    return xx;
+  }
+  return xx + log(1 - exp(ln_ratio));
+}
+
 // Requires 0 <= obs_succ <= obs_tot < 2^52; should always work for
-// succ_odds_ratio in (10^{-291}, 10^291) but may start breaking a bit past
-// that.  (Larger obs_succ and obs_tot are allowed than for the 2-sided test
-// because there's no risk of needing to expand gigantic ratios of factorials
-// to handle likelihood near-ties correctly.  For the same reason, a tiny
-// rounding error in representing succ_odds_ratio can't be consequential, so we
-// don't go through the trouble of exposing an exact-fraction interface.)
+// succ_odds_ratio in (2^{-960}, 2^960) but may start breaking a bit past that.
+//
+// Larger obs_succ and obs_tot are allowed than for the 2-sided test because
+// there's no risk of needing to expand gigantic ratios of factorials to handle
+// likelihood near-ties correctly.  For the same reason, a tiny rounding error
+// in representing succ_odds_ratio can't be consequential, so we don't go
+// through the trouble of exposing an exact-fraction or dd_real interface.
+//
+// Benchmark results revealed that Boost ibetac(k+1, n-k, p) (which is called
+// by scipy.stats.binom.logcdf()) became faster than this function's initial
+// implementation once obs_tot was several million, and its results were still
+// acceptably accurate.  So we now switch over when obs_tot > 2^22 and
+// min(k+1, n-k) >= 40.
+//
+// See Pbinom() below for a higher-accuracy variant of this function.
 double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp) {
   // Normalize to alternative hypothesis = #succ-less-than-expected, so the
   // remainder is essentially a cmf calculation with parameter succ.
   if (succ_is_greater_alt) {
     obs_succ = obs_tot - obs_succ;
     succ_odds_ratio = 1.0 / succ_odds_ratio;
+  }
+  if (obs_tot > (1 << 22)) {
+    double aa = obs_succ + 1;
+    double bb = obs_tot - obs_succ;
+    // succ_odds_ratio = p / (1-p)
+    // succ_odds_ratio + 1 = 1 / (1-p)
+    // 1-p = 1 / (succ_odds_ratio + 1)
+    const dd_real p_ddr = ddr_divd(ddr_maked(succ_odds_ratio), succ_odds_ratio + 1);
+    double xx = p_ddr.x[0];
+    double yy = 1.0 / (succ_odds_ratio + 1);
+    uint32_t inv = 1;
+    double lambda;
+    if (aa < bb) {
+      lambda = prefer_fma(aa + bb, -xx, aa);
+    } else {
+      lambda = prefer_fma(aa + bb, yy, -bb);
+    }
+    if (lambda < 0.0) {
+      swap_f64(&aa, &bb);
+      swap_f64(&xx, &yy);
+      inv = !inv;
+    }
+    // We're targeting ~45-bit accuracy, so use epsilon=2^{-46}.
+    double ln_result = ibeta_fraction2_ln_eps(aa, bb, xx, yy, inv, 1.0 / (1LL << 46));
+    if (midp) {
+      // Subtract 0.5 * pmf(k, n, p).
+      ln_result = lndiff(ln_result, binom_ln_prob_internal(obs_succ, obs_tot, p_ddr).x[0] - kLn2);
+    }
+    return ln_result;
   }
   double succ = obs_succ;
   double fail = obs_tot - obs_succ;
@@ -774,11 +938,11 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
       return 0;
     }
 
-    // Rescale our starting lastp so that we overflow to INFINITY when we'd
+    // Scale our starting likelihood so that we overflow to INFINITY when we'd
     // want to early-exit and return 0; this saves us a comparison in the loop.
-    const double left_rescale = (DBL_MAX * DBL_MIN) / right_upper_bound;
-    double lastp = left_rescale;
-    double left_sum = left_rescale;
+    const double startp = (DBL_MAX * DBL_MIN) / right_upper_bound;
+    double lastp = startp;
+    double left_sum = startp;
     while (1) {
       fail += 1;
       lastp *= succ / (succ_odds_ratio * fail);
@@ -792,13 +956,15 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
     if (left_sum == INFINITY) {
       return 0;
     }
-    left_sum /= left_rescale;
+    // startp is now potentially < 1, so this operation would throw away some
+    // range.
+    // left_sum /= startp;
 
-    // Now compute the right-sum to the precision limit;
-    double right_sum = first_right_mult;
-    succ = obs_succ + 1.0;
+    // Now compute the right-sum to the precision limit.
+    double right_sum = first_right_mult * startp;
+    succ = obs_succ + 1;
     fail = obs_tot - obs_succ - 1;
-    lastp = first_right_mult;
+    lastp = right_sum;
     while (1) {
       succ += 1;
       lastp *= succ_odds_ratio * fail / succ;
@@ -811,7 +977,7 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
     }
     // For one-sided test, slightly more convenient to exclude midp term from
     // left_sum and right_sum since it just cancels out in denom
-    return log1p((-0.5 * midp - right_sum) / (right_sum + left_sum));
+    return log1p((-0.5 * midp * startp - right_sum) / (right_sum + left_sum));
   }
   // We're to the left of the mode, and are responsible for tiny p-values.
   // If we're close enough to the mode that a simple left_sum / (left_sum +
@@ -824,7 +990,7 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
   const double ln_first_inward_mult = log(succ_odds_ratio * fail / (succ + 1));
   double overflow_steps_lower_bound = 1LL << 52;
   // log(DBL_MAX / 2^52) = 673.739...
-  if (ln_first_inward_mult > (673.739 / S_CAST(double, 1LL << 52))) {
+  if (ln_first_inward_mult > 673.739 * k2m52) {
     overflow_steps_lower_bound = 673.739 / ln_first_inward_mult;
   }
   const double obs_totd = obs_tot;
@@ -885,19 +1051,278 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
   return starting_lnprob + log(left_sum);
 }
 
-// Supports n up to 2^52 - 1, and aims for quantile relative error < 2^{-54}
-// for non-huge values of n.
-// - The initial relative-likelihood should be accurate to at least ~60 bits.
-// - We evaluate the inner part of the tailsum, let's say lastp >= 2^{-12},
-//   with full dd_real accuracy.  Past that point it should be fine to drop
-//   down to regular float64 accuracy.
+// Assumes 0 <= k < n < 2^52, 2^{-960} <= p < 1.
+// Should achieve <1 ULP relative error except when n is well over 2^31.
+//
+// See BinomOneSidedLnP() above for the faster variant of this function which
+// doesn't try to get the last few bits right.
+double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t logp) {
+  const dd_real q_ddr = ddr_ieee_sub(ddr_maked(1.0), p_ddr);
+  const dd_real pdq_ddr = ddr_accurate_div(p_ddr, q_ddr);
+  const dd_real qdp_ddr = ddr_accurate_div(q_ddr, p_ddr);
+  double k = obs_k;
+  double nmk = n - obs_k;
+  if (k > nmk * pdq_ddr.x[0]) {
+    // We're at or to the right of the mode.
+    // Start by computing an upper bound on the right-sum, and then iterating
+    // leftward until we either know we can safely return a cmf value of 1, or
+    // remaining left likelihoods are smaller than the precision limit.
+    const dd_real first_right_mult_ddr = ddr_divd(ddr_muld(pdq_ddr, nmk), k+1);
+    const double right_upper_bound = first_right_mult_ddr.x[0] / ddr_negate(ddr_subd(first_right_mult_ddr, 1.0)).x[0];
+    // Function contract ensures right_upper_bound > 0.
+
+    // Scale our starting likelihood so that we overflow to INFINITY/nan when
+    // we'd want to early-exit and return 1; this saves us a comparison in the
+    // loop.
+    const double startp = (DBL_MAX * (logp? DBL_MIN : (k2m53 * 0.5))) / right_upper_bound;
+    // We want to compute left_sum_ddr to at least 56-bit accuracy, but we also
+    // want to drop down from this slow dd_real-based loop to the much faster
+    // float64-based loop as soon as we can prove that won't make us miss the
+    // accuracy target.
+    //
+    // Initial lastp error when we exit the first loop will be < 0.501 ULP; the
+    // lastp values we add to left_tail_sum have error bounded above by 2.5
+    // ULPs, 4.5 ULPs, 6.5 ULPs, etc.  Thus, left_tail_sum should have error
+    // bounded above by 3 ULPs, then 8, 15, 24, 35, ...; and k^2 is a loose
+    // upper bound on the final error.
+    //
+    // 2^{-56} corresponds to at least 0.0625 ULPs.  If k is so large that
+    // min_mult ends up just being 1, that's ok.
+    const double min_mult_left = 1 + 0.0625 / (k * k);
+    dd_real lastp_ddr = ddr_maked(startp);
+    dd_real left_sum_ddr = lastp_ddr;
+    while (1) {
+      nmk += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      k -= 1;
+      const double preaddp = left_sum_ddr.x[0];
+      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+      // This overflows to nan rather than INFINITY in my testing; I'll write
+      // this to be agnostic to that detail.
+      if (!(left_sum_ddr.x[0] > preaddp * min_mult_left)) {
+        break;
+      }
+      if (preaddp != preaddp) {
+        return 0.0;
+      }
+    }
+    if (!(left_sum_ddr.x[0] < INFINITY)) {
+      return logp? 0.0 : 1.0;
+    }
+    if (k > 0) {
+      // Continue the calculation with ordinary precision.
+      const double pdq = pdq_ddr.x[0];
+      double lastp = lastp_ddr.x[0];
+      double left_tail_sum = 0.0;
+      while (1) {
+        nmk += 1;
+        lastp *= k / (pdq * nmk);
+        k -= 1;
+        const double preaddp = left_tail_sum;
+        left_tail_sum += lastp;
+        if (left_tail_sum == preaddp) {
+          break;
+        }
+      }
+      left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+      if (left_sum_ddr.x[0] == INFINITY) {
+        return logp? 0.0 : 1.0;
+      }
+    }
+
+    // Now compute the right-sum to at least 56-bit accuracy.
+    dd_real right_sum_ddr = ddr_muld(first_right_mult_ddr, startp);
+    k = obs_k + 1;
+    nmk = n - obs_k - 1;
+    lastp_ddr = right_sum_ddr;
+    if (nmk > 0) {
+      const double min_mult_right = 1 + 0.0625 / (nmk * nmk);
+      while (1) {
+        k += 1;
+        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+        nmk -= 1;
+        const double preaddp = right_sum_ddr.x[0];
+        right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
+        if (right_sum_ddr.x[0] <= preaddp * min_mult_right) {
+          break;
+        }
+      }
+      if (nmk > 0) {
+        // Continue the calculation with ordinary precision.
+        const double pdq = pdq_ddr.x[0];
+        double lastp = lastp_ddr.x[0];
+        double right_tail_sum = 0.0;
+        while (1) {
+          k += 1;
+          lastp *= pdq * nmk / k;
+          nmk -= 1;
+          const double preaddp = right_tail_sum;
+          right_tail_sum += lastp;
+          if (right_tail_sum == preaddp) {
+            break;
+          }
+        }
+        right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
+      }
+    }
+    const dd_real denom_ddr = ddr_add(left_sum_ddr, right_sum_ddr);
+    if (!(denom_ddr.x[0] < INFINITY)) {
+      return logp? 0.0 : 1.0;
+    }
+    const dd_real one_minus_prob_ddr = ddr_accurate_div(right_sum_ddr, denom_ddr);
+    if (!logp) {
+      return -ddr_subd(one_minus_prob_ddr, 1.0).x[0];
+    }
+    // log(1-x) = -x - (x^2)/2 - (x^3)/3 - ...
+    // For x < 2^{-35}, adding just the first two terms gives us at least
+    // 70-bit accuracy for this operation.
+    // For x >= 2^{-35}, 1-x preserves at least 70 significant bits for
+    // ordinary ddr_log().
+    if (one_minus_prob_ddr.x[0] < (1.0 / (1LL << 35))) {
+      return -ddr_add(one_minus_prob_ddr, ddr_muld(ddr_mul(one_minus_prob_ddr, one_minus_prob_ddr), 0.5)).x[0];
+    }
+    return ddr_log(ddr_negate(ddr_subd(one_minus_prob_ddr, 1.0))).x[0];
+  }
+  // We're to the left of the mode, and are responsible for tiny cmf values.
+  // If we're close enough to the mode that a simple left_sum / (left_sum +
+  // right_sum) calculation doesn't risk overflow with the initial
+  // relative-likelihood set to 1, just do that.
+  // Otherwise, we use ddr_lfact() and friends to compute the starting
+  // log-likelihood (this is the only step that could introduce >1 ULP error,
+  // and then only for huge n), and accumulate the tail-sum from there.
+  const double ln_first_inward_mult = log(pdq_ddr.x[0] * nmk / (k + 1));
+  double overflow_steps_lower_bound = 1LL << 52;
+  // log(DBL_MAX / 2^52) = 673.739...
+  if (ln_first_inward_mult > 673.739 * k2m52) {
+    overflow_steps_lower_bound = 673.739 / ln_first_inward_mult;
+  }
+  const double nd = n;
+  const double modal_k = nd * p_ddr.x[0];
+  if (k + overflow_steps_lower_bound > modal_k) {
+    const double min_mult_right = 1 + 0.0625 / (nmk * nmk);
+    dd_real lastp_ddr = ddr_maked(1.0);
+    dd_real right_sum_ddr = ddr_maked(0.0);
+    while (1) {
+      k += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+      nmk -= 1;
+      const double preaddp = right_sum_ddr.x[0];
+      right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
+      if (right_sum_ddr.x[0] <= preaddp * min_mult_right) {
+        break;
+      }
+    }
+    if (nmk > 0) {
+      const double pdq = pdq_ddr.x[0];
+      double lastp = lastp_ddr.x[0];
+      double right_tail_sum = 0.0;
+      while (1) {
+        k += 1;
+        lastp *= pdq * nmk / k;
+        nmk -= 1;
+        const double preaddp = right_tail_sum;
+        right_tail_sum += lastp;
+        if (right_tail_sum == preaddp) {
+          break;
+        }
+      }
+      right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
+    }
+    k = obs_k;
+    nmk = n - obs_k;
+    lastp_ddr = ddr_maked(1.0);
+    dd_real left_sum_ddr = lastp_ddr;
+    if (k > 0) {
+      const double min_mult_left = 1 + 0.0625 / (k * k);
+      while (1) {
+        nmk += 1;
+        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+        k -= 1;
+        const double preaddp = left_sum_ddr.x[0];
+        left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+        if (left_sum_ddr.x[0] <= preaddp * min_mult_left) {
+          break;
+        }
+      }
+      if (k > 0) {
+        const double pdq = pdq_ddr.x[0];
+        double lastp = lastp_ddr.x[0];
+        double left_tail_sum = 0.0;
+        while (1) {
+          nmk += 1;
+          lastp *= k / (pdq * nmk);
+          k -= 1;
+          const double preaddp = left_tail_sum;
+          left_tail_sum += lastp;
+          if (left_tail_sum == preaddp) {
+            break;
+          }
+        }
+        left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+      }
+    }
+    const dd_real prob_ddr = ddr_accurate_div(left_sum_ddr, ddr_add(left_sum_ddr, right_sum_ddr));
+    if (!logp) {
+      return prob_ddr.x[0];
+    }
+    return ddr_log(prob_ddr).x[0];
+  }
+  dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr);
+  dd_real lastp_ddr = ddr_maked(1.0);
+  dd_real left_sum_ddr = lastp_ddr;
+  if (k > 0) {
+    const double min_mult_left = 1 + 0.0625 / (k * k);
+    while (1) {
+      nmk += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      k -= 1;
+      const double preaddp = left_sum_ddr.x[0];
+      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+      if (left_sum_ddr.x[0] <= preaddp * min_mult_left) {
+        break;
+      }
+    }
+    if (k > 0) {
+      // Continue the calculation with ordinary precision.
+      const double pdq = pdq_ddr.x[0];
+      double lastp = lastp_ddr.x[0];
+      double left_tail_sum = 0.0;
+      while (1) {
+        nmk += 1;
+        lastp *= k / (pdq * nmk);
+        k -= 1;
+        const double preaddp = left_tail_sum;
+        left_tail_sum += lastp;
+        if (left_tail_sum == preaddp) {
+          break;
+        }
+      }
+      left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+    }
+  }
+  ln_prob_ddr = ddr_add(ln_prob_ddr, ddr_log(left_sum_ddr));
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
+}
+
+// Assumes 0 <= n < 2^52, and should achieve quantile relative error < 2^{-54}
+// unless n is well over 2^31.
+// - The initial relative-likelihood should be accurate to at least ~60 bits
+//   for n < 2^31.
+// - We evaluate the inner part of the tailsum with full dd_real accuracy.  We
+//   don't drop down to regular float64 accuracy until we know the additional
+//   relative error introduced by doing so is < 2^{-56}.
 // The goal is to support a higher-level qbinom() function where e.g.
-//   qbinom(fractions.Fraction(1, 9), 2, fractions.Fraction(2/3))
+//   qbinom(fractions.Fraction(1, 9), 2, fractions.Fraction(2, 3))
 // can be trusted to be 0, and
-//   qbinom(fractions.Fraction(2**53 + 1, (2**53) * 9), 2, fractions.Fraction(2/3))
+//   qbinom(fractions.Fraction(2**53, (2**53 - 1) * 9), 2, fractions.Fraction(2, 3))
 // can be trusted to be 1.
+/*
 int32_t Qbinom(dd_real ln_quantile_ddr, int64_t n, dd_real p_ddr) {
 }
+*/
 
 
 #ifdef __cplusplus
