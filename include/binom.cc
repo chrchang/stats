@@ -748,17 +748,29 @@ BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_nume
   return 0;
 }
 
-// ibeta_fraction2_ln_eps() and dependencies modified from alpha 6 and alpha 7
-// plink2_stats.cc (which contained ports of the corresponding Boost
-// functions).
+// ibeta_fraction2_ln_eps() and dependencies adapted from Boost 1.91.0.
 static const double kLentzFpmin = 1.0e-30;
 
 // We want more than 6 digits of accuracy here.
 static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
-static const double kLanczosDoubleSumExpgNumer[13] = {56906521.913471564, 103794043.11634455, 86363131.288138591, 43338889.324676138, 14605578.087685068, 3481712.1549806459, 601859.61716810988, 75999.293040145426, 6955.9996025153761, 449.94455690631681, 19.519927882476175, 0.50984166556566762, 0.0060618423462489065};
+static const double kLanczosDoubleSumExpgNumer[13] = {
+  56906521.91347156388090791033559122686859,
+  103794043.1163445451906271053616070238554,
+  86363131.28813859145546927288977868422342,
+  43338889.32467613834773723740590533316085,
+  14605578.08768506808414169982791359218571,
+  3481712.15498064590882071018964774556468,
+  601859.6171681098786670226533699352302507,
+  75999.29304014542649875303443598909137092,
+  6955.999602515376140356310115515198987526,
+  449.9445569063168119446858607650988409623,
+  19.51992788247617482847860966235652136208,
+  0.5098416655656676188125178644804694509993,
+  0.006061842346248906525783753964555936883222
+};
 
 // this depends on the polynomial coefficients above
-static const double kLanczosDoubleG = 6.0246800407767296;
+static const double kLanczosDoubleG = 6.024680040776729583740234375;
 
 double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   double s1;
@@ -797,10 +809,11 @@ double ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
   // prefix always 1
   // aa and bb always large
   double cc = aa + bb;
+  const double gh = kLanczosDoubleG - 0.5;
+  const double agh = aa + gh;
+  const double bgh = bb + gh;
+  const double cgh = cc + gh;
 
-  const double agh = aa + kLanczosDoubleG - 0.5;
-  const double bgh = bb + kLanczosDoubleG - 0.5;
-  const double cgh = cc + kLanczosDoubleG - 0.5;
   double numer_a;
   const double denom_a = lanczos_sum_d_expg_scaled_imp(aa, &numer_a);
   double numer_b;
@@ -810,8 +823,8 @@ double ibeta_power_terms_d_ln(double aa, double bb, double xx, double yy) {
   double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
   result *= sqrt(agh * bgh * kRecipE / cgh);
   double result_ln = log(result);
-  double l1 = (xx * bb - yy * agh) / agh;
-  double l2 = (yy * aa - xx * bgh) / bgh;
+  double l1 = ((xx * bb - yy * aa) - yy * gh) / agh;
+  double l2 = ((yy * aa - xx * bb) - xx * gh) / bgh;
   // Can't skip this anymore.
   if ((MINV(fabs(l1), fabs(l2)) < 0.2) && (l1 * l2 <= 0) && (MAXV(fabs(l1), fabs(l2)) < 0.5)) {
     const uint32_t small_a = (aa < bb);
@@ -847,17 +860,15 @@ double ibeta_fraction2_ln_eps(double aa, double bb, double xx, double yy, uint32
   }
   double cc = ff;
   const double a_plus_b = aa + bb;
-  const double x2 = xx * xx;
   double dd = 0.0;
-  double mm = 0.0;  // increment delayed since m-1 appears twice in next cur_a
+  double mm = 1.0;
   while (1) {
-    double cur_a = (aa + mm) * (a_plus_b + mm);
+    const double denom = aa + 2 * mm - 1;
+    const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * xx * xx;
+    double cur_b = mm;
+    cur_b += (mm * (bb - mm) * xx) / denom;
+    cur_b += ((aa + mm) * (ay_minus_bx_plus1 + mm * (2 - xx))) / (aa + 2 * mm + 1);
     mm += 1.0;
-    cur_a *= mm * (bb - mm) * x2;
-    const double denom = aa + 2 * mm - 1.0;
-    cur_a /= denom * denom;
-    double cur_b = prefer_fma(mm * (bb - mm), xx / denom, mm);
-    cur_b += ((aa + mm) * prefer_fma(mm, 2.0 - xx, ay_minus_bx_plus1)) / (aa + 2 * mm + 1.0);
     dd = cur_b + cur_a * dd;
     if (fabs(dd) < kLentzFpmin) {
       dd = kLentzFpmin;
@@ -933,6 +944,22 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_rati
       swap_f64(&xx, &yy);
       inv = !inv;
     }
+    uint32_t use_asym = 0;
+    const double ma = MAXV(aa, bb);
+    const double xa = (ma == aa)? xx : yy;
+    const double saddle = ma / (aa + bb);
+    if ((ma > (0.00001 / k2m53)) && (ma / MINV(aa, bb) < ((xa < saddle)? 2 : 15))) {
+      if (aa == bb) {
+        use_asym = 1;
+      } else {
+        double powers = exp(log(xx / (aa / (aa + bb))) * aa + log(yy / (bb / (aa + bb))) * bb);
+        if (powers < k2m53) {
+          use_asym = 1;
+        }
+      }
+    }
+    // TODO: use_asym branch
+
     // We're targeting ~45-bit accuracy, so use epsilon=2^{-46}.
     double ln_result = ibeta_fraction2_ln_eps(aa, bb, xx, yy, inv, 1.0 / (1LL << 46));
     if (midp) {
