@@ -863,10 +863,10 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   // TODO: Can we prove <this result> / <ibeta_fraction2's ff> doesn't
   // overflow or underflow?  Then we can replace one of these expensive ddr_log
   // operations with an ordinary multiply.
-  // todo: ddr_expd, ddr_logd?
   dd_real result_ln_ddr = ddr_log(ddr_maked(result));
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
   // exceed that of ln(result).
+  // This removes the need for special cases.
   const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh_ddr.x[0]))), agh_ddr);
   const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh_ddr.x[0])), bgh_ddr);
   return ddr_add3(result_ln_ddr,
@@ -874,10 +874,9 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
                   ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
-dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, uint32_t inv) {
+dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
   // normalized always true, min(aa, bb) >= 40, max much larger
-
-  const dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  // caller responsible for guaranteeing ay - bx >= 0
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
 
   // see Boost continued_fraction_b()
@@ -971,16 +970,12 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32
   if ((obs_tot > 1024) && (MINV(obs_succ, obs_tot - obs_succ) >= 40)) {
     double aa = obs_succ + 1;
     double bb = obs_tot - obs_succ;
+    dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
     uint32_t inv = 1;
-    double lambda;
-    if (aa < bb) {
-      lambda = prefer_fma(aa + bb, -p_ddr.x[0], aa);
-    } else {
-      lambda = prefer_fma(aa + bb, q_ddr.x[0], -bb);
-    }
-    if (lambda < 0.0) {
+    if (ay_minus_bx_ddr.x[0] < 0.0) {
       swap_f64(&aa, &bb);
       swap_ddr(&p_ddr, &q_ddr);
+      ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
     // TODO: use_asym branch for gigantic cases
@@ -1001,7 +996,7 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32
     }
     */
 
-    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr(aa, bb, p_ddr, q_ddr, inv);
+    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
     if (midp) {
       // Subtract 0.5 * pmf(k, n, p).
       const dd_real ln_half_pmf_ddr = ddr_sub(binom_ln_prob_internal(obs_succ, obs_tot, p_ddr), _ddr_log2);
@@ -1148,11 +1143,11 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32
     }
   }
   if (!logp) {
-    // Add log(2^52) to starting_lnprob before exponentiating, so it doesn't
+    // Add log(2^64) to starting_lnprob before exponentiating, so it doesn't
     // underflow unless the final result would also underflow.
     // todo: precompute this
-    const dd_real _ddr_52_log2 = ddr_muld(_ddr_log2, 52);
-    return left_sum * k2m52 * ddr_exp(ddr_add(starting_lnprob_ddr, _ddr_52_log2)).x[0];
+    const dd_real _ddr_64_log2 = ddr_mul_pwr2(_ddr_log2, 64);
+    return left_sum * (k2m60 / 16) * ddr_exp(ddr_add(starting_lnprob_ddr, _ddr_64_log2)).x[0];
   }
   return starting_lnprob_ddr.x[0] + log(left_sum);
 }
