@@ -515,7 +515,7 @@ dd_real ddr_lfact(double xx) {
   return ddr_add(sum, ddr_muld(logn, xx + 0.5));
 }
 
-int32_t dd_real_cmp(const void* aa, const void* bb) {
+int32_t dd_real_abs_cmp(const void* aa, const void* bb) {
   dd_real aa_ddr = *S_CAST(const dd_real*, aa);
   dd_real bb_ddr = *S_CAST(const dd_real*, bb);
   const double aa0 = fabs(aa_ddr.x[0]);
@@ -545,12 +545,21 @@ int32_t dd_real_cmp(const void* aa, const void* bb) {
 }
 
 dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs) {
-  qsort(ddrs, ct, sizeof(dd_real), dd_real_cmp);
-  dd_real sum = ddrs[0];
+  qsort(ddrs, ct, sizeof(dd_real), dd_real_abs_cmp);
+  dd_real sum_ddr = ddrs[0];
   for (uint32_t uii = 1; uii < ct; ++uii) {
-    sum = ddr_add(sum, ddrs[uii]);
+    sum_ddr = ddr_add(sum_ddr, ddrs[uii]);
   }
-  return sum;
+  return sum_ddr;
+}
+
+dd_real ddr_sort_and_add_lfacts(uint32_t ct, double* args) {
+  STD_SORT(ct, double_cmp, args);
+  dd_real sum_ddr = ddr_lfact(args[0]);
+  for (uint32_t uii = 1; uii < ct; ++uii) {
+    sum_ddr = ddr_add(sum_ddr, ddr_lfact(args[uii]));
+  }
+  return sum_ddr;
 }
 
 // Bignum factorial helper functions and constants.

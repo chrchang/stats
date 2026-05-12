@@ -35,6 +35,8 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 }
 
 // Currently assumes k < n.
+// For p=0.5, this doesn't reach relative error > 2^{-53} until n > ~2^44.
+// For p=DBL_MIN, it can get there slightly earlier, k > ~2^41.
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
   const dd_real q_ddr = ddr_sub(ddr_maked(1), p_ddr);
   dd_real ln_q_ddr = ddr_negate(_ddr_log2);
@@ -856,6 +858,8 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   const double numer_c = lanczos_sum_d_expg_scaled_imp(cc, &denom_c);
   // Calculate result with ordinary precision; pointless to go further here
   // unless we widen Lanczos sum calculations.
+  // (With more Lanczos terms, may need (numer_a / denom_a) * etc. to avoid
+  // intermediate overflow.)
   double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
   *nonlog_ptr = result * sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
@@ -932,11 +936,11 @@ dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_dd
 //
 //   >>> import exact_tests, scipy, timeit
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.017715082969516516
+//   0.012497625080868602
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.01739558414556086
+//   0.008436833042651415
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.018672874895855784
+//   0.012842166936025023
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
 //   1.005605333019048
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
@@ -972,7 +976,7 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    // TODO: use_asym branch for gigantic cases
+    // possible todo: use_asym branch for gigantic cases
     /*
     uint32_t use_asym = 0;
     const double ma = MAXV(aa, bb);
@@ -1154,7 +1158,7 @@ double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32
 //
 // TODO: What can we prove about a variant of ibeta_fraction2_ln_ddr which
 // computes 17- (or 24-?)term Lanczos sums with dd_real precision?  Can we
-// safely hand off most huge-n cases to it?
+// safely hand off most huge-n cases to it here?
 double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t logp) {
   const dd_real q_ddr = ddr_ieee_sub(ddr_maked(1.0), p_ddr);
   const dd_real pdq_ddr = ddr_accurate_div(p_ddr, q_ddr);
