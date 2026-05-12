@@ -44,6 +44,12 @@ typedef struct dd_real_struct {
   double x[2];
 } dd_real;
 
+HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
+  const dd_real swaptmp = *ap;
+  *ap = *bp;
+  *bp = swaptmp;
+}
+
 extern const dd_real _ddr_log2;
 
 CONSTI32(_ddr_n_ln_fact, 256);
@@ -387,6 +393,10 @@ dd_real ddr_exp(const dd_real a);
 
 dd_real ddr_log(const dd_real a);
 
+dd_real ddr_expm1(const dd_real a);
+
+dd_real ddr_log1p(const dd_real a);
+
 
 HEADER_INLINE dd_real ddr_add3(const dd_real a, const dd_real b, const dd_real c) {
   return ddr_add(ddr_add(a, b), c);
@@ -426,6 +436,10 @@ CONSTI32(kInt32PerLimb, 2);
 static_assert(sizeof(mp_limb_t) == 4, "Unexpected mp_limb_t size (expected 4).");
 CONSTI32(kInt32PerLimb, 1);
 #endif
+
+// Sorts ddrs in place from least to greatest magnitude, and then adds.
+// Assumes ct positive.
+dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs);
 
 int32_t falling_factorial(mp_limb_t top, uint32_t ct, mp_limb_t* result, uint32_t* result_limb_ctp, mp_limb_t* wkspace);
 

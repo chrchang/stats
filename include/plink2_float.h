@@ -208,6 +208,40 @@ HEADER_INLINE float prefer_fmaf(float a, float b, float c) {
 }
 #endif
 
+// Returns log(exp(xx) + exp(yy)).
+HEADER_INLINE double lnsum(double xx, double yy) {
+  // log(exp(xx) + exp(yy))
+  // = log(exp(max(xx,yy)) * (1 + exp(min(xx,yy) - max(xx,yy))))
+  // = max(xx,yy) + log(1 + exp(min(xx,yy) - max(xx,yy)))
+  // If max(xx,yy) >> min(xx,yy), quickly return max(xx,yy).
+  // If xx and yy are close enough to each other that exp(min(xx,yy) -
+  // max(xx,yy)) rounds to 1, nothing bad happens; we can focus on maximizing
+  // accuracy in the exp(min(xx,yy) - max(xx,yy)) near zero case.
+  const double max_arg = MAXV(xx, yy);
+  const double ln_ratio = MINV(xx, yy) - max_arg;
+  if (ln_ratio < -54 * kLn2) {
+    return max_arg;
+  }
+  return max_arg + log1p(exp(ln_ratio));
+}
+
+// Returns log(exp(xx) - exp(yy)), assuming xx > yy.
+HEADER_INLINE double lndiff(double xx, double yy) {
+  // log(exp(xx) - exp(yy))
+  // = log(exp(xx) * (1 - exp(yy-xx)))
+  // = xx + log(1 - exp(yy-xx))
+  // Subcases of interest:
+  // * xx >> yy: exp(yy-xx) indistinguishable from zero, quickly return xx.
+  // * (yy-xx) very small: if exp(yy-xx) rounds to 1, we have a problem.
+  //   xx + log(-expm1(yy-xx)) avoids the problem.
+  const double ln_ratio = yy - xx;
+  if (ln_ratio < -54 * kLn2) {
+    // yy is too small to matter.
+    return xx;
+  }
+  return xx + log(-expm1(ln_ratio));
+}
+
 // Efficient alternatives to ceil() for nonnegative numbers.
 
 // limit is assumed to be a positive int32.

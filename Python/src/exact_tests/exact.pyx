@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
@@ -31,7 +31,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) nogil
 
-    double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, double succ_odds_ratio, uint32_t succ_is_greater_alt, int32_t midp) nogil
+    double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real_struct p_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) nogil
 
     double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
@@ -139,8 +139,8 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
         raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
     if n >= (1LL << 52):
         raise RuntimeError("n must be less than 2^52.")
-    cdef double pfloat = float(p)
-    if pfloat == 0.0:
+    cdef dd_real_struct p_ddr = DdrMake(p)
+    if ddr_is_zero(p_ddr):
         # Degenerate cases.
         if k == 0 and midp:
             ln_result = -kLn2
@@ -150,7 +150,7 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
             if not logp:
                 return 0.0
             ln_result = NAN
-    elif pfloat == 1.0:
+    elif ddr_is_one(p_ddr):
         if k == n and midp:
             ln_result = -kLn2
         elif k == n or k_is_greater_alt:
@@ -160,13 +160,12 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
                 return 0.0
             ln_result = NAN
     else:
-        if pfloat < 0.5**960 or not pfloat <= 1.0:
-            # Don't think it's worth supporting p in (0, 2^{-960}); we'd need
-            # to either slow down the common case to avoid underflow/overflow,
-            # or bloat the library with a separate function just to handle that
-            # case.
+        if (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
+            # p in (0, 2^{-960}) is a low priority: we'd need to either slow
+            # down the common case to avoid underflow/overflow, or bloat the
+            # library with a separate function just to handle that case.
             raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-        ln_result = BinomOneSidedLnP(k, n, pfloat / (1 - pfloat), k_is_greater_alt, midp)
+        return BinomOneSidedLnP(k, n, p_ddr, k_is_greater_alt, midp, logp)
     if logp:
         return ln_result
     return exp_flush(ln_result)
@@ -221,7 +220,7 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint logp=0, bint approx=0):
     else:
         if not approx:
             return flush_if_denormal(Pbinom(k, n, p_ddr, logp))
-        ln_result = BinomOneSidedLnP(k, n, ddr_accurate_div(p_ddr, ddr_ieee_sub(ddr_maked(1.0), p_ddr)).x[0], 0, 0)
+        return BinomOneSidedLnP(k, n, p_ddr, 0, 0, logp)
     if logp:
         return ln_result
     return exp_flush(ln_result)

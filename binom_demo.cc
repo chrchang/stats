@@ -1,5 +1,6 @@
 #include "include/binom.h"
 #include "include/plink2_base.h"
+#include "include/plink2_highprec.h"
 #include "include/plink2_ln.h"
 
 #include <errno.h>
@@ -179,7 +180,7 @@ int main(int argc, char** argv) {
         }
         fputs("Two-sided ", stdout);
       } else {
-        double succ_odds_ratio;
+        dd_real p_ddr;
         if (strchr(argv[3], '/')) {
           int64_t rate_numer;
           int64_t rate_denom;
@@ -187,20 +188,21 @@ int main(int argc, char** argv) {
             fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
             goto main_ret_INVALID_CMDLINE;
           }
-          succ_odds_ratio = u63tod(rate_numer) / u63tod(rate_denom - rate_numer);
+          p_ddr = ddr_accurate_div(ddr_makei(rate_numer), ddr_makei(rate_denom));
         } else {
           double rate;
           if (unlikely((sscanf(argv[3], "%lg", &rate) != 1) || (!(rate > 0.0)) || (1 - rate <= 0.0))) {
             fprintf(stderr, "Error: Invalid expected success rate '%s'.\n", argv[3]);
             goto main_ret_INVALID_CMDLINE;
           }
-          succ_odds_ratio = rate / (1 - rate);
+          p_ddr.x[0] = rate;
+          p_ddr.x[1] = 0.0;
         }
         if (unlikely(argv[4][1] || ((argv[4][0] != '+') && (argv[4][0] != '-')))) {
           fputs("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n", stderr);
           goto main_ret_INVALID_CMDLINE;
         }
-        logp = BinomOneSidedLnP(succ, obs, succ_odds_ratio, (argv[4][0] == '+'), midp);
+        logp = BinomOneSidedLnP(succ, obs, p_ddr, (argv[4][0] == '+'), midp, 1);
         fputs("One-sided ", stdout);
       }
       if (midp) {
