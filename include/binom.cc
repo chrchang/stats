@@ -836,7 +836,7 @@ double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   return s1;
 }
 
-dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr) {
+dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, double* nonlog_ptr) {
   // returns log((x^a)(y^b) / Beta(a,b))
   //
   // normalized always true
@@ -857,58 +857,52 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   // Calculate result with ordinary precision; pointless to go further here
   // unless we widen Lanczos sum calculations.
   double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
-  result *= sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
-  // Represent log-probability with more than 53 bits, to preserve non-log
-  // accuracy without sacrificing range.
-  // TODO: Can we prove <this result> / <ibeta_fraction2's ff> doesn't
-  // overflow or underflow?  Then we can replace one of these expensive ddr_log
-  // operations with an ordinary multiply.
-  dd_real result_ln_ddr = ddr_log(ddr_maked(result));
+  *nonlog_ptr = result * sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
-  // exceed that of ln(result).
+  // exceed that of ln(nonlog).
   // This removes the need for special cases.
   const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh_ddr.x[0]))), agh_ddr);
   const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh_ddr.x[0])), bgh_ddr);
-  return ddr_add3(result_ln_ddr,
-                  ddr_muld(ddr_log1p(l1_ddr), aa),
-                  ddr_muld(ddr_log1p(l2_ddr), bb));
+  return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
+                 ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
 dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
   // normalized always true, min(aa, bb) >= 40, max much larger
   // caller responsible for guaranteeing ay - bx >= 0
-  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
+  double ff;
+  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
 
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
-  double ff = (aa * ay_minus_bx_plus1) / (aa + 1.0);
-  if (ff == 0.0) {
-    ff = kLentzFpmin;
-  }
+  double cc = (aa * ay_minus_bx_plus1) / (aa + 1.0);
   const double xx = p_ddr.x[0];
-  const double x2 = xx * xx;
   const double two_minus_x = 2 - xx;
-  double cc = ff;
+  ff = cc / ff;
   double dd = 0.0;
   double mm = 1.0;
   while (1) {
     const double denom = aa + 2 * mm - 1;
-    const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * x2;
+    // if xx is very small, precomputed xx * xx may underflow when actual
+    // product here does not
+    // (also possible for actual product to underflow)
+    const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * xx * xx;
     double cur_b = mm;
     cur_b += (mm * (bb - mm) * xx) / denom;
-    cur_b += ((aa + mm) * (ay_minus_bx_plus1 + mm * two_minus_x)) / (aa + 2 * mm + 1);
+    cur_b += ((aa + mm) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1)) / (aa + 2 * mm + 1);
     mm += 1.0;
-    dd = cur_b + cur_a * dd;
-    if (dd == 0.0) {
-      dd = kLentzFpmin;
-    }
+    dd = prefer_fma(cur_a, dd, cur_b);
+    // cur_b should always be positive
+    // if (dd == 0.0) {
+    //   dd = kLentzFpmin;
+    // }
     cc = cur_b + cur_a / cc;
-    if (cc == 0.0) {
-      cc = kLentzFpmin;
-    }
+    // if (cc == 0.0) {
+    //   cc = kLentzFpmin;
+    // }
     dd = 1.0 / dd;
     const double delta = cc * dd;
-    if (delta == 1.0) {
+    if (fabs(delta - 1) <= k2m52) {
       result_ln_ddr = ddr_addd(result_ln_ddr, -log(ff));
       if (!inv) {
         return result_ln_ddr;
