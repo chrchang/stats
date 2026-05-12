@@ -860,33 +860,18 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   result *= sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
   // Represent log-probability with more than 53 bits, to preserve non-log
   // accuracy without sacrificing range.
+  // TODO: Can we prove <this result> / <ibeta_fraction2's ff> doesn't
+  // overflow or underflow?  Then we can replace one of these expensive ddr_log
+  // operations with an ordinary multiply.
+  // todo: ddr_expd, ddr_logd?
   dd_real result_ln_ddr = ddr_log(ddr_maked(result));
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
   // exceed that of ln(result).
   const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh_ddr.x[0]))), agh_ddr);
   const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh_ddr.x[0])), bgh_ddr);
-  const double l1 = l1_ddr.x[0];
-  const double l2 = l2_ddr.x[0];
-  // We're aiming for high enough precision that we shouldn't skip this case.
-  if ((MINV(fabs(l1), fabs(l2)) < 0.2) && (l1 * l2 <= 0) && (MAXV(fabs(l1), fabs(l2)) < 0.5)) {
-    const uint32_t small_a = (aa < bb);
-    dd_real l3_ddr;
-    if ((small_a && (bb * l2 < 0.1 * aa)) || ((!small_a) && (l1 * aa > 0.1 * bb))) {
-      l3_ddr = ddr_expm1(ddr_divd(ddr_muld(ddr_log1p(l2_ddr), bb), aa));
-      l3_ddr = ddr_add3(l1_ddr, l3_ddr, ddr_mul(l3_ddr, l1_ddr));
-      l3_ddr = ddr_muld(ddr_log1p(l3_ddr), aa);
-    } else {
-      l3_ddr = ddr_expm1(ddr_divd(ddr_muld(ddr_log1p(l1_ddr), aa), bb));
-      l3_ddr = ddr_add3(l2_ddr, l3_ddr, ddr_mul(l3_ddr, l2_ddr));
-      l3_ddr = ddr_muld(ddr_log1p(l3_ddr), bb);
-    }
-    result_ln_ddr = ddr_add(result_ln_ddr, l3_ddr);
-  } else {
-    result_ln_ddr = ddr_add3(result_ln_ddr,
-                             ddr_muld(ddr_log1p(l1_ddr), aa),
-                             ddr_muld(ddr_log1p(l2_ddr), bb));
-  }
-  return result_ln_ddr;
+  return ddr_add3(result_ln_ddr,
+                  ddr_muld(ddr_log1p(l1_ddr), aa),
+                  ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
 dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, uint32_t inv) {
