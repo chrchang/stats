@@ -27,11 +27,21 @@ double LnBinomCoeff(int64_t n, int64_t k);
 
 double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp);
 
-BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp);
+BoolErr BinomP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp);
 
-double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real p_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp);
+double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, int32_t midp, uint32_t logp);
 
-double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t logp);
+HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
+  const int64_t k_decr = succ_is_greater_alt && (!midp);
+  if (k_decr && (obs_k == 0)) {
+    return logp? 0.0 : 1.0;
+  }
+  return PbinomApprox(obs_k - k_decr, n, p_ddr, succ_is_greater_alt, midp, logp);
+}
+
+double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint32_t logp);
+
+// int64_t Qbinom(dd_real quantile_ddr, int64_t n, dd_real p_ddr, uint32_t logqquant);
 
 #ifdef __cplusplus
 }

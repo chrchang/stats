@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
         fputs("Error: # successes > # observations.\n", stderr);
         goto main_ret_INVALID_CMDLINE;
       }
-      double logp;
+      double ln_pval;
       if (argc == 4) {
         int64_t rate_numer;
         int64_t rate_denom;
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
           goto main_ret_INVALID_CMDLINE;
         }
-        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom - rate_numer, midp, &logp))) {
+        if (unlikely(BinomP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
           fputs("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n", stderr);
           goto main_ret_INVALID_CMDLINE;
         }
-        logp = BinomOneSidedLnP(succ, obs, p_ddr, (argv[4][0] == '+'), midp, 1);
+        ln_pval = BinomOneSidedP(succ, obs, p_ddr, (argv[4][0] == '+'), midp, 1);
         fputs("One-sided ", stdout);
       }
       if (midp) {
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
       }
       fputs("p-value: ", stdout);
       char buf[80];
-      char* write_iter = lntoa_g(logp, buf);
+      char* write_iter = lntoa_g(ln_pval, buf);
       memcpy_k2(write_iter, "\n");
       fputs(buf, stdout);
     } else if (argc != 2) {
@@ -267,8 +267,8 @@ int main(int argc, char** argv) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s' on line %" PRIuPTR " of %s.\n", ratestr, line_idx, argv[1]);
           goto main_ret_MALFORMED_INPUT;
         }
-        double logp;
-        if (unlikely(BinomLnP(succ, obs, rate_numer, rate_denom - rate_numer, midp, &logp))) {
+        double ln_pval;
+        if (unlikely(BinomP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
         fputs(name, stdout);
         char buf[80];
         char* write_iter = memcpya_k2(buf, ": ");
-        write_iter = lntoa_g(logp, write_iter);
+        write_iter = lntoa_g(ln_pval, write_iter);
         memcpy_k2(write_iter, "\n");
         fputs(buf, stdout);
       }

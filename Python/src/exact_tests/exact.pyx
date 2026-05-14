@@ -1,6 +1,6 @@
 # cython: language_level=3
 from libc.stdint cimport int64_t, uint32_t, int32_t
-from libc.math cimport NAN
+from libc.math cimport NAN, nextafter
 import fractions
 
 __version__ = "0.3.4"
@@ -11,9 +11,7 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
     dd_real_struct ddr_maked(const double a) nogil
 
-    dd_real_struct ddr_ieee_sub(const dd_real_struct a, const dd_real_struct b) nogil
-
-    dd_real_struct ddr_accurate_div(const dd_real_struct a, const dd_real_struct b) nogil
+    dd_real_struct ddr_subd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_is_zero(const dd_real_struct a) nogil
 
@@ -29,11 +27,13 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
-    BoolErr BinomLnP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, double* resultp) nogil
+    BoolErr BinomP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) nogil
 
-    double BinomOneSidedLnP(int64_t obs_succ, int64_t obs_tot, dd_real_struct p_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) nogil
+    double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
 
-    double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
+    double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, uint32_t logp) nogil
+
+    int64_t Qbinom(dd_real_struct q_ddr, int64_t n, dd_real_struct p_ddr, uint32_t logq) nogil
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -83,6 +83,41 @@ cdef dd_real_struct DdrMake(object p):
     return p_ddr
 
 
+cdef double zeroval(bint logp):
+    if logp:
+        return NAN
+    return 0.0
+
+cdef double oneval(bint logp):
+    return 1.0 - logp
+
+cdef double half_or_oneval(bint midp, bint logp):
+    if midp:
+        if logp:
+            return -kLn2
+        return 0.5
+    return 1.0 - logp
+
+cdef double pbinom_p01(int64_t k, int64_t n, double p, bint complement, bint midp, bint logp):
+    if complement:
+        k = n + midp - k - 1
+        p = 1 - p
+    if k < 0:
+        return zeroval(logp)
+    if k > n:
+        return oneval(logp)
+    if p == 0:
+        if k == 0:
+            return half_or_oneval(midp, logp)
+        return oneval(logp)
+    # p == 1
+    if k == n:
+        return half_or_oneval(midp, logp)
+    return zeroval(logp)
+
+
+
+
 # n must be in [0, 2^31) for the two-sided test, and [0, 2^52) for one-sided
 # tests.  k must be in [0, n].  p must be in [0, 1].
 #
@@ -95,7 +130,10 @@ cdef dd_real_struct DdrMake(object p):
 # - Otherwise, you can use the generic approximation
 #     fractions.Fraction(p).limit_denominator(2**63 - 1)
 # The benefit of this interface is that it enables *perfect* handling of
-# likelihood near-ties; we aren't limited to even qbinom()'s ~53 bits.
+# likelihood near-ties; we aren't limited to even qbinom()'s ~53 bits.  (Though
+# provable perfection shouldn't be considered part of the function contract; it
+# may be sensible to relax the interface and introduce a tiny risk of
+# mishandling e.g. a 200-bit near-tie in the future.)
 #
 # Since there is negligible practical difference between ~45-bit and 53-bit
 # p-value precision, the implementation aims for the former rather than the
@@ -106,7 +144,7 @@ cdef dd_real_struct DdrMake(object p):
 def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
-    cdef double ln_result
+    cdef double result
     if alternative == "two-sided":
         if n > 0x7fffffff:
             raise RuntimeError("For alternative='two-sided', n must be less than 2^31.")
@@ -116,59 +154,31 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
             if numer != 0 and numer != 1:
                 raise RuntimeError("For alternative='two-sided', p must be 0 or in (2^{-63}, 1].")
             if (numer == 0 and k == 0) or (numer == 1 and k == n):
-                if midp:
-                    ln_result = -kLn2
-                else:
-                    ln_result = 0.0
-            else:
-                if not logp:
-                    return 0.0
-                ln_result = NAN
-        else:
-            if numer * (2**63) <= denom or numer >= denom:
-                raise RuntimeError("For alternative='two-sided', p must be 0 or in (2^{-63}, 1].")
-            if denom >= 2**63:
-                raise RuntimeError("For alternative='two-sided', fractions.Fraction(p) must have denominator < 2^63.  If an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
-            if BinomLnP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, &ln_result):
-                raise MemoryError()
-        if logp:
-            return ln_result
-        return exp_flush(ln_result)
-    cdef bint k_is_greater_alt = (alternative == "greater")
-    if alternative != "less" and not k_is_greater_alt:
+                return half_or_oneval(midp, logp)
+            return zeroval(logp)
+        if numer * (2**63) <= denom or numer >= denom:
+            raise RuntimeError("For alternative='two-sided', p must be 0 or in (2^{-63}, 1].")
+        if denom >= 2**63:
+            raise RuntimeError("For alternative='two-sided', fractions.Fraction(p) must have denominator < 2^63.  If an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
+        if BinomP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, logp, &result):
+            raise MemoryError()
+        return flush_if_denormal(result)
+    cdef bint complement = (alternative == "greater")
+    if alternative != "less" and not complement:
         raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
     if n >= (1LL << 52):
         raise RuntimeError("n must be less than 2^52.")
     cdef dd_real_struct p_ddr = DdrMake(p)
-    if ddr_is_zero(p_ddr):
-        # Degenerate cases.
-        if k == 0 and midp:
-            ln_result = -kLn2
-        elif k == 0 or not k_is_greater_alt:
-            ln_result = 0.0
-        else:
-            if not logp:
-                return 0.0
-            ln_result = NAN
-    elif ddr_is_one(p_ddr):
-        if k == n and midp:
-            ln_result = -kLn2
-        elif k == n or k_is_greater_alt:
-            ln_result = 0.0
-        else:
-            if not logp:
-                return 0.0
-            ln_result = NAN
-    else:
-        if (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
-            # p in (0, 2^{-960}) is a low priority: we'd need to either slow
-            # down the common case to avoid underflow/overflow, or bloat the
-            # library with a separate function just to handle that case.
-            raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-        return BinomOneSidedLnP(k, n, p_ddr, k_is_greater_alt, midp, logp)
-    if logp:
-        return ln_result
-    return exp_flush(ln_result)
+    if complement and (not midp):
+        k -= 1
+    if ddr_is_zero(p_ddr) or ddr_is_one(p_ddr):
+        return pbinom_p01(k, n, p_ddr.x[0], complement, midp, logp)
+    if (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
+        # p in (0, 2^{-960}) is a low priority: we'd need to either slow down
+        # the common case to avoid underflow/overflow, or bloat the library
+        # with a separate function just to handle that case.
+        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
+    return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, midp, logp))
 
 
 # Returns likelihood of exactly k successes.  Relative error should be <0.6 ULP
@@ -185,13 +195,9 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
         return 0.0
     if ddr_is_zero(p_ddr) or ddr_is_one(p_ddr):
         if (ddr_is_zero(p_ddr) and k == 0) or (k == n and not ddr_is_zero(p_ddr)):
-            if logp:
-                return 0.0
-            return 1.0
-        if logp:
-            return NAN
-        return 0.0
-    return BinomMass(k, n, p_ddr, logp)
+            return oneval(logp)
+        return zeroval(logp)
+    return flush_if_denormal(BinomMass(k, n, p_ddr, logp))
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 #
@@ -199,33 +205,40 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
 # alternative="less", which uses a faster algorithm that doesn't try to get the
 # last few mantissa bits right.
 # Otherwise, relative error should be <0.6 ULP unless n is huge.
-def pbinom(int64_t k, int64_t n, object p=0.5, bint logp=0, bint approx=0):
+def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, bint approx=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef dd_real_struct p_ddr = DdrMake(p)
     if not ddr_is_zero(p_ddr) and (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
         raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-    cdef double ln_result
-    if k < 0:
-        # Degenerate cases.
-        if not logp:
-            return 0.0
-        ln_result = NAN
-    elif k >= n or ddr_is_zero(p_ddr):
-        ln_result = 0.0
-    elif ddr_is_one(p_ddr):
-        if not logp:
-            return 0.0
-        ln_result = NAN
-    else:
-        if not approx:
-            return flush_if_denormal(Pbinom(k, n, p_ddr, logp))
-        return BinomOneSidedLnP(k, n, p_ddr, 0, 0, logp)
-    if logp:
-        return ln_result
-    return exp_flush(ln_result)
 
-# Todo: qbinom function.
+    if ddr_is_zero(p_ddr) or ddr_is_one(p_ddr):
+        return pbinom_p01(k, n, p_ddr.x[0], complement, 0, logp)
+    if approx:
+        return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, 0, logp))
+    return flush_if_denormal(Pbinom(k, n, p_ddr, complement, logp))
+
+# Returns smallest nonnegative k for which cdf(k) >= q.
+#
+# Implementation is *not* built on top of pbinom() in a way that e.g.
+# guarantees qbinom(pbinom(k, n, p), n, p) == k or qbinom(pbinom(k, n, p) * (1
+# + 0.5**52), n, p) > k in non-degenerate cases.  However, it is designed to
+# make these outcomes very likely:
+# - Qbinom() is designed for <0.5 ULP relative error (except when n is huge).
+# - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
+def qbinom(object q, int64_t n, object p=0.5, bint logq=0):
+    if n < 0 or n >= (1LL << 52):
+        raise RuntimeError("n must be in [0, 2^52).")
+    cdef dd_real_struct p_ddr = DdrMake(p)
+    if not ddr_is_zero(p_ddr) and (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
+        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
+    cdef dd_real_struct q_ddr = DdrMake(q)
+    if not ddr_leqd(q_ddr, 1.0):
+        raise RuntimeError("q must be <= 1.")
+    cdef double half_ulp = 0.5 * (q_ddr.x[0] - nextafter(q_ddr.x[0], 0.0))
+    q_ddr = ddr_subd(q_ddr, half_ulp)
+    # return Qbinom(q_ddr, n, p_ddr, logq)
+    raise RuntimeError("qbinom is not implemented yet.")
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length

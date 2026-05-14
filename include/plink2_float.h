@@ -105,6 +105,7 @@ static const double k2m30 = 1.0 / (1 << 30);
 static const double k2m35 = 1.0 / (1LL << 35);
 static const double k2m44 = 1.0 / (1LL << 44);
 static const double k2m60 = 1.0 / (1LL << 60);
+static const double k2m64 = k2m60 / 16;
 
 static const double kBigEpsilon = k2m21;  // must be >= sqrt(kSmallEpsilon)
 static const double kEpsilon = k2m30;
