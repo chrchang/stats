@@ -221,17 +221,17 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
 # Returns smallest nonnegative k for which cdf(k) >= targetP.
 #
 # Implementation is *not* built on top of pbinom() in a way that e.g.
-# guarantees qbinom(pbinom(k, n, distP), n, distP) == k or
-# qbinom(pbinom(k, n, distP) * (1 + 0.5**52), n, distP) > k in non-degenerate
+# guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
+# qbinom(pbinom(k, n, succP) * (1 + 0.5**52), n, succP) > k in non-degenerate
 # cases.  However, it is designed to make these outcomes very likely:
 # - Qbinom() is designed for <0.5 ULP relative error (except when n is huge).
 # - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
-def qbinom(object targetP, int64_t n, object distP=0.5, bint logTarget=0):
+def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    cdef dd_real_struct distp_ddr = DdrMake(distP)
+    cdef dd_real_struct distp_ddr = DdrMake(succP)
     if not ddr_is_zero(distp_ddr) and (ddr_ltd(distp_ddr, 0.5**960) or not ddr_leqd(distp_ddr, 1.0)):
-        raise RuntimeError("distP must be 0, or in [2^{-960}, 1].")
+        raise RuntimeError("succP must be 0, or in [2^{-960}, 1].")
     cdef dd_real_struct targetp_ddr = DdrMake(targetP)
     if not ddr_leqd(targetp_ddr, 1.0):
         raise RuntimeError("targetP must be <= 1.")

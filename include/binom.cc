@@ -499,7 +499,7 @@ double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32_t logp) {
 // (...yes, it would of course be reasonable to use qd_reals for near-tie
 // handling instead, giving up perfection for better flexibility and worst-case
 // speed/memory usage.)
-BoolErr BinomP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) {
+BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) {
   if (!obs_tot) {
     if (midp) {
       *resultp = logp? -kLn2 : 0.5;
@@ -1453,24 +1453,26 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
 // can be trusted to be 0, and
 //   qbinom(fractions.Fraction(2**53, (2**53 - 1) * 9), 2, fractions.Fraction(2, 3))
 // can be trusted to be 1.
-// The QbinomHalfUlp() entry point subtracts a natural epsilon value (0.5 times
-// the value of the least significant bit in targetp_ddr.x[0]) off of
-// targetp_ddr before calling Qbinom().
+// The QbinomHalfUlp() entry point subtracts the natural epsilon value (0.5
+// times the value of the least significant bit in targetp_ddr.x[0]) off of
+// targetp_ddr, for the goal described above, before calling Qbinom().
 //
 // Probable todo: (except possibly on some very large cases) start with faster
 // lower-accuracy interval-math calculation, and fall back on reliable
 // high-accuracy calculation only when needed.
-int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_target) {
-  if (ddr_leqd(targetp_ddr, 0.0) || ddr_is_zero(distp_ddr) || (n == 0)) {
+int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
+  if (ddr_is_zero(targetp_ddr) || ddr_is_zero(succp_ddr) || (n == 0)) {
     return 0;
   }
-  if (ddr_is_one(distp_ddr) || ddr_is_one(targetp_ddr)) {
+  if (ddr_is_one(succp_ddr) || ddr_is_one(targetp_ddr)) {
     return n;
   }
   // Only need to initialize in targetp > 0.5 case.
   // Not possible to represent targetp in (1 - <smallest positive double>, 1),
   // so we don't need to work in log-space on that side.
   const uint32_t is_right_half = ((!log_target) && (targetp_ddr.x[0] > 0.5)) || (log_target && (targetp_ddr.x[0] > -_ddr_log2.x[0]));
+  // Named target1mp ("1 minus p") instead of targetq since q might be expected
+  // to refer to 'quantile' in this context.
   dd_real target1mp_ddr = {{0.0, 0.0}};
   if (is_right_half) {
     if (!log_target) {
@@ -1479,29 +1481,47 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_t
       target1mp_ddr = ddr_negate(ddr_expm1(targetp_ddr));
     }
   }
-  const dd_real distq_ddr = ddr_negate(ddr_subd(distp_ddr, 1.0));
+  const dd_real failp_ddr = ddr_negate(ddr_subd(succp_ddr, 1.0));
+  // n=1 doesn't play well with the current initial-guess algorithm, and is
+  // straightforward to handle directly.
   if (n == 1) {
-    // cdf(0) = q.
+    // cdf(0) = failp.
     if (is_right_half) {
-      // May as well get this right even when p < 2^{-106}.
-      return ddr_lt(target1mp_ddr, distp_ddr);
+      // May as well get this right even when succp < 2^{-106}.
+      return ddr_lt(target1mp_ddr, succp_ddr);
     }
     if (log_target) {
       targetp_ddr = ddr_exp(targetp_ddr);
     }
-    return ddr_lt(distq_ddr, targetp_ddr);
+    return ddr_lt(failp_ddr, targetp_ddr);
   }
-  int64_t mode = S_CAST(int64_t, n * distp_ddr.x[0] + 0.5);
-  // Log-likelihood over the rest of the domain is bounded above by the
-  // quadratic which goes through three consecutive points near the mode.
+  // We make an initial guess, use Newton's method to refine it (in the same
+  // way as BinomTwoSidedP() when jumping from one tail to the other),
+  // calculate tail likelihood to sufficient accuracy, and then start moving k
+  // inward and updating tail likelihood until it crosses targetp or target1mp.
+  // This avoids unnecessary repetition of the tail-likelihood calculation.
+  //
+  // Initial guess is based on fitting a quadratic to three points of the
+  // log-likelihood function near the mode.  Log-likelihood is
+  //   log(p^k (1-p)^{n-k} n! / (k! (n-k)!))
+  //   = k log(p) + (n-k) log(1-p) + log(n!) - log(k!) - log((n-k)!)
+  //   = <constant> + k(log(p)-log(1-p)) - log(gamma(k+1)) - log(gamma(n+1-k))
+  // First derivative w.r.t. k is
+  //   log(p) - log(1-p) - digamma(k+1) + digamma(n+1-k)
+  // Second derivative is
+  //   -trigamma(k+1) - trigamma(n+1-k)
+  //   ~= -(1/(k+1) + 1/(n+1-k))
+  // which is slowly varying for large n and k.
+  //
   // Probable todo: try Cornish-Fisher expansion (like R qbinom()) for initial
   // guess instead.
+  int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
   mode = mode + (mode == 0) - (mode == n);
   const dd_real n_lfact_ddr = ddr_lfact(n);
-  const dd_real pdq_ddr = ddr_accurate_div(distp_ddr, distq_ddr);
-  const dd_real qdp_ddr = ddr_accurate_div(distq_ddr, distp_ddr);
-  const dd_real logp_ddr = ddr_log(distp_ddr);
-  const dd_real logq_ddr = ddr_log(distq_ddr);
+  const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
+  const dd_real qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
+  const dd_real logp_ddr = ddr_log(succp_ddr);
+  const dd_real logq_ddr = ddr_log(failp_ddr);
   // This is usually overkill, but if n is huge we need to compute these to
   // high precision to make a decent initial guess.
   const dd_real mode_lnlike_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
@@ -1527,7 +1547,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_t
 
     // Find the x on the right side where the quadratic crosses
     // y=log(target1mp/(n-mode)).  If there's no such point, just start at
-    // x=mode+1.  This is expected to overshoot.
+    // x=mode+1..
     // (Could recalculate target_lnlike with mode replaced with k when
     // log(pmf(k)) is too high.)
     const double target_lnlike = log(target1mp_ddr.x[0] / (n - mode));
@@ -1560,6 +1580,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_t
       cur_lnlike_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
                                ddr_add_lfacts(k, nmk));
       const double lnlike_diff = cur_lnlike_ddr.x[0] - target_lnlike;
+      // TODO: mirror BinomTwoSidedP.
       if (lnlike_diff > 0) {
         if (k == n) {
           break;

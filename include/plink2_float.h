@@ -209,6 +209,24 @@ HEADER_INLINE float prefer_fmaf(float a, float b, float c) {
 }
 #endif
 
+HEADER_INLINE uint64_t float64bits(double xx) {
+  double* xx_ptr = &xx;
+  return *R_CAST(uint64_t*, xx_ptr);
+}
+
+HEADER_INLINE double float64frombits(uint64_t ullii) {
+  uint64_t* ullii_ptr = &ullii;
+  return *R_CAST(double*, ullii_ptr);
+}
+
+HEADER_INLINE double prev_float64(double xx) {
+  return float64frombits(float64bits(xx) - 1);
+}
+
+HEADER_INLINE double next_float64(double xx) {
+  return float64frombits(float64bits(xx) + 1);
+}
+
 // Returns log(exp(xx) + exp(yy)).
 HEADER_INLINE double lnsum(double xx, double yy) {
   // log(exp(xx) + exp(yy))

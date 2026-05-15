@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
           goto main_ret_INVALID_CMDLINE;
         }
-        if (unlikely(BinomP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
+        if (unlikely(BinomTwoSidedP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
           goto main_ret_MALFORMED_INPUT;
         }
         double ln_pval;
-        if (unlikely(BinomP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
+        if (unlikely(BinomTwoSidedP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1, &ln_pval))) {
           goto main_ret_NOMEM;
         }
         fputs("Two-sided ", stdout);
