@@ -310,6 +310,18 @@ const dd_real _ddr_ln_fact[_ddr_n_ln_fact] = {
   { 1.1617121011184005965e+03,  5.4254719719550151903e-14}
 };
 
+double Lfact(double xx) {
+  if (xx < 256) {
+    return _ddr_ln_fact[S_CAST(int32_t, xx)].x[0];
+  }
+  // Since we're summing a fixed number of terms, start with the smaller terms
+  // to reduce rounding error.
+  const double invn = 1.0 / xx;
+  const double invn2 = invn * invn;
+  const double small_term_sum = prefer_fma(invn, prefer_fma(invn2, 1.0 / -360.0, 1.0 / 12.0), kLnSqrt2Pi - xx);
+  return log(xx) * (xx + 0.5) + small_term_sum;
+}
+
 CONSTI32(_ddr_n_inv_fact, 15);
 
 // "_offset3" since this starts at 1 / (3!), not 1 / (0!)

@@ -41,7 +41,13 @@ HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, uin
 
 double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint32_t logp);
 
-// int64_t Qbinom(dd_real quantile_ddr, int64_t n, dd_real p_ddr, uint32_t logqquant);
+int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_target);
+
+HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_ddr, int64_t n, dd_real distp_ddr, uint32_t log_target) {
+  const double half_ulp = 0.5 * (targetp_ddr.x[0] - nextafter(targetp_ddr.x[0], 0.0));
+  targetp_ddr = ddr_subd(targetp_ddr, half_ulp);
+  return Qbinom(targetp_ddr, n, distp_ddr, log_target);
+}
 
 #ifdef __cplusplus
 }

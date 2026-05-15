@@ -55,6 +55,10 @@ extern const dd_real _ddr_log2;
 CONSTI32(_ddr_n_ln_fact, 256);
 extern const dd_real _ddr_ln_fact[_ddr_n_ln_fact];
 
+// Fast float64-accuracy version.
+// Assumes xx is a nonnegative integer.
+double Lfact(double xx);
+
 #define _QD_SPLITTER 134217729.0               // = 2^27 + 1
 #define _QD_SPLIT_THRESH 6.69692879491417e+299 // = 2^996
 

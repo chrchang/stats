@@ -1,6 +1,6 @@
 # cython: language_level=3
 from libc.stdint cimport int64_t, uint32_t, int32_t
-from libc.math cimport NAN, nextafter
+from libc.math cimport NAN
 import fractions
 
 __version__ = "0.3.4"
@@ -33,7 +33,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, uint32_t logp) nogil
 
-    int64_t Qbinom(dd_real_struct q_ddr, int64_t n, dd_real_struct p_ddr, uint32_t logq) nogil
+    int64_t QbinomHalfUlp(dd_real_struct targetp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -218,26 +218,24 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
         return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, 0, logp))
     return flush_if_denormal(Pbinom(k, n, p_ddr, complement, logp))
 
-# Returns smallest nonnegative k for which cdf(k) >= q.
+# Returns smallest nonnegative k for which cdf(k) >= targetP.
 #
 # Implementation is *not* built on top of pbinom() in a way that e.g.
-# guarantees qbinom(pbinom(k, n, p), n, p) == k or qbinom(pbinom(k, n, p) * (1
-# + 0.5**52), n, p) > k in non-degenerate cases.  However, it is designed to
-# make these outcomes very likely:
+# guarantees qbinom(pbinom(k, n, distP), n, distP) == k or
+# qbinom(pbinom(k, n, distP) * (1 + 0.5**52), n, distP) > k in non-degenerate
+# cases.  However, it is designed to make these outcomes very likely:
 # - Qbinom() is designed for <0.5 ULP relative error (except when n is huge).
 # - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
-def qbinom(object q, int64_t n, object p=0.5, bint logq=0):
+def qbinom(object targetP, int64_t n, object distP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    cdef dd_real_struct p_ddr = DdrMake(p)
-    if not ddr_is_zero(p_ddr) and (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
-        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-    cdef dd_real_struct q_ddr = DdrMake(q)
-    if not ddr_leqd(q_ddr, 1.0):
-        raise RuntimeError("q must be <= 1.")
-    cdef double half_ulp = 0.5 * (q_ddr.x[0] - nextafter(q_ddr.x[0], 0.0))
-    q_ddr = ddr_subd(q_ddr, half_ulp)
-    # return Qbinom(q_ddr, n, p_ddr, logq)
+    cdef dd_real_struct distp_ddr = DdrMake(distP)
+    if not ddr_is_zero(distp_ddr) and (ddr_ltd(distp_ddr, 0.5**960) or not ddr_leqd(distp_ddr, 1.0)):
+        raise RuntimeError("distP must be 0, or in [2^{-960}, 1].")
+    cdef dd_real_struct targetp_ddr = DdrMake(targetP)
+    if not ddr_leqd(targetp_ddr, 1.0):
+        raise RuntimeError("targetP must be <= 1.")
+    # return QbinomHalfUlp(targetp_ddr, n, distp_ddr, logTarget)
     raise RuntimeError("qbinom is not implemented yet.")
 
 

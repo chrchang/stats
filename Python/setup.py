@@ -19,8 +19,8 @@ ext_modules = [
                          "src/include/plink2_highprec.cc",
                          "src/include/plink2_ln.cc"],
               language = "c++",
-              extra_compile_args = ["-std=c++11", "-Wno-unused-function", "-Wno-cpp", "-DNO_CPP11_TYPE_ENFORCEMENT"],
-              extra_link_args = ["-std=c++11"]
+              extra_compile_args = ["-std=c++14", "-Wno-unused-function", "-Wno-cpp", "-DNO_CPP11_TYPE_ENFORCEMENT"],
+              extra_link_args = ["-std=c++14"]
               )
     ]
 
