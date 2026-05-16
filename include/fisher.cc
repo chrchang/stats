@@ -75,7 +75,11 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
 // int <-> floating-point conversions.  (Yes, uint32 -> float64 should be fine
 // on 64-bit systems, but we may as well write this to also be efficient on
 // 32-bit systems when there's no real drawback to doing so.)
-BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, double* resultp) {
+//
+// Not difficult to extend this to obs_m11 + obs_m12 + obs_m21 + obs_m22 <
+// 2^52, if the rational-arithmetic backstop in CompareFactorialProducts() is
+// revised to use qd_reals.
+BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
   // spurious index differences between Fisher22 and Fisher23.
@@ -92,7 +96,7 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
   if (!midp) {
     // Fast path for p=1.
     if ((obs_m11 + 1LL) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
-      *resultp = 0;
+      *resultp = logp? 0.0 : 1.0;
       return 0;
     }
   }
@@ -185,7 +189,8 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
         break;
       }
     }
-    *resultp = log(tailp / (tailp + centerp));
+    const double pval = tailp / (tailp + centerp);
+    *resultp = logp? log(pval) : pval;
     return 0;
   }
   dd_real starting_lnprobv_ddr =
@@ -264,7 +269,12 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        *resultp = starting_lnprob + log(tailp);
+        if (logp) {
+          *resultp = starting_lnprob + log(tailp);
+        } else {
+          // Avoid premature underflow.
+          *resultp = exp(starting_lnprob + 64 * kLn2) * tailp * k2m64;
+        }
         return 0;
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
@@ -338,7 +348,11 @@ BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t o
     m12 -= 1;
     m21 -= 1;
   }
-  *resultp = starting_lnprob + log(tailp);
+  if (logp) {
+    *resultp = starting_lnprob + log(tailp);
+  } else {
+    *resultp = exp(starting_lnprob + 64 * kLn2) * tailp * k2m64;
+  }
   return 0;
 }
 
@@ -1143,7 +1157,7 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
           swap_i32(&mx2i, &mx3i);
         }
         if (mx3i == 0) {
-          return Fisher22LnP(obs_m11, obs_m12, obs_m21, obs_m22, midp, resultp);
+          return Fisher22TwoSidedP(obs_m11, obs_m12, obs_m21, obs_m22, midp, 1, resultp);
         }
       }
       if (mx1i < mx2i) {

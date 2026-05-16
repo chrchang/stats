@@ -2,8 +2,9 @@ exact_tests
 ===========
 
 This package provides binomial, Hardy-Weinberg equilibrium, and Fisher's exact
-test functions.  (Only binomial test and 2x2 and 2x3 FET implemented right now;
-the rest is coming soon.)  The functions are accurate and efficient:
+test (2x2 and 2x3 so far) functions, along with {p,d,q}binom() and
+{p,d,q}hyper() distribution functions.  The functions are accurate and
+efficient:
 
 - High-precision and interval arithmetic are used to ensure likelihood
   near-ties are correctly resolved.  Log-(mid)p-values are available when you

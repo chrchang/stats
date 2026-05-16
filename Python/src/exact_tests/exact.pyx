@@ -37,7 +37,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
-    BoolErr Fisher22LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, double* resultp) nogil
+    BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) nogil
 
     double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp) nogil
 
@@ -280,8 +280,9 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
         ln_result = Fisher22OneSidedLnP(m11, m12, m21, m22, m11_is_greater_alt, midp)
     else:
         if nrow == 2 and ncol == 2:
-            if Fisher22LnP(m11, m12, m21, m22, midp, &ln_result):
+            if Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp, &ln_result):
                 raise MemoryError()
+            return flush_if_denormal(ln_result)
         elif (nrow == 2 and ncol == 3) or (nrow == 3 and ncol == 2):
             if nrow == 2:
                 m13 = table[0][2]

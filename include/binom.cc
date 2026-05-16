@@ -500,8 +500,9 @@ double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32_t logp) {
 // e.g. numerator and denominator < 2^31.
 //
 // (...yes, it would of course be reasonable to use qd_reals for near-tie
-// handling instead, giving up perfection for better flexibility and worst-case
-// speed/memory usage.)
+// handling instead, giving up perfection for better flexibility, worst-case
+// speed/memory usage, and fewer license restrictions.  Such a switch is likely
+// to happen in the future.)
 //
 // Note that this can be written in terms of dbinom() and pbinom():
 // 1. Calculate mode, determine which tail obs_succ is on.  Early-exit if we're

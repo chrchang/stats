@@ -60,13 +60,13 @@ int32_t main(int argc, char** argv) {
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
         }
-        double logp;
-        if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &logp))) {
+        double ln_pval;
+        if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &ln_pval))) {
           goto main_ret_NOMEM;
         }
         char buf[80];
         char* write_iter = strcpya(buf, "P-value: ");
-        write_iter = lntoa_g(logp, write_iter);
+        write_iter = lntoa_g(ln_pval, write_iter);
         memcpy_k2(write_iter, "\n");
         fputs(buf, stdout);
       } else {
@@ -76,23 +76,23 @@ int32_t main(int argc, char** argv) {
           goto main_ret_1;
         }
         if (argc == 5) {
-          double logp;
-          if (unlikely(Fisher22LnP(m11, m12, m21, m22, midp, &logp))) {
+          double ln_pval;
+          if (unlikely(Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1, &ln_pval))) {
             goto main_ret_NOMEM;
           }
           char buf[80];
           char* write_iter = strcpya(buf, "P-value: ");
-          write_iter = lntoa_g(logp, write_iter);
+          write_iter = lntoa_g(ln_pval, write_iter);
           memcpy_k2(write_iter, "\n");
           fputs(buf, stdout);
         } else {
           if ((argv[5][1] != '\0') || ((argv[5][0] != '+') && (argv[5][0] != '-'))) {
             goto main_std_help;
           }
-          const double logp = Fisher22OneSidedLnP(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp);
+          const double ln_pval = Fisher22OneSidedLnP(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp);
           char buf[80];
           char* write_iter = strcpya(buf, "P-value: ");
-          write_iter = lntoa_g(logp, write_iter);
+          write_iter = lntoa_g(ln_pval, write_iter);
           memcpy_k2(write_iter, "\n");
           fputs(buf, stdout);
         }
@@ -143,17 +143,17 @@ int32_t main(int argc, char** argv) {
         uint32_t m22;
         uint32_t m31;
         uint32_t m32;
-        double logp;
+        double ln_pval;
         if (sscanf(bufptr, "%s %u %u %u %u %u %u", idstr, &m11, &m12, &m21, &m22, &m31, &m32) < 7) {
           if (sscanf(bufptr, "%s %u %u %u %u", idstr, &m11, &m12, &m21, &m22) < 5) {
             // skip improperly formatted line
             continue;
           }
-          if (unlikely(Fisher22LnP(m11, m12, m21, m22, midp, &logp))) {
+          if (unlikely(Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1, &ln_pval))) {
             goto main_ret_NOMEM;
           }
         } else {
-          if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &logp))) {
+          if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &ln_pval))) {
             goto main_ret_NOMEM;
           }
         }
@@ -161,7 +161,7 @@ int32_t main(int argc, char** argv) {
         fputs("P-value for ", stdout);
         fputs(idstr, stdout);
         char* write_iter = strcpya(buf, ": ");
-        write_iter = lntoa_g(logp, write_iter);
+        write_iter = lntoa_g(ln_pval, write_iter);
         memcpy_k2(write_iter, "\n");
         fputs(buf, stdout);
       }
