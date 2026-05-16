@@ -475,9 +475,9 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
 }
 
 static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
+static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
 // calculated with qd_real library
 static const dd_real _ddr_960log2 = {{ 6.6542129333754746767e+02, 2.9368276770525480578e-14 }};
-static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
 
 // lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.
 // Avoids intermediate underflow when exp(lnprob_ddr) would underflow, but
@@ -502,6 +502,16 @@ double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32_t logp) {
 // (...yes, it would of course be reasonable to use qd_reals for near-tie
 // handling instead, giving up perfection for better flexibility and worst-case
 // speed/memory usage.)
+//
+// Note that this can be written in terms of dbinom() and pbinom():
+// 1. Calculate mode, determine which tail obs_succ is on.  Early-exit if we're
+//    at a mode.
+// 2. Calculate pbinom() for tail, and log-dbinom() for starting table.
+// 3. Search for furthest-inward value of succ on other tail where log-dbinom()
+//    is <= starting log-dbinom().
+// 4. Add its tail pbinom() value, return.
+// Several other 2-sided exact tests based on unimodal distributions (e.g.
+// Fisher's 2x2) can be performed in the same manner.
 BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) {
   if (!obs_tot) {
     if (midp) {
@@ -924,14 +934,19 @@ dd_real ibeta_fraction2_ln_ddr(double aa, double bb, dd_real p_ddr, dd_real q_dd
     cur_b += ((aa + mm) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1)) / (aa + 2 * mm + 1);
     mm += 1.0;
     dd = prefer_fma(cur_a, dd, cur_b);
-    // cur_b should always be positive
-    // if (dd == 0.0) {
-    //   dd = kLentzFpmin;
-    // }
+    // Algorithm should terminate when cur_a decreases to 0 due to bb == mm or
+    // underflow.  At and before that point, cur_b is always positive.
+    /*
+    if (dd == 0.0) {
+      dd = kLentzFpmin;
+    }
+    */
     cc = cur_b + cur_a / cc;
-    // if (cc == 0.0) {
-    //   cc = kLentzFpmin;
-    // }
+    /*
+    if (cc == 0.0) {
+      cc = kLentzFpmin;
+    }
+    */
     dd = 1.0 / dd;
     const double delta = cc * dd;
     if (fabs(delta - 1) <= k2m52) {
