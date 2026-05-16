@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.3.4"
+__version__ = "0.4.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
@@ -27,7 +27,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
-    BoolErr BinomP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) nogil
+    BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) nogil
 
     double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
 
@@ -160,7 +160,7 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
             raise RuntimeError("For alternative='two-sided', p must be 0 or in (2^{-63}, 1].")
         if denom >= 2**63:
             raise RuntimeError("For alternative='two-sided', fractions.Fraction(p) must have denominator < 2^63.  If an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
-        if BinomP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, logp, &result):
+        if BinomTwoSidedP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, logp, &result):
             raise MemoryError()
         return flush_if_denormal(result)
     cdef bint complement = (alternative == "greater")
@@ -235,8 +235,7 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     cdef dd_real_struct targetp_ddr = DdrMake(targetP)
     if not ddr_leqd(targetp_ddr, 1.0):
         raise RuntimeError("targetP must be <= 1.")
-    # return QbinomHalfUlp(targetp_ddr, n, distp_ddr, logTarget)
-    raise RuntimeError("qbinom is not implemented yet.")
+    return QbinomHalfUlp(targetp_ddr, n, distp_ddr, logTarget)
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length

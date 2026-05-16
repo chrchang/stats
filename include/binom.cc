@@ -475,6 +475,9 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
 }
 
 static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
+// calculated with qd_real library
+static const dd_real _ddr_960log2 = {{ 6.6542129333754746767e+02, 2.9368276770525480578e-14 }};
+static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
 
 // lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.
 // Avoids intermediate underflow when exp(lnprob_ddr) would underflow, but
@@ -650,7 +653,6 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   const dd_real lnprobf_ddr =
     ddr_add(ddr_lfact(obs_totd), ddr_muld(lnfail_ddr, obs_totd));
   const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
-  const double starting_lnprob = starting_lnprob_ddr.x[0];
 
   // Now we want to jump near the other tail, without evaluating that many
   // contingency table log-likelihoods along the way.
@@ -1513,8 +1515,8 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   //   ~= -(1/(k+1) + 1/(n+1-k))
   // which is slowly varying for large n and k.
   //
-  // Probable todo: try Cornish-Fisher expansion (like R qbinom()) for initial
-  // guess instead.
+  // Probable todo: compare to R qbinom()'s use of Cornish-Fisher expansion.  I
+  // expect the R approach to be better on this front.
   int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
   mode = mode + (mode == 0) - (mode == n);
   const dd_real n_lfact_ddr = ddr_lfact(n);
@@ -1547,12 +1549,12 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
 
     // Find the x on the right side where the quadratic crosses
     // y=log(target1mp/(n-mode)).  If there's no such point, just start at
-    // x=mode+1..
-    // (Could recalculate target_lnlike with mode replaced with k when
+    // x=mode+1.
+    // (Could recalculate target_lnprob with mode replaced with k when
     // log(pmf(k)) is too high.)
-    const double target_lnlike = log(target1mp_ddr.x[0] / (n - mode));
+    const double target_lnprob = log(target1mp_ddr.x[0] / (n - mode));
     // (-b + sqrt(b^2 - 4ac)) / 2a
-    double k = trunc((-x1_coeff + sqrt(x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnlike))) / (2 * x2_coeff));
+    double k = trunc((-x1_coeff + sqrt(x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob))) / (2 * x2_coeff));
     if (k > n) {
       k = n;
     }
@@ -1566,35 +1568,157 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
     const double tailsum_ddr_end = log(0.125 / ((n - mode) * (n - mode)));
     // |log(pmf(n) / pmf(n-1))| is larger than all the other gaps between
     // adjacent log(pmf()) points to the right of the mode.  So this ensures
-    // there's at least one value of k where log(pmf(k)) - target_lnlike is in
+    // there's at least one value of k where log(pmf(k)) - target_lnprob is in
     // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(n)) >=
-    // target_lnlike, in which case we exit the loop at k=n.
+    // target_lnprob, in which case we exit the loop at k=n.
     double lnprob_diff_min = log(pdq_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
     if (lnprob_diff_min > tailsum_ddr_end) {
       lnprob_diff_min = tailsum_ddr_end;
     }
-    dd_real cur_lnlike_ddr;
+    double nmk;
+    dd_real cur_lnprob_ddr;
     while (1) {
       // Evaluate pmf(k) to high precision.
-      double nmk = n - k;
-      cur_lnlike_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
+      nmk = n - k;
+      cur_lnprob_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
                                ddr_add_lfacts(k, nmk));
-      const double lnlike_diff = cur_lnlike_ddr.x[0] - target_lnlike;
-      // TODO: mirror BinomTwoSidedP.
-      if (lnlike_diff > 0) {
+      const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
+      if (lnprob_diff > 0) {
         if (k == n) {
           break;
         }
-        // Newton's method.
-      } else if (lnlike_diff > lnprob_diff_min) {
+        const double ll_deriv = pdq_ddr.x[0] + log(nmk / (k + 1));
+        k += ceil_smalleps(-lnprob_diff / ll_deriv);
+        if (k > n) {
+          k = n;
+        }
+      } else if (lnprob_diff > lnprob_diff_min) {
         break;
       } else {
+        const double ll_deriv = pdq_ddr.x[0] + log((nmk + 1) / k);
+        k -= S_CAST(int64_t, lnprob_diff / ll_deriv);
       }
     }
+    // Exit log-space, and express current likelihood as a fraction of
+    // target1mp.
+    // Need to be careful about intermediate underflow here.
+    const int64_t tailstart_k = k;
+    const dd_real tailstart_p_ddr = ddr_mul_pwr2(ddr_accurate_div(ddr_exp(ddr_add(cur_lnprob_ddr, _ddr_960log2)), target1mp_ddr), 1.0 / k2p960);
+    dd_real lastp_ddr = tailstart_p_ddr;
+    dd_real tailsum_ddr = tailstart_p_ddr;
+    if (nmk > 0) {
+      // Could use geometric-series upper bound on tailsum to raise this
+      // threshold.
+      const double min_incr_right = 0.125 / (nmk * nmk);
+      while (lastp_ddr.x[0] >= min_incr_right) {
+        k += 1;
+        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+        nmk -= 1;
+        tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+      }
+      if (nmk > 0) {
+        const double pdq = pdq_ddr.x[0];
+        double lastp = lastp_ddr.x[0];
+        double tailsum = 0.0;
+        while (1) {
+          k += 1;
+          lastp *= pdq * nmk / k;
+          nmk -= 1;
+          const double preaddp = tailsum;
+          tailsum += lastp;
+          if (tailsum == preaddp) {
+            break;
+          }
+        }
+        tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
+      }
+      lastp_ddr = tailstart_p_ddr;
+      k = tailstart_k;
+      nmk = n - k;
+    }
+    while (ddr_leqd(tailsum_ddr, 1.0)) {
+      nmk += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      k -= 1;
+      tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+    }
+    return k;
   }
   // Left half.  Need to be able to handle 0 < targetp < DBL_MIN.
-  // TODO
-  return 0;
+  // (That difference really only affects the tailstart_p_ddr calculation.)
+  const dd_real target_lnp_ddr = log_target? targetp_ddr : ddr_log(targetp_ddr);
+  const double target_lnprob = log(target_lnp_ddr.x[0] / (n - mode));
+  double k = trunc((-x1_coeff - sqrt(x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob))) / (2 * x2_coeff));
+  if (k < 0) {
+    k = 0;
+  }
+  const double tailsum_ddr_end = log(0.125 / (mode * mode));
+  double lnprob_diff_min = log(qdp_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
+  if (lnprob_diff_min > tailsum_ddr_end) {
+    lnprob_diff_min = tailsum_ddr_end;
+  }
+  double nmk;
+  dd_real cur_lnprob_ddr;
+  while (1) {
+    nmk = n - k;
+    cur_lnprob_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
+                             ddr_add_lfacts(k, nmk));
+    const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
+    if (lnprob_diff > 0) {
+      if (k == 0) {
+        break;
+      }
+      const double ll_deriv = pdq_ddr.x[0] + log((nmk + 1) / k);
+      k -= ceil_smalleps(lnprob_diff / ll_deriv);
+      if (k < 0) {
+        k = 0;
+      }
+    } else if (lnprob_diff > lnprob_diff_min) {
+      break;
+    } else {
+      const double ll_deriv = pdq_ddr.x[0] + log(nmk / (k + 1));
+      k += S_CAST(int64_t, lnprob_diff / ll_deriv);
+    }
+  }
+  const int64_t tailstart_k = k;
+  const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
+  dd_real lastp_ddr = tailstart_p_ddr;
+  dd_real tailsum_ddr = tailstart_p_ddr;
+  if (k > 0) {
+    const double min_incr_left = 0.125 / (k * k);
+    while (lastp_ddr.x[0] >= min_incr_left) {
+      nmk += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      k -= 1;
+      tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+    }
+    if (k > 0) {
+      const double qdp = qdp_ddr.x[0];
+      double lastp = lastp_ddr.x[0];
+      double tailsum = 0.0;
+      while (1) {
+        nmk += 1;
+        lastp *= qdp * k / nmk;
+        k -= 1;
+        const double preaddp = tailsum;
+        tailsum += lastp;
+        if (tailsum == preaddp) {
+          break;
+        }
+      }
+      tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
+    }
+    lastp_ddr = tailstart_p_ddr;
+    k = tailstart_k;
+    nmk = n - k;
+  }
+  while (ddr_ltd(tailsum_ddr, 1.0)) {
+    k += 1;
+    lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+    nmk -= 1;
+    tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+  }
+  return k;
 }
 
 
