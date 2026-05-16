@@ -322,6 +322,8 @@ def test_fisher():
     logp = exact_tests.fisher([[4, 0], [0, 4]], midp=True, logp=True)
     assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
     assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
+    # R print(phyper(1e9, 4e9, 7.999e9, 3e9), digits=17)
+    assert exact_tests.fisher([[1e9, 2e9], [3e9, 5.999e9]], alternative="less") == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
 
 
 def test_HWE():
