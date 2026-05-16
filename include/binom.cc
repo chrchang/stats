@@ -1550,7 +1550,12 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   if (discrim < 0.0) {
     k = mode - 1;
   } else {
-    k = trunc((-x1_coeff - sqrt(discrim)) / (2 * x2_coeff));
+    double sqrt_discrim = sqrt(discrim);
+    if (x2_coeff > 0.0) {
+      // this shouldn't happen
+      sqrt_discrim = -sqrt_discrim;
+    }
+    k = trunc((sqrt_discrim - x1_coeff) / (2 * x2_coeff));
     if (k < 0) {
       k = 0;
     }
@@ -1574,17 +1579,22 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   }
   double nmk;
   dd_real cur_lnprob_ddr;
+  uint32_t iter_idx = 0;
   while (1) {
+    ++iter_idx;
     nmk = n - k;
     // Evaluate pmf(k) to high precision.
     cur_lnprob_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
                              ddr_add_lfacts(k, nmk));
     const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
+    if (iter_idx == 30) {
+      return k;
+    }
     if (lnprob_diff > 0) {
       if (k == 0) {
         break;
       }
-      const double ll_deriv = pdq_ddr.x[0] + log((nmk + 1) / k);
+      const double ll_deriv = log(pdq_ddr.x[0] * (nmk + 1) / k);
       k -= ceil_smalleps(lnprob_diff / ll_deriv);
       if (k < 0) {
         k = 0;
@@ -1592,8 +1602,8 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
     } else if (lnprob_diff > lnprob_diff_min) {
       break;
     } else {
-      const double ll_deriv = pdq_ddr.x[0] + log(nmk / (k + 1));
-      k += S_CAST(int64_t, lnprob_diff / ll_deriv);
+      const double ll_deriv = log(pdq_ddr.x[0] * nmk / (k + 1));
+      k += S_CAST(int64_t, -lnprob_diff / ll_deriv);
     }
   }
   // Express current likelihood as a fraction of targetp.
