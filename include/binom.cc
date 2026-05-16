@@ -1554,9 +1554,15 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
     // log(pmf(k)) is too high.)
     const double target_lnprob = log(target1mp_ddr.x[0] / (n - mode));
     // (-b + sqrt(b^2 - 4ac)) / 2a
-    double k = trunc((-x1_coeff + sqrt(x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob))) / (2 * x2_coeff));
-    if (k > n) {
-      k = n;
+    const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob);
+    double k;
+    if (discrim < 0.0) {
+      k = mode + 1;
+    } else {
+      k = trunc((-x1_coeff + sqrt(discrim)) / (2 * x2_coeff));
+      if (k > n) {
+        k = n;
+      }
     }
     // Our relative error budget is usually 2^{-54}.
     // We want to ensure that accumulated error when evaluating the outer
@@ -1647,10 +1653,16 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   // Left half.  Need to be able to handle 0 < targetp < DBL_MIN.
   // (That difference really only affects the tailstart_p_ddr calculation.)
   const dd_real target_lnp_ddr = log_target? targetp_ddr : ddr_log(targetp_ddr);
-  const double target_lnprob = log(target_lnp_ddr.x[0] / (n - mode));
-  double k = trunc((-x1_coeff - sqrt(x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob))) / (2 * x2_coeff));
-  if (k < 0) {
-    k = 0;
+  const double target_lnprob = target_lnp_ddr.x[0] - log(n - mode);
+  const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob);
+  double k;
+  if (discrim < 0.0) {
+    k = mode - 1;
+  } else {
+    k = trunc((-x1_coeff - sqrt(discrim)) / (2 * x2_coeff));
+    if (k < 0) {
+      k = 0;
+    }
   }
   const double tailsum_ddr_end = log(0.125 / (mode * mode));
   double lnprob_diff_min = log(qdp_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
