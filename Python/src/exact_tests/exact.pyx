@@ -39,7 +39,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 cdef extern from "../include/fisher.h" namespace "plink2":
     BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) nogil
 
-    double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp) nogil
+    double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp) nogil
 
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
 
@@ -243,7 +243,8 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
-# lists.  Values must be nonnegative integers which add up to <2^31.
+# lists.  For two-sided tests, values must be nonnegative integers which add up
+# to <2^31.  For one-sided tests, they must add up to <2^52.
 #
 # alternative must be one of the following:
 #   "two-sided": default, must be this if table is larger than 2x2.
@@ -260,45 +261,50 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
             raise RuntimeError("table rows have unequal lengths.")
     if ncol < 2:
         raise RuntimeError("table has less than 2 columns.")
-    cdef int32_t m11 = table[0][0]
-    cdef int32_t m12 = table[0][1]
-    cdef int32_t m21 = table[1][0]
-    cdef int32_t m22 = table[1][1]
-    cdef int64_t total = <int64_t>(m11) + <int64_t>(m12) + <int64_t>(m21) + <int64_t>(m22)
-    if m11 < 0 or m12 < 0 or m21 < 0 or m22 < 0 or total > 0x7fffffff:
-        raise RuntimeError("table entries must be nonnegative and sum to <2^31")
+    cdef int64_t m11 = table[0][0]
+    cdef int64_t m12 = table[0][1]
+    cdef int64_t m21 = table[1][0]
+    cdef int64_t m22 = table[1][1]
+    cdef int64_t total = m11 + m12 + m21 + m22
+    if m11 < 0 or m12 < 0 or m21 < 0 or m22 < 0:
+        raise RuntimeError("table entries must be nonnegative")
+    if m11 >= (1LL << 52) or m12 >= (1LL << 52) or m21 >= (1LL << 52) or m22 >= (1LL << 52):
+        raise RuntimeError("table entries must be <2^52")
     cdef bint m11_is_greater_alt = 0
-    cdef int32_t m13
-    cdef int32_t m23
     cdef double ln_result
     if alternative != "two-sided":
         if nrow > 2 or ncol > 2:
             raise RuntimeError("alternative must be 'two-sided' for tables larger than 2x2.")
+        if total >= (1LL << 52):
+            raise RuntimeError("table entries must sum to <2^52")
         m11_is_greater_alt = (alternative == "greater")
         if alternative != "less" and not m11_is_greater_alt:
             raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
-        ln_result = Fisher22OneSidedLnP(m11, m12, m21, m22, m11_is_greater_alt, midp)
-    else:
-        if nrow == 2 and ncol == 2:
-            if Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp, &ln_result):
-                raise MemoryError()
-            return flush_if_denormal(ln_result)
-        elif (nrow == 2 and ncol == 3) or (nrow == 3 and ncol == 2):
-            if nrow == 2:
-                m13 = table[0][2]
-                m23 = table[1][2]
-            else:
-                m12, m21 = m21, m12
-                m13 = table[2][0]
-                m23 = table[2][1]
-            total += <int64_t>(m13) + <int64_t>(m23)
-            if m13 < 0 or m23 < 0 or total > 0x7fffffff:
-                raise RuntimeError("table entries must be nonnegative and sum to <2^31")
-            with nogil:
-                if Fisher23LnP(m11, m12, m13, m21, m22, m23, midp, &ln_result):
-                    raise MemoryError()
+        return flush_if_denormal(PhyperApprox(m11, m12, m21, m22, m11_is_greater_alt, midp, logp))
+    if nrow == 2 and ncol == 2:
+        if total > 0x7fffffff:
+            raise RuntimeError("table entries must sum to <2^31")
+        if Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp, &ln_result):
+            raise MemoryError()
+        return flush_if_denormal(ln_result)
+    cdef int32_t m13
+    cdef int32_t m23
+    if (nrow == 2 and ncol == 3) or (nrow == 3 and ncol == 2):
+        if nrow == 2:
+            m13 = table[0][2]
+            m23 = table[1][2]
         else:
-             raise RuntimeError("tables larger than 2x3 not yet supported")
+            m12, m21 = m21, m12
+            m13 = table[2][0]
+            m23 = table[2][1]
+        total += <int64_t>(m13) + <int64_t>(m23)
+        if m13 < 0 or m23 < 0 or total > 0x7fffffff:
+            raise RuntimeError("table entries must be nonnegative and sum to <2^31")
+        with nogil:
+            if Fisher23LnP(m11, m12, m13, m21, m22, m23, midp, &ln_result):
+                raise MemoryError()
+    else:
+         raise RuntimeError("tables larger than 2x3 not yet supported")
     if logp:
         return ln_result
     return exp_flush(ln_result)

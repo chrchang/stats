@@ -89,7 +89,7 @@ int32_t main(int argc, char** argv) {
           if ((argv[5][1] != '\0') || ((argv[5][0] != '+') && (argv[5][0] != '-'))) {
             goto main_std_help;
           }
-          const double ln_pval = Fisher22OneSidedLnP(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp);
+          const double ln_pval = PhyperApprox(m11, m12, m21, m22, (argv[5][0] == '+')? 1 : 0, midp, 1);
           char buf[80];
           char* write_iter = strcpya(buf, "P-value: ");
           write_iter = lntoa_g(ln_pval, write_iter);

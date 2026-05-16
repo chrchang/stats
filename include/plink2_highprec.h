@@ -440,6 +440,19 @@ dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs);
 
 dd_real ddr_sort_and_add_lfacts(uint32_t ct, double* args);
 
+static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
+// lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.
+// Avoids intermediate underflow when exp(lnprob_ddr) would underflow, but
+// final result does not underflow.  Doesn't try to preserve last bit of
+// accuracy, but does try to avoid throwing away up to 10 bits when logp is
+// false and return value is positive and <= e^{-512}.
+HEADER_INLINE double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32_t logp) {
+  if (logp) {
+    return lnprob_ddr.x[0] + log(mult);
+  }
+  return mult * k2m64 * ddr_exp(ddr_add(lnprob_ddr, _ddr_64log2)).x[0];
+}
+
 int32_t falling_factorial(mp_limb_t top, uint32_t ct, mp_limb_t* result, uint32_t* result_limb_ctp, mp_limb_t* wkspace);
 
 void lshift_multilimb(uint64_t lshift_ct, mp_limb_t* num, uint32_t* num_limb_ctp);

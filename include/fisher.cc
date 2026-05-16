@@ -252,7 +252,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
   const dd_real lnprobf_ddr =
     ddr_sub(ddr_add4_lfacts(m1x, m2x, mx1, obs_m12 + obs_m22),
             ddr_lfact(mxx));
-  const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
+  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
   while (1) {
     m11 = mx1 - m21;
     m12 = m12_minus_m21 + m21;
@@ -269,12 +269,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        if (logp) {
-          *resultp = starting_lnprob + log(tailp);
-        } else {
-          // Avoid premature underflow.
-          *resultp = exp(starting_lnprob + 64 * kLn2) * tailp * k2m64;
-        }
+        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
         return 0;
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
@@ -348,56 +343,59 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
     m12 -= 1;
     m21 -= 1;
   }
-  if (logp) {
-    *resultp = starting_lnprob + log(tailp);
-  } else {
-    *resultp = exp(starting_lnprob + 64 * kLn2) * tailp * k2m64;
-  }
+  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
   return 0;
 }
 
-// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
-// Just returns 0 if the log-p-value > 1 - 2^{-54} since additional precision
-// in that direction is expected to be irrelevant.  (Reverse the test direction
-// when you do actually want that precision.)
-double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp) {
+// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^52.  (I'll keep the
+// old Fisher's 2x2 exact test variable names since they're relatively
+// self-explanatory, and scipy and R don't agree on hypergeometric-distribution
+// parameterization.)
+// See Phyper() below for a higher-accuracy variant of this function; this one
+// mostly avoids use of dd_reals.
+// TODO: learn more about continued fractions, and investigate whether
+// something like the TOMS 708 algorithm can help here.
+double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp) {
   // Normalize.
   if (obs_m11 < obs_m22) {
-    swap_i32(&obs_m11, &obs_m22);
+    swap_i64(&obs_m11, &obs_m22);
   }
   if (obs_m12 < obs_m21) {
-    swap_i32(&obs_m12, &obs_m21);
+    swap_i64(&obs_m12, &obs_m21);
   }
   // Flipping m11<->m12 and m21<->m22 also flips the direction of the
   // alternative hypothesis.  So we flip on m11-is-greater alternative
   // hypothesis here to allow the rest of the code to assume m11-is-less.
   if (m11_is_greater_alt) {
-    swap_i32(&obs_m11, &obs_m12);
-    swap_i32(&obs_m21, &obs_m22);
+    swap_i64(&obs_m11, &obs_m12);
+    swap_i64(&obs_m21, &obs_m22);
   }
   double m11 = obs_m11;
   double m12 = obs_m12;
   double m21 = obs_m21;
   double m22 = obs_m22;
-  if (S_CAST(int64_t, obs_m11) * obs_m22 >= S_CAST(int64_t, obs_m12) * obs_m21) {
+  if (obs_m11 * obs_m22 >= obs_m12 * obs_m21) {
     // We're at or to the right of the mode.
     // Start by computing an upper bound on the right-sum, and then iterating
-    // leftward until we either know the p-value > 1 - 2^{-54} (at which point
-    // we return 0), or remaining left likelihoods are smaller than the
-    // precision limit.
+    // leftward until we either know the p-value > 1 - logp? DBL_MIN : 2^{-54}
+    // (at which point we just return log(1) or 1; in the logp case, don't want
+    // to risk imposing a surprising denormal-handling performance penalty for
+    // no good reason), or remaining left likelihoods are smaller than the
+    // prevision limit.
     const double first_right_mult = m12 * m21 / ((m11 + 1) * (m22 + 1));
     // r + r^2 + ... = r / (1-r)
     const double right_upper_bound = 0.5 * midp + first_right_mult / (1 - first_right_mult);
     if (right_upper_bound == 0.0) {
       // p-value is exactly 1 when m12*m21==0 and midp is false
-      return 0;
+      return logp? 0 : 1;
     }
 
-    // Rescale our starting lastp so that we overflow to INFINITY when we'd
-    // want to early-exit and return 0; this saves us a comparison in the loop.
-    const double left_rescale = (DBL_MAX / (1LL << 54)) / right_upper_bound;
-    double lastp = left_rescale;
-    double left_sum = left_rescale;
+    // Scale our starting likelihood so that we overflow to INFINITY when we'd
+    // want to early-exit and return log(1) or 1; this saves us a comparison in
+    // the loop.
+    const double startp = (DBL_MAX * (logp? DBL_MIN : (1.0 / (1LL << 54)))) / right_upper_bound;
+    double lastp = startp;
+    double left_sum = startp;
     while (1) {
       m12 += 1;
       m21 += 1;
@@ -411,17 +409,16 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       }
     }
     if (left_sum == INFINITY) {
-      return 0;
+      return logp? 0 : 1;
     }
-    left_sum /= left_rescale;
 
     // Now compute the right-sum to the precision limit.
-    double right_sum = first_right_mult;
+    double right_sum = first_right_mult * startp;
     m11 = obs_m11 + 1.0;
     m12 = obs_m12 - 1;
     m21 = obs_m21 - 1;
     m22 = obs_m22 + 1;
-    lastp = first_right_mult;
+    lastp = right_sum;
     while (1) {
       m11 += 1;
       m22 += 1;
@@ -436,22 +433,28 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
     }
     // For one-sided test, slightly more convenient to exclude midp term from
     // left_sum and right_sum since it just cancels out in denom
-    return log1p((-0.5 * midp - right_sum) / (right_sum + left_sum));
+    const double midp_numer = -0.5 * midp * startp;
+    const double denom = right_sum + left_sum;
+    if (!logp) {
+      return (left_sum + midp_numer) / denom;
+    }
+    return log1p((midp_numer - right_sum) / denom);
   }
   // We're to the left of the mode, and are responsible for tiny p-values.
   // If we're close enough to the mode that a simple left_sum / (left_sum +
   // right_sum) calculation doesn't risk overflow with the initial
   // relative-likelihood set to 1, just do that.
-  // Otherwise... if the problem instance isn't *that* large, we could use
-  // Lfact() to compute the starting log-likelihood and eat a big catastrophic
-  // cancellation error, but I'll start with just the slow-and-accurate
-  // calculation.
+  // Otherwise, we evaluate the starting log-likelihood with dd_reals to work
+  // around catastrophic cancellation, and then iterate leftward to the
+  // precision limit.
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
   const double mx2 = obs_m12 + obs_m22;
   const double mxx = m1x + m2x;
   const double modal_m22 = m2x * mx2 / mxx;
-  if (modal_m22 <= S_CAST(double, 172LL + obs_m22)) {
+  // ((168^168) / 168!)^4 ~= 6.3e285
+  // Need a bit more headroom than int32_t case.
+  if (modal_m22 <= S_CAST(double, 168LL + obs_m22)) {
     double lastp = 1;
     double right_sum = 0;
     while (1) {
@@ -484,14 +487,19 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
         break;
       }
     }
-    return log((left_sum - 0.5 * midp) / (left_sum + right_sum));
+    const double pval = (left_sum - 0.5 * midp) / (left_sum + right_sum);
+    return logp? log(pval) : pval;
   }
   const dd_real starting_lnprobv_ddr =
     ddr_negate(ddr_add4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
   const dd_real lnprobf_ddr =
     ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11 + obs_m21, mx2),
             ddr_lfact(mxx));
-  const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
+  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  // Replace -1074 with -1126 if we want to return denormals.
+  if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
+    return 0;
+  }
   double lastp = 1;
   double left_sum = 1 - 0.5 * midp;
   while (1) {
@@ -506,7 +514,7 @@ double Fisher22OneSidedLnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, in
       break;
     }
   }
-  return starting_lnprob + log(left_sum);
+  return join_log_and_nonlog(starting_lnprob_ddr, left_sum, logp);
 }
 
 // Switch between log- and regular representations at kSwitchThresh.

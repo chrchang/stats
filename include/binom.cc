@@ -474,22 +474,9 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
   return reterr;
 }
 
-static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
-static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
+// static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
 // calculated with qd_real library
-static const dd_real _ddr_960log2 = {{ 6.6542129333754746767e+02, 2.9368276770525480578e-14 }};
-
-// lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.
-// Avoids intermediate underflow when exp(lnprob_ddr) would underflow, but
-// final result does not underflow.  Doesn't try to preserve last bit of
-// accuracy, but does try to avoid throwing away up to 10 bits when logp is
-// false and return value is positive and <= e^{-512}.
-double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32_t logp) {
-  if (logp) {
-    return lnprob_ddr.x[0] + log(mult);
-  }
-  return mult * k2m64 * ddr_exp(ddr_add(lnprob_ddr, _ddr_64log2)).x[0];
-}
+// static const dd_real _ddr_960log2 = {{ 6.6542129333754746767e+02, 2.9368276770525480578e-14 }};
 
 // obs_tot assumed to be <2^31.  succ_odds_ratio_numer and
 // succ_odds_ratio_{numer,denom} must be positive, reduced to lowest terms,
@@ -1063,10 +1050,11 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   if (k > nmk * pdq) {
     // We're at or to the right of the mode.
     // Start by computing an upper bound on the right-sum, and then iterating
-    // leftward until we either know the p-value > 1 - DBL_MIN (at which point
-    // we just return 0, don't want to risk imposing a surprising
-    // denormal-handling performance penalty for no good reason), or remaining
-    // left likelihoods are smaller than the precision limit.
+    // leftward until we either know the p-value > 1 - logp? DBL_MIN : 2^{-54}
+    // (at which point we just return log(1) or 1; in the logp case, don't want
+    // to risk imposing a surprising denormal-handling performance penalty for
+    // no good reason), or remaining left likelihoods are smaller than the
+    // precision limit.
     const double first_right_mult = pdq * nmk / (k + 1);
     // r + r^2 + ... = r / (1-r)
     const double right_upper_bound = 0.5 * midp + first_right_mult / (1 - first_right_mult);
@@ -1076,7 +1064,8 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     }
 
     // Scale our starting likelihood so that we overflow to INFINITY when we'd
-    // want to early-exit and return 0; this saves us a comparison in the loop.
+    // want to early-exit and return log(1) or 1; this saves us a comparison in
+    // the loop.
     const double startp = (DBL_MAX * (logp? DBL_MIN : (1.0 / (1LL << 54)))) / right_upper_bound;
     double lastp = startp;
     double left_sum = startp;
@@ -1125,10 +1114,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   // If we're close enough to the mode that a simple left_sum / (left_sum +
   // right_sum) calculation doesn't risk overflow with the initial
   // relative-likelihood set to 1, just do that.
-  // Otherwise... if the problem instance isn't *that* large, we could use
-  // Lfact() to compute the starting log-likelihood and eat a big catastrophic
-  // cancellation error, but I'll start with just the slow-and-accurate
-  // calculation.
+  // Otherwise, we evaluate the starting log-likelihood with dd_reals to work
+  // around catastrophic cancellation, and then iterate leftward to the
+  // precision limit.
   const double ln_first_inward_mult = log(pdq * nmk / (k + 1));
   double overflow_steps_lower_bound = 1LL << 52;
   // log(DBL_MAX / 2^52) = 673.739...
@@ -1179,6 +1167,10 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   const dd_real lnprobf_ddr =
     ddr_add(ddr_lfact(nd), ddr_muld(ln_nmk_ddr, nd));
   const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  // Replace -1074 with -1126 if we want to return denormals.
+  if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
+    return 0;
+  }
   double lastp = 1;
   double left_sum = 1 - 0.5 * midp;
   while (1) {
