@@ -1579,17 +1579,12 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   }
   double nmk;
   dd_real cur_lnprob_ddr;
-  uint32_t iter_idx = 0;
   while (1) {
-    ++iter_idx;
     nmk = n - k;
     // Evaluate pmf(k) to high precision.
     cur_lnprob_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
                              ddr_add_lfacts(k, nmk));
     const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
-    if (iter_idx == 30) {
-      return k;
-    }
     if (lnprob_diff > 0) {
       if (k == 0) {
         break;
