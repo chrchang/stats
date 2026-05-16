@@ -233,8 +233,12 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if not ddr_is_zero(distp_ddr) and (ddr_ltd(distp_ddr, 0.5**960) or not ddr_leqd(distp_ddr, 1.0)):
         raise RuntimeError("succP must be 0, or in [2^{-960}, 1].")
     cdef dd_real_struct targetp_ddr = DdrMake(targetP)
-    if not ddr_leqd(targetp_ddr, 1.0):
-        raise RuntimeError("targetP must be <= 1.")
+    if logTarget:
+        if not ddr_leqd(targetp_ddr, 0.0):
+            raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+    else:
+        if ddr_ltd(targetp_ddr, 0.0) or not ddr_leqd(targetp_ddr, 1.0):
+            raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
     return QbinomHalfUlp(targetp_ddr, n, distp_ddr, logTarget)
 
 

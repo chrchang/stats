@@ -270,7 +270,7 @@ def test_dbinom():
 def test_pbinom():
     for test_case in scipy_binom_cases:
         if test_case[3] == "less":
-            pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative="less")
+            pval = exact_tests.pbinom(test_case[0], test_case[1], test_case[2])
             assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     assert exact_tests.pbinom(0, 0) == 1.0
     assert exact_tests.pbinom(-1, 0) == 0.0
@@ -289,6 +289,26 @@ def test_pbinom():
     assert exact_tests.pbinom(5548, 9999, 0.37, logp=True) == pytest.approx(-8.201532972018594e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5549, 9999, 0.37, logp=True) == pytest.approx(-3.8607083741381037e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
+
+
+def test_qbinom():
+    for test_case in scipy_binom_cases:
+        if test_case[3] == "less":
+            # Precise inversion of pbinom().
+            pval = exact_tests.pbinom(test_case[0], test_case[1], test_case[2])
+            assert test_case[0] == exact_tests.qbinom(pval, test_case[1], test_case[2])
+            if pval < 1.0:
+                assert test_case[0] + 1 == exact_tests.qbinom(pval * (1 + 0.5 ** 52), test_case[1], test_case[2])
+    assert exact_tests.qbinom(0, 0) == 0
+    assert exact_tests.qbinom(1, 0) == 0
+    assert exact_tests.qbinom(0, 2, 0.0) == 0
+    assert exact_tests.qbinom(0.5, 2, 0.0) == 0
+    assert exact_tests.qbinom(1, 2, 0.0) == 0
+    assert exact_tests.qbinom(0, 2, 1.0) == 0
+    assert exact_tests.qbinom(0.5, 2, 1.0) == 2
+    assert exact_tests.qbinom(1, 2, 1.0) == 2
+    assert exact_tests.qbinom(-1000000000 * math.log(2), 999999999, logTarget=True) == 0
+    assert exact_tests.qbinom(-999999998 * math.log(2), 999999999, logTarget=True) == 1
 
 
 def test_fisher():
