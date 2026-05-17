@@ -25,6 +25,23 @@
 namespace plink2 {
 #endif
 
+double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp) {
+  dd_real ddrs[8];
+  ddrs[0] = ddr_lfact(m11 + m12);
+  ddrs[1] = ddr_lfact(m21 + m22);
+  ddrs[2] = ddr_lfact(m11 + m21);
+  ddrs[3] = ddr_lfact(m12 + m22);
+  ddrs[4] = ddr_negate(ddr_lfact(m11));
+  ddrs[5] = ddr_negate(ddr_lfact(m12));
+  ddrs[6] = ddr_negate(ddr_lfact(m21));
+  ddrs[7] = ddr_negate(ddr_lfact(m22));
+  dd_real ln_prob_ddr = ddr_sub(ddr_sort_and_add(8, ddrs), ddr_lfact(m11 + m12 + m21 + m22));
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
+}
+
 // *cmp_resultp is set to positive value if m22 = obs_m22 + m22_incr has higher
 // likelihood than m22 = obs_m22, 0 if identical likelihood, and negative value
 // if lower likelihood.
@@ -515,6 +532,12 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     }
   }
   return join_log_and_nonlog(starting_lnprob_ddr, left_sum, logp);
+}
+
+// Aims for <2^{-54} relative error unless problem instance is huge.
+double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) {
+  // TODO: dd_real loops
+  return PhyperApprox(obs_m11, obs_m12, obs_m21, obs_m22, 0, 0, logp);
 }
 
 // Switch between log- and regular representations at kSwitchThresh.

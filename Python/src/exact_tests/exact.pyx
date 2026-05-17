@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
@@ -37,9 +37,13 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
+    double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp)
+
     BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) nogil
 
     double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp) nogil
+
+    double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) nogil
 
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
 
@@ -199,6 +203,7 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
         return zeroval(logp)
     return flush_if_denormal(BinomMass(k, n, p_ddr, logp))
 
+
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 #
 # If approx=True, this is essentially equivalent to a binom() call with
@@ -217,6 +222,7 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
     if approx:
         return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, 0, logp))
     return flush_if_denormal(Pbinom(k, n, p_ddr, complement, logp))
+
 
 # Returns smallest nonnegative k for which cdf(k) >= targetP.
 #
@@ -308,6 +314,47 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
     if logp:
         return ln_result
     return exp_flush(ln_result)
+
+
+# This mirrors R dhyper()'s parameters.
+def dhyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint logp=0):
+    if a < 0 or ac < 0 or bd < 0 or ab < 0 or a >= (1LL << 52) or ac >= (1LL << 52) or bd >= (1LL << 52) or ab >= (1LL << 52):
+        raise RuntimeError("Parameters must be in [0, 2^52).")
+    cdef int64_t b = ab - a
+    cdef int64_t c = ac - a
+    cdef int64_t d = bd - b
+    if b < 0 or c < 0 or d < 0:
+        raise RuntimeError("(ab-a), (ac-a), and (bd-(ab-a)) must be nonnegative.")
+    if ac + bd >= (1LL << 52):
+        raise RuntimeError("ac+bd must be <2^52.")
+    return flush_if_denormal(HypergeomMass(a, b, c, d, logp))
+
+
+def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bint logp=0, bint approx=0):
+    if a < 0 or ac < 0 or bd < 0 or ab < 0 or a >= (1LL << 52) or ac >= (1LL << 52) or bd >= (1LL << 52) or ab >= (1LL << 52):
+        raise RuntimeError("Parameters must be in [0, 2^52).")
+    cdef int64_t b = ab - a
+    cdef int64_t c = ac - a
+    cdef int64_t d = bd - b
+    if b < 0 or c < 0 or d < 0:
+        raise RuntimeError("(ab-a), (ac-a), and (bd-(ab-a)) must be nonnegative.")
+    if ac + bd >= (1LL << 52):
+        raise RuntimeError("ac+bd must be <2^52.")
+    if complement:
+        a, b = b, a
+        c, d = d, c
+        if a == 0 or d == 0:
+            if logp:
+                return NAN
+            return 0
+        a -= 1
+        b += 1
+        c += 1
+        d -= 1
+    if approx:
+        return flush_if_denormal(PhyperApprox(a, b, c, d, 0, 0, logp))
+    raise RuntimeError("phyper with approx=False is not properly implemented yet.")
+    return flush_if_denormal(Phyper(a, b, c, d, logp))
 
 
 # "HWE" is short for Hardy-Weinberg Equilibrium.
