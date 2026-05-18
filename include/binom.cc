@@ -245,7 +245,7 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
     }
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     // ddr_lfact() result has >= 106 bits of precision, should be accurate to
-    // 96+ bits (mostly dependent on log; I think we actually get 102+?).
+    // 96+ bits (mostly dependent on log; I think we actually get 100+?).
     // log((2^31)!) is less than 2^36, so we should have at least 60 bits past
     // the decimal point.
     const double epsilon = k2m60 * u31tod(ffac_ct);
@@ -725,7 +725,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      succ += ceil_smalleps(-lnprob_diff / ll_deriv);
+      succ += ceil(-lnprob_diff / ll_deriv);
       if (succ > obs_totd) {
         succ = obs_totd;
       }
@@ -1598,7 +1598,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
         break;
       }
       const double ll_deriv = log(pdq_ddr.x[0] * (nmk + 1) / k);
-      k -= ceil_smalleps(lnprob_diff / ll_deriv);
+      k -= ceil(lnprob_diff / ll_deriv);
       if (k < 0) {
         k = 0;
       }
@@ -1617,12 +1617,16 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   if (k > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
-    const double min_incr_left = 0.125 / (k * k);
-    while (lastp_ddr.x[0] >= min_incr_left) {
+    const double min_mult_left = 1 + 0.125 / (k * k);
+    while (1) {
       nmk += 1;
       lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
       k -= 1;
+      const double preaddp = tailsum_ddr.x[0];
       tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+      if (tailsum_ddr.x[0] <= preaddp * min_mult_left) {
+        break;
+      }
     }
     if (k > 0) {
       const double qdp = qdp_ddr.x[0];

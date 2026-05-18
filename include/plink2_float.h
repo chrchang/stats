@@ -261,18 +261,11 @@ HEADER_INLINE double lndiff(double xx, double yy) {
   return xx + log(-expm1(ln_ratio));
 }
 
-// Efficient alternatives to ceil() for positive numbers.
-
-// limit is assumed to be a positive int32.
-HEADER_INLINE double ceil_smalleps_limit32(double xx, double limit) {
-  if (xx > limit) {
+HEADER_INLINE double ceil_limit(double xx, double limit) {
+  if (xx >= limit) {
     return limit;
   }
-  return 1 + S_CAST(int32_t, xx * (1 - kSmallEpsilon));
-}
-
-HEADER_INLINE double ceil_smalleps(double xx) {
-  return 1 + S_CAST(int64_t, xx * (1 - kSmallEpsilon));
+  return ceil(xx);
 }
 
 HEADER_INLINE double flush_if_denormal(double xx) {
