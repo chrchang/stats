@@ -35,8 +35,35 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 }
 
 // Currently assumes k < n.
-// For p=0.5, this doesn't reach relative error > 2^{-53} until n > ~2^44.
-// For p=DBL_MIN, it can get there slightly earlier, k > ~2^41.
+//
+// For p=0.5, this doesn't reach relative error > 2^{-53} until n > ~2^43.
+// (ddr_lfact(2^43) ~= 2^43 * log(2^43) ~= 2^43 * 40 * 0.693 ~= 2^48.
+// Reviewing the operations required by ddr_lfact() (dominated by a ddr_log()
+// call, which is in turn dominated by a ddr_exp() call), I'm pretty sure
+// ddr_lfact()'s relative error < 2^{-99} for our domain (while I would be
+// surprised if it was always < 2^{-101}).  We need to add one number near
+// ddr_lfact(n) (or two numbers near ddr_lfact(n/2)) and subtract ddr_lfact(n);
+// that translates to absolute error ~2^{-50}.  The return value is always <
+// -15 in that region, so absolute error < 2^{-50} translates into relative
+// error < 2^{-53}.)
+//
+// The p~=DBL_MIN case can be broken into two subcases, k=0 and k>0.
+// - If k=0, no log-factorials are computed, but q_ddr... actually overperforms
+//   here, you wouldn't expect it to be able to distinguish 1 - DBL_MIN from 1
+//   if you thought of dd_real as a float with a ~106-bit mantissa, but it
+//   turns out that q_ddr.x[1] represents the difference with 53-bit accuracy,
+//   ddr_log() consistently returns {{-q_ddr.x[1], 0.0}} in this situation, and
+//   the only remaining operation is the high-precision ddr_muld().  So there
+//   isn't actually any need to invoke ddr_log1p() to plug a hole.
+// - If k>>0 and n is huge, the k_ln_p_ddr term may be dominant.  When it is,
+//   ddr_muld(ddr_log(p_ddr), k) should have relative error < 2^{-99}, which
+//   corresponds to absolute error
+//     2^{-99} * k * log(p) ~= k * 2^{-89}
+//   which can be much worse than the p=0.5 case.  But the relative error
+//   doesn't wind up being much worse (equivalent at worst to ~doubling n?)
+//   since the final return value has larger magnitude.
+//
+// TODO: error analysis of p ~= 2^{-106} case.
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
   const dd_real q_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
   dd_real ln_q_ddr = ddr_negate(_ddr_log2);
@@ -1167,7 +1194,16 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   const dd_real lnprobf_ddr =
     ddr_add(ddr_lfact(nd), ddr_muld(ln_nmk_ddr, nd));
   const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
-  // Replace -1074 with -1126 if we want to return denormals.
+  // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
+  // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
+  // when logp=false and we're flushing denormals to zero.  DBL_MIN is
+  // 2^{-1022}.
+  //
+  // 2^{-1074} is the smallest positive denormal, and (1 + epsilon) * 2^{-1075}
+  // is the smallest number that should be rounded up to it, so -1074 can be
+  // replaced with -1127 if we want this function to return denormals.
+  //
+  // (Yes, a tighter bound could be established for left_sum if it matters.)
   if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
     return 0;
   }

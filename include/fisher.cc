@@ -513,7 +513,16 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11 + obs_m21, mx2),
             ddr_lfact(mxx));
   const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
-  // Replace -1074 with -1126 if we want to return denormals.
+  // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
+  // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
+  // when logp=false and we're flushing denormals to zero.  DBL_MIN is
+  // 2^{-1022}.
+  //
+  // 2^{-1074} is the smallest positive denormal, and (1 + epsilon) * 2^{-1075}
+  // is the smallest number that should be rounded up to it, so -1074 can be
+  // replaced with -1127 if we want this function to return denormals.
+  //
+  // (Yes, a tighter bound could be established for left_sum if it matters.)
   if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
     return 0;
   }
