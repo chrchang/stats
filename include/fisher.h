@@ -17,12 +17,21 @@
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "plink2_base.h"
+#include "plink2_highprec.h"
 
 #ifdef __cplusplus
 namespace plink2 {
 #endif
 
-double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp);
+dd_real fisher22_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t m22);
+
+HEADER_INLINE double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp) {
+  const dd_real ln_prob_ddr = fisher22_ln_prob_internal(m11, m12, m21, m22);
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
+}
 
 BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp);
 

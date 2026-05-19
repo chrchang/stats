@@ -332,6 +332,8 @@ def dhyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint logp=0):
 
 def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bint logp=0, bint approx=0):
     if a < 0 or ac < 0 or bd < 0 or ab < 0 or a >= (1LL << 52) or ac >= (1LL << 52) or bd >= (1LL << 52) or ab >= (1LL << 52):
+        # Unlike pbinom(), we don't bother with returning NAN/0/1 in some of
+        # these cases.
         raise RuntimeError("Parameters must be in [0, 2^52).")
     cdef int64_t b = ab - a
     cdef int64_t c = ac - a
@@ -353,7 +355,6 @@ def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bin
         d -= 1
     if approx:
         return flush_if_denormal(PhyperApprox(a, b, c, d, 0, 0, logp))
-    raise RuntimeError("phyper with approx=False is not properly implemented yet.")
     return flush_if_denormal(Phyper(a, b, c, d, logp))
 
 

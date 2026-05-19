@@ -81,6 +81,7 @@ static const double k2m32 = 1.0 / (1LL << 32);
 static const double k2m50 = 1.0 / (1LL << 50);
 static const double k2m52 = 1.0 / (1LL << 52);
 static const double k2m53 = 1.0 / (1LL << 53);
+static const double k2m54 = 1.0 / (1LL << 54);
 static const double k2p50 = 1.0 * (1LL << 50);
 static const double k2p64 = 4.0 * (1LL << 62);
 static const double k2p100 = k2p50 * k2p50;

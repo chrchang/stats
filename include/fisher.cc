@@ -25,7 +25,7 @@
 namespace plink2 {
 #endif
 
-double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp) {
+dd_real fisher22_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t m22) {
   dd_real ddrs[8];
   ddrs[0] = ddr_lfact(m11 + m12);
   ddrs[1] = ddr_lfact(m21 + m22);
@@ -35,11 +35,7 @@ double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_
   ddrs[5] = ddr_negate(ddr_lfact(m12));
   ddrs[6] = ddr_negate(ddr_lfact(m21));
   ddrs[7] = ddr_negate(ddr_lfact(m22));
-  dd_real ln_prob_ddr = ddr_sub(ddr_sort_and_add(8, ddrs), ddr_lfact(m11 + m12 + m21 + m22));
-  if (logp) {
-    return ln_prob_ddr.x[0];
-  }
-  return ddr_exp(ln_prob_ddr).x[0];
+  return ddr_sub(ddr_sort_and_add(8, ddrs), ddr_lfact(m11 + m12 + m21 + m22));
 }
 
 // *cmp_resultp is set to positive value if m22 = obs_m22 + m22_incr has higher
@@ -391,7 +387,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   double m12 = obs_m12;
   double m21 = obs_m21;
   double m22 = obs_m22;
-  if (obs_m11 * obs_m22 >= obs_m12 * obs_m21) {
+  if (m11 * m22 >= m12 * m21) {
     // We're at or to the right of the mode.
     // Start by computing an upper bound on the right-sum, and then iterating
     // leftward until we either know the p-value > 1 - logp? DBL_MIN : 2^{-54}
@@ -410,7 +406,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     // Scale our starting likelihood so that we overflow to INFINITY when we'd
     // want to early-exit and return log(1) or 1; this saves us a comparison in
     // the loop.
-    const double startp = (DBL_MAX * (logp? DBL_MIN : (1.0 / (1LL << 54)))) / right_upper_bound;
+    const double startp = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
     double lastp = startp;
     double left_sum = startp;
     while (1) {
@@ -471,7 +467,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   const double modal_m22 = m2x * mx2 / mxx;
   // ((168^168) / 168!)^4 ~= 6.3e285
   // Need a bit more headroom than int32_t case.
-  if (modal_m22 <= S_CAST(double, 168LL + obs_m22)) {
+  if (modal_m22 <= obs_m22 + 168) {
     double lastp = 1;
     double right_sum = 0;
     while (1) {
@@ -507,12 +503,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     const double pval = (left_sum - 0.5 * midp) / (left_sum + right_sum);
     return logp? log(pval) : pval;
   }
-  const dd_real starting_lnprobv_ddr =
-    ddr_negate(ddr_add4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
-  const dd_real lnprobf_ddr =
-    ddr_sub(ddr_add4_lfacts(m1x, m2x, obs_m11 + obs_m21, mx2),
-            ddr_lfact(mxx));
-  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  const dd_real starting_lnprob_ddr = fisher22_ln_prob_internal(obs_m11, obs_m12, obs_m21, obs_m22);
   // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
   // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
   // when logp=false and we're flushing denormals to zero.  DBL_MIN is
@@ -543,10 +534,244 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   return join_log_and_nonlog(starting_lnprob_ddr, left_sum, logp);
 }
 
-// Aims for <2^{-54} relative error unless problem instance is huge.
+// Assumes parameters are nonnegative, and add up to less than 2^52.  Aims for
+// <0.6 ULP relative error unless problem instance is huge (sum > ~2^40 if logp
+// true, ~2^37 if false; see binom_ln_prob_internal error analysis).
 double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) {
-  // TODO: dd_real loops
-  return PhyperApprox(obs_m11, obs_m12, obs_m21, obs_m22, 0, 0, logp);
+  // Normalize.
+  if (obs_m11 < obs_m22) {
+    swap_i64(&obs_m11, &obs_m22);
+  }
+  if (obs_m12 < obs_m21) {
+    swap_i64(&obs_m12, &obs_m21);
+  }
+  double m11 = obs_m11;
+  double m12 = obs_m12;
+  double m21 = obs_m21;
+  double m22 = obs_m22;
+  if (m11 * m22 >= m12 * m21) {
+    // We're at or to the right of the mode.  Don't have to worry about cmf
+    // values < DBL_MIN, so even for e.g. sum > 2^51 our relative error is not
+    // inflated by a need to work in log-space.  (todo: we should still replace
+    // calculation of left_sum with a log-factorial-based likelihood evaluation
+    // when that would be faster and not blow our error budget.  But let's get
+    // a minimal implementation working first.)
+    const dd_real first_right_mult_ddr = ddr_divd(ddr_divd(ddr_muld(ddr_maked(m12), m21), m11 + 1), m22 + 1);
+    if (ddr_is_zero(first_right_mult_ddr)) {
+      return logp? 0.0 : 1.0;
+    }
+    const double right_upper_bound = first_right_mult_ddr.x[0] / ddr_negate(ddr_subd(first_right_mult_ddr, 1.0)).x[0];
+
+    const double startp = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
+    // We want to compute left_sum_ddr to at most 2^{-57} relative error.  See
+    // related discussion in Pbinom() implementation.
+    const double min_incr_left = 0.03125 / (m22 * m22);
+    dd_real lastp_ddr = ddr_maked(startp);
+    dd_real left_sum_ddr = lastp_ddr;
+    do {
+      m12 += 1;
+      m21 += 1;
+      // Divide before multiplying to avoid premature overflow.
+      lastp_ddr = ddr_muld(ddr_muld(ddr_divd(ddr_divd(lastp_ddr, m12), m21), m11), m22);
+      m11 -= 1;
+      m22 -= 1;
+      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+    } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+    if (!(left_sum_ddr.x[0] < INFINITY)) {
+      return logp? 0.0 : 1.0;
+    }
+    if (m22 > 0) {
+      // Continue the calculation with ordinary precision.
+      double lastp = lastp_ddr.x[0];
+      double left_tail_sum = 0.0;
+      while (1) {
+        m12 += 1;
+        m21 += 1;
+        lastp *= m11 * m22 / (m12 * m21);
+        m11 -= 1;
+        m22 -= 1;
+        const double preaddp = left_tail_sum;
+        left_tail_sum += lastp;
+        if (left_tail_sum == preaddp) {
+          break;
+        }
+      }
+      left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+      if (left_sum_ddr.x[0] == INFINITY) {
+        return logp? 0.0 : 1.0;
+      }
+    }
+
+    // Now compute the right-sum to at most 2^{-57} relative error.
+    dd_real right_sum_ddr = ddr_muld(first_right_mult_ddr, startp);
+    m11 = obs_m11 + 1;
+    m12 = obs_m12 - 1;
+    m21 = obs_m21 - 1;
+    m22 = obs_m22 + 1;
+    lastp_ddr = right_sum_ddr;
+    if (m21 > 0) {
+      const double min_incr_right = 0.03125 / (m21 * m21);
+      do {
+        m11 += 1;
+        m22 += 1;
+        lastp_ddr = ddr_muld(ddr_muld(ddr_divd(ddr_divd(lastp_ddr, m11), m22), m12), m21);
+        m12 -= 1;
+        m21 -= 1;
+        right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
+      } while (lastp_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
+      if (m21 > 0) {
+        // Continue the calculation with ordinary precision.
+        double lastp = lastp_ddr.x[0];
+        double right_tail_sum = 0.0;
+        while (1) {
+          m11 += 1;
+          m22 += 1;
+          lastp *= m12 * m21 / (m11 * m22);
+          m12 -= 1;
+          m21 -= 1;
+          const double preaddp = right_tail_sum;
+          right_tail_sum += lastp;
+          if (right_tail_sum == preaddp) {
+            break;
+          }
+        }
+        right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
+      }
+    }
+    const dd_real denom_ddr = ddr_add(left_sum_ddr, right_sum_ddr);
+    if (!(denom_ddr.x[0] < INFINITY)) {
+      return logp? 0.0 : 1.0;
+    }
+    const dd_real one_minus_prob_ddr = ddr_accurate_div(right_sum_ddr, denom_ddr);
+    if (!logp) {
+      return -ddr_subd(one_minus_prob_ddr, 1.0).x[0];
+    }
+    return ddr_log1p(ddr_negate(one_minus_prob_ddr)).x[0];
+  }
+  // We're at or to the left of the mode, and are responsible for tiny cmf
+  // values.
+  // If we're close enough to the mode that a simple left_sum / (left_sum +
+  // right_sum) calculation doesn't risk overflow with the initial
+  // relative-likelihood set to 1, just do that.
+  // Otherwise, we use ddr_lfact() and friends to compute the starting
+  // log-likelihood (this is the only step that could introduce >0.1 ULP error,
+  // and then only for huge n), and accumulate the tail-sum from there.
+  // (todo: opportunistically use the _lfact() path when that's within the
+  // error budget and rates to be faster than the left_sum / (left_sum +
+  // right_sum) approach.  Reasonable to wait until qd_real functions are added
+  // to this library, though.)
+  const double m1x = obs_m11 + obs_m12;
+  const double m2x = obs_m21 + obs_m22;
+  const double mx2 = obs_m12 + obs_m22;
+  const double mxx = m1x + m2x;
+  const double modal_m22 = m2x * mx2 / mxx;
+  if (modal_m22 <= m22 + 168) {
+    dd_real lastp_ddr = ddr_maked(1.0);
+    dd_real right_sum_ddr = ddr_maked(0.0);
+    if (m21 > 0) {
+      const double min_incr_right = 0.03125 / (m21 * m21);
+      do {
+        m11 += 1;
+        m22 += 1;
+        lastp_ddr = ddr_muld(ddr_muld(ddr_divd(ddr_divd(lastp_ddr, m11), m22), m12), m21);
+        m12 -= 1;
+        m21 -= 1;
+        right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
+      } while (lastp_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
+      if (m21 > 0) {
+        double lastp = lastp_ddr.x[0];
+        double right_tail_sum = 0.0;
+        while (1) {
+          m11 += 1;
+          m22 += 1;
+          lastp *= m12 * m21 / (m11 * m22);
+          m12 -= 1;
+          m21 -= 1;
+          const double preaddp = right_tail_sum;
+          right_tail_sum += lastp;
+          if (right_tail_sum == preaddp) {
+            break;
+          }
+        }
+        right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
+      }
+    }
+    m11 = obs_m11;
+    m12 = obs_m12;
+    m21 = obs_m21;
+    m22 = obs_m22;
+    lastp_ddr = ddr_maked(1.0);
+    dd_real left_sum_ddr = lastp_ddr;
+    if (m22 > 0) {
+      const double min_incr_left = 0.03125 / (m22 * m22);
+      do {
+        m12 += 1;
+        m21 += 1;
+        lastp_ddr = ddr_muld(ddr_muld(ddr_divd(ddr_divd(lastp_ddr, m12), m21), m11), m22);
+        m11 -= 1;
+        m22 -= 1;
+        left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+      } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+      if (m22 > 0) {
+        double lastp = lastp_ddr.x[0];
+        double left_tail_sum = 0.0;
+        while (1) {
+          m12 += 1;
+          m21 += 1;
+          lastp *= m11 * m22 / (m12 * m21);
+          m11 -= 1;
+          m22 -= 1;
+          const double preaddp = left_tail_sum;
+          left_tail_sum += lastp;
+          if (left_tail_sum == preaddp) {
+            break;
+          }
+        }
+        left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+      }
+    }
+    const dd_real prob_ddr = ddr_accurate_div(left_sum_ddr, ddr_add(left_sum_ddr, right_sum_ddr));
+    if (!logp) {
+      return prob_ddr.x[0];
+    }
+    return ddr_log(prob_ddr).x[0];
+  }
+  dd_real ln_prob_ddr = fisher22_ln_prob_internal(obs_m11, obs_m12, obs_m21, obs_m22);
+  dd_real lastp_ddr = ddr_maked(1.0);
+  dd_real left_sum_ddr = lastp_ddr;
+  if (m22 > 0) {
+    const double min_incr_left = 0.03125 / (m22 * m22);
+    do {
+      m12 += 1;
+      m21 += 1;
+      lastp_ddr = ddr_muld(ddr_muld(ddr_divd(ddr_divd(lastp_ddr, m12), m21), m11), m22);
+      m11 -= 1;
+      m22 -= 1;
+      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+    } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+    if (m22 > 0) {
+      double lastp = lastp_ddr.x[0];
+      double left_tail_sum = 0.0;
+      while (1) {
+        m12 += 1;
+        m21 += 1;
+        lastp *= m11 * m22 / (m12 * m21);
+        m11 -= 1;
+        m22 -= 1;
+        const double preaddp = left_tail_sum;
+        left_tail_sum += lastp;
+        if (left_tail_sum == preaddp) {
+          break;
+        }
+      }
+      left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
+    }
+  }
+  ln_prob_ddr = ddr_add(ln_prob_ddr, ddr_log(left_sum_ddr));
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
 }
 
 // Switch between log- and regular representations at kSwitchThresh.

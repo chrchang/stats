@@ -69,7 +69,7 @@ scipy_binom_cases = [
     (50, 100, 0.1, "two-sided", 5.8320387857343647e-024, 1e-10),
     ]
 
-# This test case was scraped from
+# These test cases were scraped from
 #   scipy/stats/tests/test_{discrete_distns,multivariate}.py
 # (obvious todo: add more tests)
 # Entries are of the form (k, n, p, p_want)
@@ -128,6 +128,54 @@ scipy_fisher22_cases = [
     ([[190, 800], [200, 900]], "greater", 0.2959825901308897),
     ]
 
+# These test cases were scraped from
+#   scipy/stats/tests/test_distributions.py
+# Entries are of the form (k, M, n, N, p_want, rtol)
+scipy_dhyper_cases = [
+    (2, 2500, 50, 500, 0.0010114963068932233, 1e-11),
+    (0, 2, 1, 0, 1.0, 1e-11),
+    # This corresponds to negative m21, which we don't support.
+    # (1, 2, 1, 0, 0.0, 1e-11),
+    (0, 2, 0, 2, 1.0, 1e-11),
+    ]
+
+# These test cases were scraped from
+#   scipy/stats/tests/test_{discrete_distns,distributions}.py
+# Entries are of the form (k, M, n, N, complement, logp, p_want, rtol)
+scipy_phyper_cases = [
+    (3, 10, 4, 5, False, False, 0.9761904761904762, 1e-15),
+    (107, 10000, 3000, 215, False, False, 0.9999999997226765, 1e-15),
+    (10, 10000, 3000, 215, False, False, 2.681682217692179e-21, 5e-11),
+    (25, 10000, 3000, 215, True, False, 0.9999999999052958, 1e-15),
+    (125, 10000, 3000, 215, True, False, 1.4416781705752128e-18, 5e-11),
+    # cdf value from R; scipy test only confirms this is in [0, 1]
+    (30, 13397950, 4363, 12390, False, True, -1.3299429823230965e-17, 1e-11),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3e4, True, False, 0, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3.8e4, True, False, 1.904153e-114, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3.9e4, True, False, 2.752693e-66, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4e4, True, False, 4.931217e-32, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4.1e4, True, False, 8.265601e-11, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4.2e4, True, False, 0.1237904, 5e-7),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 5e4, True, False, 1, 5e-7),
+    (1e4, 1e7, 1e6, 5e4, True, True, -2239.771249920399, 1e-11),
+    (1, 1600, 600, 300, True, True, -2.5665672697340924e-68, 1e-11),
+    (1, 1e7, 1e6, 5e4, False, True, -5273.3351516552739, 1e-11),
+    (40, 1600, 50, 300, False, True, -7.5651488792285293e-23, 1e-11),
+    (125, 1600, 250, 500, False, True, -4.2426884594741954e-12, 1e-11),
+    # This corrresponds to negative m22.
+    # (9, 1e5, 1e5, 10, True, False, 1, 1e-11),
+    (9, 1e6, 1e5, 10, True, False, 9.9959506789896877e-11, 1e-11),
+    (9, 1e7, 1e5, 10, True, False, 9.9955458497748593e-21, 1e-11),
+    (9, 1e8, 1e5, 10, True, False, 9.9955053678820622e-31, 1e-11),
+    (9, 1e9, 1e5, 10, True, False, 9.9955013197030621e-41, 1e-11),
+    (9, 1e10, 1e5, 10, True, False, 9.9955009148852711e-51, 1e-11),
+    (9, 1e11, 1e5, 10, True, False, 9.9955008744034664e-61, 1e-11),
+    (9, 1e12, 1e5, 10, True, False, 9.9955008703553125e-71, 1e-11),
+    (9, 1e13, 1e5, 10, True, False, 9.9955008699504913e-81, 1e-11),
+    (9, 1e14, 1e5, 10, True, False, 9.9955008699100105e-91, 1e-11),
+    (9, 1e15, 1e5, 10, True, False, 9.9955008699059437e-101, 1e-11),
+    ]
+
 # First four test cases are from the R HardyWeinberg package's vignettes.
 # Tests #5-8 are from https://github.com/jeremymcrae/snphwe .
 # Entries are of the form (hom1, hets, hom2, alternative, midp, p_want).
@@ -149,7 +197,6 @@ def test_binom():
         assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN), str(test_case)
     # possible todo: port test_binomtest2, test_binomtest3
     assert exact_tests.binom(0, 8, midp=True) == pytest.approx(1/256, rel=1e-13, abs=0)
-
     assert exact_tests.binom(0, 0) == 1.0
     assert exact_tests.binom(0, 0, midp=True) == 0.5
     assert exact_tests.binom(0, 2, 0.0) == 1.0
@@ -241,7 +288,7 @@ def test_binom():
     assert exact_tests.binom(5550, 9999, 0.37, alternative="less", logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
     assert exact_tests.binom(9998, 9999, alternative="less", logp=True) == 0.0
-    # probable todo: test exception-throwing cases
+    # todo: test exception-throwing cases
 
 
 def test_dbinom():
@@ -265,6 +312,7 @@ def test_dbinom():
     assert exact_tests.dbinom(2, 2, 1.0) == 1.0
     assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
     assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
+    # todo: test exception-throwing cases
 
 
 def test_pbinom():
@@ -289,6 +337,7 @@ def test_pbinom():
     assert exact_tests.pbinom(5548, 9999, 0.37, logp=True) == pytest.approx(-8.201532972018594e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5549, 9999, 0.37, logp=True) == pytest.approx(-3.8607083741381037e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
+    # todo: test exception-throwing cases
 
 
 def test_qbinom():
@@ -309,6 +358,7 @@ def test_qbinom():
     assert exact_tests.qbinom(1, 2, 1.0) == 2
     assert exact_tests.qbinom(-1000000000 * math.log(2), 999999999, logTarget=True) == 0
     assert exact_tests.qbinom(-999999998 * math.log(2), 999999999, logTarget=True) == 1
+    # todo: test exception-throwing cases
 
 
 def test_fisher():
@@ -326,10 +376,42 @@ def test_fisher():
     # (scipy.stats.hypergeom.cdf(1e9, 11.999e9, 3e9, 4e9) is substantially
     # less accurate.)
     assert exact_tests.fisher([[1e9, 2e9], [3e9, 5.999e9]], alternative="less") == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+    # todo: test exception-throwing cases
 
 
 def test_dhyper():
+    for test_case in scipy_dhyper_cases:
+        # scipy.stats.hypergeom.pmf(m11, m11+m12+m21+m22, m11+m12, m11+m21) is
+        # equivalent to R dhyper(m11, m11+m21, m12+m22, m11+m12)
+        # -> ([0], [3], [1]-[3], [2])
+        a = test_case[0]
+        b = test_case[3]
+        c = test_case[1] - b
+        d = test_case[2]
+        p_got = exact_tests.dhyper(a, b, c, d)
+        lnp_got = exact_tests.dhyper(a, b, c, d, logp=True)
+        assert p_got == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
+        if math.isnan(lnp_got):
+            assert 0.0 == test_case[4]
+        else:
+            assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149371888e-08, rel=1e-8, abs=0)
+    # todo: test exception-throwing cases
+
+
+def test_phyper():
+    for test_case in scipy_phyper_cases:
+        a = test_case[0]
+        b = test_case[3]
+        c = test_case[1] - b
+        d = test_case[2]
+        p_got_approx = exact_tests.phyper(a, b, c, d, complement=test_case[4], approx=True, logp=test_case[5])
+        p_got = exact_tests.phyper(a, b, c, d, complement=test_case[4], logp=test_case[5])
+        assert p_got_approx == pytest.approx(test_case[6], rel=test_case[7], abs=DBL_MIN)
+        assert p_got == pytest.approx(test_case[6], rel=test_case[7], abs=DBL_MIN)
+    assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+    assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=True) == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+    # todo: test exception-throwing cases
 
 
 def test_HWE():
@@ -338,3 +420,4 @@ def test_HWE():
         logp = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4], logp=True)
         assert pval == pytest.approx(test_case[5], rel=1e-6, abs=0), str(test_case)
         assert math.exp(logp) == pytest.approx(pval, rel=1e-13, abs=0), str("logp")
+    # todo: test exception-throwing cases
