@@ -414,17 +414,20 @@ HEADER_INLINE dd_real ddr_add_lfacts(const double a, const double b) {
   return ddr_add(ddr_lfact(a), ddr_lfact(b));
 }
 
-HEADER_INLINE dd_real ddr_add3_lfacts(const double a, const double b, const double c) {
-  return ddr_add3(ddr_lfact(a), ddr_lfact(b), ddr_lfact(c));
+HEADER_INLINE dd_real ddr_add3_lfacts(const double a, const double b1, const double b2) {
+  // Common case seems to be that there's a known-nonmaximal argument caller
+  // can put first, but order of the other two varies.
+  const dd_real lfact_a_ddr = ddr_lfact(a);
+  const dd_real lfact_b1_ddr = ddr_lfact(b1);
+  const dd_real lfact_b2_ddr = ddr_lfact(b2);
+  if (b1 < b2) {
+    return ddr_add3(lfact_a_ddr, lfact_b1_ddr, lfact_b2_ddr);
+  } else {
+    return ddr_add3(lfact_a_ddr, lfact_b2_ddr, lfact_b1_ddr);
+  }
 }
 
-HEADER_INLINE dd_real ddr_add4_lfacts(const double a, const double b, const double c, const double d) {
-  return ddr_add4(ddr_lfact(a), ddr_lfact(b), ddr_lfact(c), ddr_lfact(d));
-}
-
-HEADER_INLINE dd_real ddr_add5_lfacts(const double a, const double b, const double c, const double d, const double e) {
-  return ddr_add5(ddr_lfact(a), ddr_lfact(b), ddr_lfact(c), ddr_lfact(d), ddr_lfact(e));
-}
+// ddr_add{4,5}_lfacts() removed to encourage sort-and-add for those cases.
 
 #if defined(__LP64__) && !defined(_WIN32)
 static_assert(sizeof(mp_limb_t) == 8, "Unexpected mp_limb_t size (expected 8).");
@@ -439,6 +442,33 @@ CONSTI32(kInt32PerLimb, 1);
 dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs);
 
 dd_real ddr_sort_and_add_lfacts(uint32_t ct, double* args);
+
+HEADER_INLINE dd_real ddr_sort_and_add_3_lfacts(double a, double b, double c) {
+  double args[3];
+  args[0] = a;
+  args[1] = b;
+  args[2] = c;
+  return ddr_sort_and_add_lfacts(3, args);
+}
+
+HEADER_INLINE dd_real ddr_sort_and_add_4_lfacts(double a, double b, double c, double d) {
+  double args[4];
+  args[0] = a;
+  args[1] = b;
+  args[2] = c;
+  args[3] = d;
+  return ddr_sort_and_add_lfacts(4, args);
+}
+
+HEADER_INLINE dd_real ddr_sort_and_add_5_lfacts(double a, double b, double c, double d, double e) {
+  double args[5];
+  args[0] = a;
+  args[1] = b;
+  args[2] = c;
+  args[3] = d;
+  args[4] = e;
+  return ddr_sort_and_add_lfacts(5, args);
+}
 
 static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
 // lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.

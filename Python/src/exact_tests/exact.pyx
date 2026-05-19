@@ -45,6 +45,8 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) nogil
 
+    int64_t QhyperHalfUlp(dd_real_struct targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t log_targetp) nogil
+
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
 
 
@@ -67,8 +69,9 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
 # approximation with at least 53-bit accuracy.
 #
 # Of course, a calculation with e.g. p=1/3 is a reasonable thing to want, yet
-# 1/3 cannot be precisely represented by a float64.  We won't achieve our goal
-# if we force the caller to misrepresent p by up to 0.5 ULPs up front.
+# 1/3 cannot be precisely represented by a float64.  We're poorly positioned to
+# achieve our goal if we force the caller to misrepresent p by up to 0.5 ULPs
+# up front.
 #
 # So these functions allow p to be a fractions.Fraction, and in that case we
 # convert to a dd_real ("double-double") with ~106-bit precision instead of the
@@ -85,7 +88,6 @@ cdef dd_real_struct DdrMake(object p):
     p_ddr.x[0] = float(p)
     p_ddr.x[1] = float(p - fractions.Fraction(p_ddr.x[0]))
     return p_ddr
-
 
 cdef double zeroval(bint logp):
     if logp:
@@ -120,8 +122,6 @@ cdef double pbinom_p01(int64_t k, int64_t n, double p, bint complement, bint mid
     return zeroval(logp)
 
 
-
-
 # n must be in [0, 2^31) for the two-sided test, and [0, 2^52) for one-sided
 # tests.  k must be in [0, n].  p must be in [0, 1].
 #
@@ -136,7 +136,7 @@ cdef double pbinom_p01(int64_t k, int64_t n, double p, bint complement, bint mid
 # The benefit of this interface is that it enables *perfect* handling of
 # likelihood near-ties; we aren't limited to even qbinom()'s ~53 bits.  (Though
 # provable perfection shouldn't be considered part of the function contract; it
-# may be sensible to relax the interface and introduce a tiny risk of
+# will probably be sensible to relax the interface and introduce a tiny risk of
 # mishandling e.g. a 200-bit near-tie in the future.)
 #
 # Since there is negligible practical difference between ~45-bit and 53-bit
@@ -178,9 +178,10 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
     if ddr_is_zero(p_ddr) or ddr_is_one(p_ddr):
         return pbinom_p01(k, n, p_ddr.x[0], complement, midp, logp)
     if (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
-        # p in (0, 2^{-960}) is a low priority: we'd need to either slow down
-        # the common case to avoid underflow/overflow, or bloat the library
-        # with a separate function just to handle that case.
+        # TODO: these functions should allow p in this range.  Deferred since,
+        # as of this writing, there are much higher-priority problems to solve;
+        # but this is straightforward to get right, just need to be careful
+        # about underflow.
         raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
     return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, midp, logp))
 
@@ -230,7 +231,8 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
 # guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
 # qbinom(pbinom(k, n, succP) * (1 + 0.5**52), n, succP) > k in non-degenerate
 # cases.  However, it is designed to make these outcomes very likely:
-# - Qbinom() is designed for <0.5 ULP relative error (except when n is huge).
+# - Qbinom() is designed for <0.6 ULP relative error (except when n is huge),
+#   and achieves <0.5 ULP the vast majority of the time.
 # - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
 def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):
@@ -356,6 +358,37 @@ def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bin
     if approx:
         return flush_if_denormal(PhyperApprox(a, b, c, d, 0, 0, logp))
     return flush_if_denormal(Phyper(a, b, c, d, logp))
+
+
+# Returns smallest 'a' in the distribution support for which cdf(a) >= targetP.
+#
+# Implementation is *not* built on top of phyper() in a way that e.g.
+# guarantees qhyper(phyper(a, ac, bd, ab), ac, bd, ab) == a or
+# qhyper(phyper(a, ac, bd, ab) * (1 + 0.5**52), ac, bd, ab) > a in
+# non-degenerate cases.  However, it is designed to make these outcomes very
+# likely:
+# - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
+#   and achieves <0.5 ULP the vast majority of the time.
+# - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
+def qhyper(object targetP, int64_t ac, int64_t bd, int64_t ab, bint logTarget=0):
+    if ac < 0 or bd < 0 or ab < 0 or ac >= (1LL << 52) or bd >= (1LL << 52) or ab >= (1LL << 52):
+        raise RuntimeError("ac, bd, and ab must be in [0, 2^52).")
+    if ac + bd >= (1LL << 52):
+        raise RuntimeError("ac+bd must be <2^52.")
+    if ab > ac + bd:
+        raise RuntimeError("ab must be <= ac+bd.")
+    cdef dd_real_struct targetp_ddr = DdrMake(targetP)
+    if logTarget:
+        if not ddr_leqd(targetp_ddr, 0.0):
+            raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+    else:
+        if ddr_ltd(targetp_ddr, 0.0) or not ddr_leqd(targetp_ddr, 1.0):
+            raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
+    raise RuntimeError("qhyper() is under development.")
+    return QhyperHalfUlp(targetp_ddr, ac, bd, ab, logTarget)
+
+
+# TODO: scipy-style entry points.
 
 
 # "HWE" is short for Hardy-Weinberg Equilibrium.

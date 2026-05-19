@@ -39,6 +39,16 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
 
 double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp);
 
+int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t log_target);
+
+HEADER_INLINE int64_t QhyperHalfUlp(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t log_target) {
+  if (!ddr_is_zero(targetp_ddr)) {
+    const double half_ulp = 0.5 * (targetp_ddr.x[0] - prev_float64(targetp_ddr.x[0]));
+    targetp_ddr = ddr_subd(targetp_ddr, half_ulp);
+  }
+  return Qhyper(targetp_ddr, ac, bd, ab, log_target);
+}
+
 BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp);
 
 // Probable todos:

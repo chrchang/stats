@@ -261,7 +261,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     const double c_minus_r = homc - homr;
     dd_real starting_lnprobv_ddr =
       ddr_sub(ddr_muld(_ddr_log2, obs_hets),
-              ddr_add3_lfacts(obs_hets, obs_homr, obs_homc));
+              ddr_add3_lfacts(obs_homr, obs_hets, obs_homc));
     // Now we want to jump near the other tail, without evaluating that many
     // contingency table log-likelihoods along the way.
     //
@@ -310,7 +310,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     // when rare_ct and sample_ct are held constant), 'v' refers to variable
     // component
     const dd_real lnprobf_ddr =
-      ddr_sub(ddr_add3_lfacts(sample_ct, rare_ct, allele_ctd - rare_ct),
+      ddr_sub(ddr_add3_lfacts(rare_ct, sample_ct, allele_ctd - rare_ct),
               ddr_lfact(allele_ctd));
     const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
     while (1) {
@@ -318,7 +318,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
       homc = homr + c_minus_r;
       const dd_real lnprobv_ddr =
         ddr_sub(ddr_muld(_ddr_log2, hets),
-                ddr_add3_lfacts(hets, homr, homc));
+                ddr_add3_lfacts(homr, hets, homc));
       const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
       // Could tighten this threshold further; I haven't performed a careful
       // error analysis yet but CompareFactorialProducts() includes a plausible
@@ -485,7 +485,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
   const double c_minus_r = homc - homr;
   dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(_ddr_log2, obs_hets),
-            ddr_add3_lfacts(obs_hets, obs_homr, obs_homc));
+            ddr_add3_lfacts(obs_homr, obs_hets, obs_homc));
   // Jump to other tail.
   {
     const double delta = cmodal_nhet - 0.5 * (hets + obs_hets);
@@ -501,7 +501,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
   const double max_homr = S_CAST(double, rare_ct >> 1);
 #endif
   const dd_real lnprobf_ddr =
-    ddr_sub(ddr_add3_lfacts(sample_ct, rare_ct, allele_ctd - rare_ct),
+    ddr_sub(ddr_add3_lfacts(rare_ct, sample_ct, allele_ctd - rare_ct),
             ddr_lfact(allele_ctd));
   const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
   while (1) {
@@ -509,7 +509,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     homc = homr + c_minus_r;
     const dd_real lnprobv_ddr =
       ddr_sub(ddr_muld(_ddr_log2, hets),
-              ddr_add3_lfacts(hets, homr, homc));
+              ddr_add3_lfacts(homr, hets, homc));
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprob_diff >= k2m53) {
       if (homr == 0) {
@@ -1143,13 +1143,13 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   // 3. The rest follows HweLnP(), except with an extra geometric-series-based
   //    early-exit attempt near the end.
   const dd_real lnprobf_ddr =
-    ddr_sub(ddr_add3_lfacts(sample_ct, rare_ct, allele_ctd - rare_ct),
+    ddr_sub(ddr_add3_lfacts(rare_ct, sample_ct, allele_ctd - rare_ct),
             ddr_lfact(allele_ctd));
   double homr = obs_homr;
   double homc = obs_homc;
   dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(_ddr_log2, hets),
-            ddr_add3_lfacts(hets, homr, homc));
+            ddr_add3_lfacts(homr, hets, homc));
   const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
   if (ln_thresh <= starting_lnprob - midp * kLn2) {
     *out_of_eqp = 0;
@@ -1196,7 +1196,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
       homc = homr + c_minus_r;
       const dd_real lnprobv_ddr =
         ddr_sub(ddr_muld(_ddr_log2, hets),
-                ddr_add3_lfacts(hets, homr, homc));
+                ddr_add3_lfacts(homr, hets, homc));
       const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
       if (lnprob_diff >= k2m53) {
         if (homr == max_homr) {
@@ -1315,7 +1315,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     homc = homr + c_minus_r;
     const dd_real lnprobv_ddr =
       ddr_sub(ddr_muld(_ddr_log2, hets),
-              ddr_add3_lfacts(hets, homr, homc));
+              ddr_add3_lfacts(homr, hets, homc));
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprob_diff >= k2m53) {
       if (homr <= 0) {

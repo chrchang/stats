@@ -184,8 +184,10 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
   // 2. Iterate through numer_factorial_args[] and denom_factorial_args[] just
   //    to determine bignum calculation size.
   // 3. If bignum calculation size is large enough, perform the comparison with
-  //    dd_reals first, returning a result unless the log-likelihoods are
-  //    within ffac_ct * 2^{-60} of each other.
+  //    dd_reals first, returning a result unless the log-probabilities are
+  //    within ffac_ct * 2^{-60} of each other.  (TODO: fix naming --
+  //    'probability' should be used over 'likelihood' when there isn't a
+  //    possibly-unknown scaling factor in the picture.)
   // 4. Reallocate workspace if necessary, and iterate properly through
   //    numer_factorial_args[] and denom_factorial_args[].  When
   //    numer_factorial_args[k] > denom_factorial_args[k], multiply the
@@ -1517,9 +1519,9 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   }
   // We make an initial guess, use Newton's method to refine it (in the same
   // way as BinomTwoSidedP() when jumping from one tail to the other),
-  // calculate tail likelihood to sufficient accuracy, and then start moving k
-  // inward and updating tail likelihood until it crosses targetp or target1mp.
-  // This avoids unnecessary repetition of the tail-likelihood calculation.
+  // calculate tail probability to sufficient accuracy, and then start moving k
+  // inward and updating tail probability until it crosses targetp.  This
+  // avoids repetition of the tail-probability calculation.
   //
   // Initial guess is based on fitting a quadratic to three points of the
   // log-likelihood function near the mode.  Log-likelihood is
