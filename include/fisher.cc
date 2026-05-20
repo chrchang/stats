@@ -773,20 +773,19 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
   return ddr_exp(ln_prob_ddr).x[0];
 }
 
-// Returns smallest 'a' in the distribution support for which cdf(a) >=
-// targetp.
-// Assumes 0 <= a+b+c+d < 2^52, and should achieve targetp relative error <
-// 2^{-54} unless a+b+c+d is well over 2^31.  Since fisher22 parameterization
-// doesn't work here, we mirror R qhyper()'s parameters.
+// Returns smallest 'a' in the distribution support for which cdf(a) >= p.
+// Assumes 0 <= a+b+c+d < 2^52, and should achieve p relative error < 2^{-54}
+// unless a+b+c+d is well over 2^31.  Since fisher22 parameterization doesn't
+// work here, we mirror R qhyper()'s parameters.
 //
 // The QhyperHalfUlp() entry point subtracts the natural epsilon value (0.5
-// times the value of the least significant bit in targetp_ddr.x[0]) off of
-// targetp_ddr, for the goal described above, before calling Qhyper().
+// times the value of the least significant bit in p_ddr.x[0]) off of p_ddr,
+// for the goal described above, before calling Qhyper().
 //
 // Probable todo: (except possibly on some very large cases) start with faster
 // lower-accuracy interval-math calculation, and fall back on reliable
 // high-accuracy calculation only when needed.
-int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t log_target) {
+int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) {
   const int64_t abcd = ac + bd;
   // Normalize so that d's support is of the form [0, max_d], to minimize
   // differences from the earlier functions in this file.  We perform most
@@ -804,20 +803,20 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
     bd = abcd - ac;
   }
   const int64_t max_d = abcd - ab;
-  if (ddr_is_zero(targetp_ddr) || (max_d == 0)) {
+  if (ddr_is_zero(p_ddr) || (max_d == 0)) {
     return final_return_incr;
   }
-  if (ddr_is_one(targetp_ddr)) {
+  if (ddr_is_one(p_ddr)) {
     return abcd + final_return_incr;
   }
-  // If targetp > 0.5, work with (1 - targetp) and right tail.
-  const uint32_t right_side = ((!log_target) && (targetp_ddr.x[0] > 0.5)) || (log_target && (targetp_ddr.x[0] > -_ddr_log2.x[0]));
+  // If p > 0.5, work with (1 - p) and right tail.
+  const uint32_t right_side = ((!logp) && (p_ddr.x[0] > 0.5)) || (logp && (p_ddr.x[0] > -_ddr_log2.x[0]));
   if (right_side) {
-    if (!log_target) {
-      targetp_ddr = ddr_negate(ddr_subd(targetp_ddr, 1.0));
+    if (!logp) {
+      p_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
     } else {
-      targetp_ddr = ddr_negate(ddr_expm1(targetp_ddr));
-      log_target = 0;
+      p_ddr = ddr_negate(ddr_expm1(p_ddr));
+      logp = 0;
     }
   }
 
@@ -844,16 +843,16 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
     // lastp is now equal to pmf(1) / pmf(0).
     // cdf(0) = pmf(0) / (pmf(0) + pmf(1))
     //        = 1 / (1 + lastp)
-    // targetp < cdf(0) -> targetp < 1 / (1 + lastp)
-    //                     targetp * (1 + lastp) < 1
-    const int64_t d = ddr_geqd(ddr_mul(targetp_ddr, ddr_addd(lastp_ddr, 1.0)), 1.0);
+    // p < cdf(0) -> p < 1 / (1 + lastp)
+    //               p * (1 + lastp) < 1
+    const int64_t d = ddr_geqd(ddr_mul(p_ddr, ddr_addd(lastp_ddr, 1.0)), 1.0);
     return final_return_incr + (right_side? (1 - d) : d);
   }
   // We make an initial guess, use Newton's method to refine it (in the same
   // way as Fisher22TwoSidedP() when jumping from one tail to the other),
   // calculate tail probability to sufficient accuracy, and then start moving
-  // d inward and updating tail probability until it crosses targetp.  This
-  // avoids repetition of the tail-probability calculation.
+  // d inward and updating tail probability until it crosses p.  This avoids
+  // repetition of the tail-probability calculation.
   //
   // Initial guess is based on fitting a quadratic to three points of the
   // log-probability function near the mode.  Log-probability is
@@ -893,21 +892,21 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
 
   // left_side logic:
   // 1. Identify d<mode such that
-  //      pmf(d) * (d+1) < targetp
+  //      pmf(d) * (d+1) < p
   //    If no such d>0 exists, initialize d=0.  Also ok to initialize d=0 if
   //    mode is small.
   // 2. Compute pmf(d) to high accuracy.
-  // 3. Sum left-tail (<= d) likelihoods.  (Guaranteed to be < targetp unless
-  //    d=0, in which case we can immediately return 0.)  Use float64 instead
-  //    of dd_real precision when we can get away with it.
-  // 4. Sum inward until the sum >= targetp, at which point we return d.
+  // 3. Sum left-tail (<= d) likelihoods.  (Guaranteed to be < p unless d=0, in
+  //    which case we can immediately return 0.)  Use float64 instead of
+  //    dd_real precision when we can get away with it.
+  // 4. Sum inward until the sum >= p, at which point we return d.
   //    Again, use float64 precision as far as we can.
   // right_side is essentially the same, just mirrored.
-  const dd_real target_lnprob_ddr = log_target? targetp_ddr : ddr_log(targetp_ddr);
+  const dd_real target_lnprob_ddr = logp? p_ddr : ddr_log(p_ddr);
   const double max_dd = max_d;
   if (!right_side) {
     // Find the x on the left side where the quadratic crosses
-    // y=log(targetp/mode).  If there's no such point, just start at x=mode-1.
+    // y=log(p/mode).  If there's no such point, just start at x=mode-1.
     // (Could recalculate target_lnprob with mode replaced with d when
     // log(pmf(d)) is too high.)
     const double search_lnprob = target_lnprob_ddr.x[0] - log(m22);
@@ -967,7 +966,7 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
         m22 += S_CAST(int64_t, -lnprob_diff / ll_deriv);
       }
     }
-    // Express current likelihood as a fraction of targetp.
+    // Express current likelihood as a fraction of p.
     const double tailstart_m22 = m22;
     const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
     dd_real lastp_ddr = tailstart_p_ddr;
@@ -1018,7 +1017,7 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
     return final_return_incr + S_CAST(int64_t, m22);
   }
   // Find the x on the right side where the quadratic crosses
-  // y=log(targetp/modal_c).  If there's no such point, just start at
+  // y=log(p/modal_c).  If there's no such point, just start at
   // x=mode+1.
   // (Could recalculate target_lnprob with mode replaced with d when
   // log(pmf(d)) is too high.)
@@ -1073,7 +1072,7 @@ int64_t Qhyper(dd_real targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t
       m22 -= S_CAST(int64_t, lnprob_diff / ll_deriv);
     }
   }
-  // Express current likelihood as a fraction of targetp.
+  // Express current likelihood as a fraction of p.
   const double tailstart_m22 = m22;
   const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
   dd_real lastp_ddr = tailstart_p_ddr;

@@ -45,7 +45,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) nogil
 
-    int64_t QhyperHalfUlp(dd_real_struct targetp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t log_targetp) nogil
+    int64_t QhyperHalfUlp(dd_real_struct p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) nogil
 
     BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
 
@@ -360,7 +360,7 @@ def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bin
     return flush_if_denormal(Phyper(a, b, c, d, logp))
 
 
-# Returns smallest 'a' in the distribution support for which cdf(a) >= targetP.
+# Returns smallest 'a' in the distribution support for which cdf(a) >= p.
 #
 # Implementation is *not* built on top of phyper() in a way that e.g.
 # guarantees qhyper(phyper(a, ac, bd, ab), ac, bd, ab) == a or
@@ -370,21 +370,21 @@ def phyper(int64_t a, int64_t ac, int64_t bd, int64_t ab, bint complement=0, bin
 # - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
 #   and achieves <0.5 ULP the vast majority of the time.
 # - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
-def qhyper(object targetP, int64_t ac, int64_t bd, int64_t ab, bint logTarget=0):
+def qhyper(object p, int64_t ac, int64_t bd, int64_t ab, bint logp=0):
     if ac < 0 or bd < 0 or ab < 0 or ac >= (1LL << 52) or bd >= (1LL << 52) or ab >= (1LL << 52):
         raise RuntimeError("ac, bd, and ab must be in [0, 2^52).")
     if ac + bd >= (1LL << 52):
         raise RuntimeError("ac+bd must be <2^52.")
     if ab > ac + bd:
         raise RuntimeError("ab must be <= ac+bd.")
-    cdef dd_real_struct targetp_ddr = DdrMake(targetP)
-    if logTarget:
-        if not ddr_leqd(targetp_ddr, 0.0):
-            raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+    cdef dd_real_struct p_ddr = DdrMake(p)
+    if logp:
+        if not ddr_leqd(p_ddr, 0.0):
+            raise RuntimeError("p must be <= 0 when logp is True.")
     else:
-        if ddr_ltd(targetp_ddr, 0.0) or not ddr_leqd(targetp_ddr, 1.0):
-            raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    return QhyperHalfUlp(targetp_ddr, ac, bd, ab, logTarget)
+        if ddr_ltd(p_ddr, 0.0) or not ddr_leqd(p_ddr, 1.0):
+            raise RuntimeError("p must be in [0, 1] when logp is False.")
+    return QhyperHalfUlp(p_ddr, ac, bd, ab, logp)
 
 
 # TODO: scipy-style entry points.
