@@ -45,7 +45,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
 
 HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
   if (!ddr_is_zero(targetp_ddr)) {
-    const double half_ulp = 0.5 * (targetp_ddr.x[0] - prev_float64(targetp_ddr.x[0]));
+    const double half_ulp = 0.5 * fabs(targetp_ddr.x[0] - prev_float64(targetp_ddr.x[0]));
     targetp_ddr = ddr_subd(targetp_ddr, half_ulp);
   }
   return Qbinom(targetp_ddr, n, succp_ddr, log_target);

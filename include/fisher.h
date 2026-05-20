@@ -43,7 +43,7 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
 
 HEADER_INLINE int64_t QhyperHalfUlp(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) {
   if (!ddr_is_zero(p_ddr)) {
-    const double half_ulp = 0.5 * (p_ddr.x[0] - prev_float64(p_ddr.x[0]));
+    const double half_ulp = 0.5 * fabs(p_ddr.x[0] - prev_float64(p_ddr.x[0]));
     p_ddr = ddr_subd(p_ddr, half_ulp);
   }
   return Qhyper(p_ddr, ac, bd, ab, logp);

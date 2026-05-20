@@ -821,7 +821,7 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   }
 
   const double m1x = ab;
-  const double m2x = abcd - ab;
+  const double m2x = abcd - ab;  // = max_d
   const double mx2 = bd;
   const double mxx = abcd;
   // max_d=1 doesn't play well with the current initial-guess algorithm, and is
@@ -903,7 +903,6 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   //    Again, use float64 precision as far as we can.
   // right_side is essentially the same, just mirrored.
   const dd_real target_lnprob_ddr = logp? p_ddr : ddr_log(p_ddr);
-  const double max_dd = max_d;
   if (!right_side) {
     // Find the x on the left side where the quadratic crosses
     // y=log(p/mode).  If there's no such point, just start at x=mode-1.
@@ -1021,7 +1020,7 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   // x=mode+1.
   // (Could recalculate target_lnprob with mode replaced with d when
   // log(pmf(d)) is too high.)
-  const double modal_cd = max_dd - modal_dd;
+  const double modal_cd = m2x - modal_dd;
   const double search_lnprob = target_lnprob_ddr.x[0] - log(m21);
   // (-b - sqrt(b^2 - 4ac)) / 2a
   const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - search_lnprob);
@@ -1034,8 +1033,8 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
       sqrt_discrim = -sqrt_discrim;
     }
     m22 = ceil((-sqrt_discrim - x1_coeff) / (2 * x2_coeff));
-    if (m22 > max_dd) {
-      m22 = max_dd;
+    if (m22 > m2x) {
+      m22 = m2x;
     }
   }
   const double tailsum_ddr_end = -log(8 * modal_cd * modal_cd);
@@ -1044,7 +1043,7 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   //   m12 = mx2 - max_d
   //   m21 = 0
   //   m22 = max_d
-  double lnprob_diff_min = log((mx2 + 1 - max_dd) / ((m11_minus_m22 + max_dd) * max_dd)) * (1 + kSmallEpsilon);
+  double lnprob_diff_min = log((mx2 + 1 - m2x) / ((m11_minus_m22 + m2x) * m2x)) * (1 + kSmallEpsilon);
   if (lnprob_diff_min > tailsum_ddr_end) {
     lnprob_diff_min = tailsum_ddr_end;
   }
@@ -1057,13 +1056,13 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
                              ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
     const double lnprob_diff = cur_lnprob_ddr.x[0] - search_lnprob;
     if (lnprob_diff > 0) {
-      if (m22 == max_dd) {
+      if (m22 == m2x) {
         break;
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
       m22 += ceil(-lnprob_diff / ll_deriv);
-      if (m22 > max_dd) {
-        m22 = max_dd;
+      if (m22 > m2x) {
+        m22 = m2x;
       }
     } else if (lnprob_diff > lnprob_diff_min) {
       break;

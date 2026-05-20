@@ -414,6 +414,22 @@ def test_phyper():
     # todo: test exception-throwing cases
 
 
+def test_qhyper():
+    for test_case in scipy_phyper_cases:
+        if test_case[4] == False:
+            # Precise inversion of phyper().
+            a = test_case[0]
+            b = test_case[3]
+            c = test_case[1] - b
+            d = test_case[2]
+            logp = test_case[5]
+            pval = exact_tests.phyper(a, b, c, d, logp=logp)
+            assert test_case[0] == exact_tests.qhyper(pval, b, c, d, logp=logp)
+            if not logp:
+                if pval < 1.0:
+                    assert test_case[0] + 1 == exact_tests.qhyper(pval * (1 + 0.5 ** 52), b, c, d, logp=logp)
+
+
 def test_HWE():
     for test_case in r_HWE_cases:
         pval = exact_tests.HWE(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
