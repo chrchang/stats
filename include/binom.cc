@@ -1596,12 +1596,12 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   // inner part of the tailsum.
   // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
   // squared term in the denominator.
-  const double tailsum_ddr_end = log(0.125 / (mode * mode));
-  // |log(pmf(n) / pmf(n-1))| is larger than all the other gaps between
-  // adjacent log(pmf()) points to the right of the mode.  So this ensures
+  const double tailsum_ddr_end = -log(8 * mode * mode);
+  // |log(pmf(0) / pmf(1))| is larger than all the other gaps between
+  // adjacent log(pmf()) points to the left of the mode.  So this ensures
   // there's at least one value of k where log(pmf(k)) - target_lnprob is in
-  // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(n)) >=
-  // target_lnprob, in which case we exit the loop at k=n.
+  // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(0)) >=
+  // target_lnprob, in which case we exit the loop at k=0.
   double lnprob_diff_min = log(qdp_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
   if (lnprob_diff_min > tailsum_ddr_end) {
     lnprob_diff_min = tailsum_ddr_end;
@@ -1631,7 +1631,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
     }
   }
   // Express current likelihood as a fraction of targetp.
-  const int64_t tailstart_k = k;
+  const double tailstart_k = k;
   const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
   dd_real lastp_ddr = tailstart_p_ddr;
   dd_real tailsum_ddr = tailstart_p_ddr;
@@ -1671,7 +1671,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
     nmk -= 1;
     tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
   }
-  return inv? (n - k) : k;
+  return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }
 
 

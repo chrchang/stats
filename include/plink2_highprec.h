@@ -239,6 +239,14 @@ HEADER_CINLINE dd_real ddr_mul_pwr2(const dd_real a, double b) {
   return ddr_make(a.x[0] * b, a.x[1] * b);
 }
 
+// This is (i) very efficient when FMA is available, and (ii) is error-free
+// when a and b are e.g. integers < 2^53.
+HEADER_INLINE dd_real ddr_mul2d(double a, double b) {
+  double p2;
+  double p1 = qd_two_prod(a, b, &p2);
+  return ddr_make(p1, p2);
+}
+
 HEADER_INLINE dd_real ddr_muld(const dd_real a, double b) {
   double p1, p2;
 

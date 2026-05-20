@@ -384,7 +384,6 @@ def qhyper(object targetP, int64_t ac, int64_t bd, int64_t ab, bint logTarget=0)
     else:
         if ddr_ltd(targetp_ddr, 0.0) or not ddr_leqd(targetp_ddr, 1.0):
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    raise RuntimeError("qhyper() is under development.")
     return QhyperHalfUlp(targetp_ddr, ac, bd, ab, logTarget)
 
 
