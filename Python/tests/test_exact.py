@@ -396,6 +396,8 @@ def test_dhyper():
         else:
             assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149371888e-08, rel=1e-8, abs=0)
+    assert exact_tests.dhyper(0, 0, 0, 0) == 1.0
+    assert exact_tests.dhyper(2, 2, 2, 4) == 1.0
     # todo: test exception-throwing cases
 
 
@@ -411,6 +413,8 @@ def test_phyper():
         assert p_got == pytest.approx(test_case[6], rel=test_case[7], abs=DBL_MIN)
     assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
     assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=True) == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+    assert exact_tests.phyper(0, 0, 0, 0) == 1.0
+    assert exact_tests.phyper(2, 2, 2, 4) == 1.0
     # todo: test exception-throwing cases
 
 
@@ -431,6 +435,10 @@ def test_qhyper():
             else:
                 if pval < 0.0:
                     assert test_case[0] + 1 == exact_tests.qhyper(pval * (1 - 0.5 ** 52), b, c, d, logp=True)
+    assert exact_tests.qhyper(0, 0, 0, 0) == 0
+    assert exact_tests.qhyper(1, 0, 0, 0) == 0
+    assert exact_tests.qhyper(0, 2, 2, 4) == 2
+    assert exact_tests.qhyper(1, 2, 2, 4) == 2
 
 
 def test_HWE():
