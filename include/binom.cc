@@ -1244,7 +1244,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
   }
   // possible for this to round up to 1, so we must avoid computing 1-p or 1-q
   // later in the function
-  dd_real q_ddr = ddr_ieee_sub(ddr_maked(1.0), p_ddr);
+  dd_real q_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
 
   if (complement) {
     obs_k = n - obs_k - 1;
@@ -1546,7 +1546,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   const dd_real logq_ddr = ddr_log(failp_ddr);
   // This is usually overkill, but if n is huge we need to compute these to
   // high precision to make a decent initial guess.
-  const dd_real mode_lnlike_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
+  const dd_real mode_lnlike_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
                                           ddr_add_lfacts(mode, n - mode));
   const dd_real modem1_lnlike_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
   const dd_real modep1_lnlike_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
@@ -1611,7 +1611,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   while (1) {
     nmk = n - k;
     // Evaluate pmf(k) to high precision.
-    cur_lnprob_ddr = ddr_sub(ddr_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
+    cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
                              ddr_add_lfacts(k, nmk));
     const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
     if (lnprob_diff > 0) {

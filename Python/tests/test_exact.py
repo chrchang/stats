@@ -427,7 +427,10 @@ def test_qhyper():
             assert test_case[0] == exact_tests.qhyper(pval, b, c, d, logp=logp)
             if not logp:
                 if pval < 1.0:
-                    assert test_case[0] + 1 == exact_tests.qhyper(pval * (1 + 0.5 ** 52), b, c, d, logp=logp)
+                    assert test_case[0] + 1 == exact_tests.qhyper(pval * (1 + 0.5 ** 52), b, c, d)
+            else:
+                if pval < 0.0:
+                    assert test_case[0] + 1 == exact_tests.qhyper(pval * (1 - 0.5 ** 52), b, c, d, logp=True)
 
 
 def test_HWE():

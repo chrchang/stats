@@ -449,6 +449,14 @@ CONSTI32(kInt32PerLimb, 1);
 // Assumes ct positive.
 dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs);
 
+HEADER_INLINE dd_real ddr_sort_and_add3(dd_real a_ddr, dd_real b_ddr, dd_real c_ddr) {
+  dd_real args[3];
+  args[0] = a_ddr;
+  args[1] = b_ddr;
+  args[2] = c_ddr;
+  return ddr_sort_and_add(3, args);
+}
+
 dd_real ddr_sort_and_add_lfacts(uint32_t ct, double* args);
 
 HEADER_INLINE dd_real ddr_sort_and_add_3_lfacts(double a, double b, double c) {
