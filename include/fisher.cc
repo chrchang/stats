@@ -809,9 +809,11 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   if (ddr_is_one(p_ddr)) {
     return abcd + final_return_incr;
   }
-  // If p > 0.5, work with (1 - p) and right tail.
-  const uint32_t right_side = ((!logp) && (p_ddr.x[0] > 0.5)) || (logp && (p_ddr.x[0] > -_ddr_log2.x[0]));
-  if (right_side) {
+  // If p > 0.5, work with (1-p) and flipped columns.
+  const uint32_t inv = ((!logp) && (p_ddr.x[0] > 0.5)) || (logp && (p_ddr.x[0] > -_ddr_log2.x[0]));
+  if (inv) {
+    swap_i64(&ac, &bd);
+    a_minus_d = ab - bd;
     if (!logp) {
       p_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
     } else {
@@ -846,7 +848,7 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
     // p < cdf(0) -> p < 1 / (1 + lastp)
     //               p * (1 + lastp) < 1
     const int64_t d = ddr_geqd(ddr_mul(p_ddr, ddr_addd(lastp_ddr, 1.0)), 1.0);
-    return final_return_incr + (right_side? (1 - d) : d);
+    return final_return_incr + (inv? (1 - d) : d);
   }
   // We make an initial guess, use Newton's method to refine it (in the same
   // way as Fisher22TwoSidedP() when jumping from one tail to the other),
@@ -890,7 +892,6 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   // mode^2 * x2_coeff + mode * x1_coeff + x0_coeff = mode_lnprob_ddr
   const double x0_coeff = ddr_subd(mode_lnprob_ddr, m22 * prefer_fma(m22, x2_coeff, x1_coeff)).x[0];
 
-  // left_side logic:
   // 1. Identify d<mode such that
   //      pmf(d) * (d+1) < p
   //    If no such d>0 exists, initialize d=0.  Also ok to initialize d=0 if
@@ -901,149 +902,41 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   //    dd_real precision when we can get away with it.
   // 4. Sum inward until the sum >= p, at which point we return d.
   //    Again, use float64 precision as far as we can.
-  // right_side is essentially the same, just mirrored.
   const dd_real target_lnprob_ddr = logp? p_ddr : ddr_log(p_ddr);
-  if (!right_side) {
-    // Find the x on the left side where the quadratic crosses
-    // y=log(p/mode).  If there's no such point, just start at x=mode-1.
-    // (Could recalculate target_lnprob with mode replaced with d when
-    // log(pmf(d)) is too high.)
-    const double search_lnprob = target_lnprob_ddr.x[0] - log(m22);
-    // (-b - sqrt(b^2 - 4ac)) / 2a
-    const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - search_lnprob);
-    if (discrim < 0.0) {
-      m22 -= 1;
-    } else {
-      double sqrt_discrim = sqrt(discrim);
-      if (x2_coeff > 0.0) {
-        // this shouldn't happen
-        sqrt_discrim = -sqrt_discrim;
-      }
-      m22 = trunc((sqrt_discrim - x1_coeff) / (2 * x2_coeff));
-      if (m22 < 0) {
-        m22 = 0;
-      }
-    }
-    // Our relative error budget is usually 2^{-54}.
-    // We want to ensure that accumulated error when evaluating the outer part
-    // of the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other
-    // half of the budget covers dd_real-precision evaluation of log(pmf(d))
-    // and the inner part of the tailsum.
-    // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
-    // squared term in the denominator.
-    const double tailsum_ddr_end = -log(8 * modal_dd * modal_dd);
-    // |log(pmf(0) / pmf(1))| is larger than all the other gaps between
-    // adjacent log(pmf()) points to the left of the mode.  So this ensures
-    // there's at least one value of d where log(pmf(d)) - target_lnprob is in
-    // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(0)) >=
-    // target_lnprob, in which case we exit the loop at d=0.
-    double lnprob_diff_min = log((m11_minus_m22 + 1) / (mx2 * m2x)) * (1 + kSmallEpsilon);
-    if (lnprob_diff_min > tailsum_ddr_end) {
-      lnprob_diff_min = tailsum_ddr_end;
-    }
-    dd_real cur_lnprob_ddr;
-    while (1) {
-      m11 = m11_minus_m22 + m22;
-      m12 = mx2 - m22;
-      m21 = m2x - m22;
-      cur_lnprob_ddr = ddr_sub(lnprobf_ddr,
-                               ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
-      const double lnprob_diff = cur_lnprob_ddr.x[0] - search_lnprob;
-      if (lnprob_diff > 0) {
-        if (m22 == 0) {
-          break;
-        }
-        const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
-        m22 -= ceil(lnprob_diff / ll_deriv);
-        if (m22 < 0) {
-          m22 = 0;
-        }
-      } else if (lnprob_diff > lnprob_diff_min) {
-        break;
-      } else {
-        const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
-        m22 += S_CAST(int64_t, -lnprob_diff / ll_deriv);
-      }
-    }
-    // Express current likelihood as a fraction of p.
-    const double tailstart_m22 = m22;
-    const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
-    dd_real lastp_ddr = tailstart_p_ddr;
-    dd_real tailsum_ddr = tailstart_p_ddr;
-    if (m22 > 0) {
-      // Could use geometric-series upper bound on tailsum to raise this
-      // threshold.
-      const double min_incr_left = 0.125 / (m22 * m22);
-      do {
-        m12 += 1;
-        m21 += 1;
-        lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m11, m22), ddr_mul2d(m12, m21)));
-        m11 -= 1;
-        m22 -= 1;
-        tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
-      } while (lastp_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
-      if (m22 > 0) {
-        double lastp = lastp_ddr.x[0];
-        double tailsum = 0.0;
-        while (1) {
-          m12 += 1;
-          m21 += 1;
-          lastp *= m11 * m22 / (m12 * m21);
-          m11 -= 1;
-          m22 -= 1;
-          const double preaddp = tailsum;
-          tailsum += lastp;
-          if (tailsum == preaddp) {
-            break;
-          }
-        }
-        tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
-      }
-      lastp_ddr = tailstart_p_ddr;
-      m22 = tailstart_m22;
-      m11 = m11_minus_m22 + m22;
-      m12 = mx2 - m22;
-      m21 = m2x - m22;
-    }
-    while (ddr_ltd(tailsum_ddr, 1.0)) {
-      m11 += 1;
-      m22 += 1;
-      lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m12, m21), ddr_mul2d(m11, m22)));
-      m12 -= 1;
-      m21 -= 1;
-      tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
-    }
-    return final_return_incr + S_CAST(int64_t, m22);
-  }
-  // Find the x on the right side where the quadratic crosses
-  // y=log(p/modal_c).  If there's no such point, just start at
-  // x=mode+1.
+  // Find the x on the left side where the quadratic crosses
+  // y=log(p/mode).  If there's no such point, just start at x=mode-1.
   // (Could recalculate target_lnprob with mode replaced with d when
   // log(pmf(d)) is too high.)
-  const double modal_cd = m2x - modal_dd;
-  const double search_lnprob = target_lnprob_ddr.x[0] - log(m21);
+  const double search_lnprob = target_lnprob_ddr.x[0] - log(m22);
   // (-b - sqrt(b^2 - 4ac)) / 2a
   const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - search_lnprob);
   if (discrim < 0.0) {
-    m22 += 1;
+    m22 -= 1;
   } else {
     double sqrt_discrim = sqrt(discrim);
     if (x2_coeff > 0.0) {
       // this shouldn't happen
       sqrt_discrim = -sqrt_discrim;
     }
-    m22 = ceil((-sqrt_discrim - x1_coeff) / (2 * x2_coeff));
-    if (m22 > m2x) {
-      m22 = m2x;
+    m22 = trunc((sqrt_discrim - x1_coeff) / (2 * x2_coeff));
+    if (m22 < 0) {
+      m22 = 0;
     }
   }
-  const double tailsum_ddr_end = -log(8 * modal_cd * modal_cd);
-  // Maximal m22:
-  //   m11 = m11_minus_m22 + max_d
-  //   m12 = mx2 - max_d
-  //   m21 = 0
-  //   m22 = max_d
-  double lnprob_diff_min = log((mx2 + 1 - m2x) / ((m11_minus_m22 + m2x) * m2x)) * (1 + kSmallEpsilon);
+  // Our relative error budget is usually 2^{-54}.
+  // We want to ensure that accumulated error when evaluating the outer part
+  // of the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other
+  // half of the budget covers dd_real-precision evaluation of log(pmf(d))
+  // and the inner part of the tailsum.
+  // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
+  // squared term in the denominator.
+  const double tailsum_ddr_end = -log(8 * modal_dd * modal_dd);
+  // |log(pmf(0) / pmf(1))| is larger than all the other gaps between
+  // adjacent log(pmf()) points to the left of the mode.  So this ensures
+  // there's at least one value of d where log(pmf(d)) - target_lnprob is in
+  // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(0)) >=
+  // target_lnprob, in which case we exit the loop at d=0.
+  double lnprob_diff_min = log((m11_minus_m22 + 1) / (mx2 * m2x)) * (1 + kSmallEpsilon);
   if (lnprob_diff_min > tailsum_ddr_end) {
     lnprob_diff_min = tailsum_ddr_end;
   }
@@ -1056,19 +949,19 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
                              ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
     const double lnprob_diff = cur_lnprob_ddr.x[0] - search_lnprob;
     if (lnprob_diff > 0) {
-      if (m22 == m2x) {
+      if (m22 == 0) {
         break;
       }
-      const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
-      m22 += ceil(-lnprob_diff / ll_deriv);
-      if (m22 > m2x) {
-        m22 = m2x;
+      const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
+      m22 -= ceil(lnprob_diff / ll_deriv);
+      if (m22 < 0) {
+        m22 = 0;
       }
     } else if (lnprob_diff > lnprob_diff_min) {
       break;
     } else {
-      const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
-      m22 -= S_CAST(int64_t, lnprob_diff / ll_deriv);
+      const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
+      m22 += S_CAST(int64_t, -lnprob_diff / ll_deriv);
     }
   }
   // Express current likelihood as a fraction of p.
@@ -1076,27 +969,27 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
   const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
   dd_real lastp_ddr = tailstart_p_ddr;
   dd_real tailsum_ddr = tailstart_p_ddr;
-  if (m21 > 0) {
+  if (m22 > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
-    const double min_incr_left = 0.125 / (m21 * m21);
+    const double min_incr_left = 0.125 / (m22 * m22);
     do {
-      m11 += 1;
-      m22 += 1;
-      lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m12, m21), ddr_mul2d(m11 + 1, m22 + 1)));
-      m12 -= 1;
-      m21 -= 1;
+      m12 += 1;
+      m21 += 1;
+      lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m11, m22), ddr_mul2d(m12, m21)));
+      m11 -= 1;
+      m22 -= 1;
       tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
     } while (lastp_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
-    if (m21 > 0) {
+    if (m22 > 0) {
       double lastp = lastp_ddr.x[0];
       double tailsum = 0.0;
       while (1) {
-        m11 += 1;
-        m22 += 1;
-        lastp *= m12 * m21 / (m11 * m22);
-        m12 -= 1;
-        m21 -= 1;
+        m12 += 1;
+        m21 += 1;
+        lastp *= m11 * m22 / (m12 * m21);
+        m11 -= 1;
+        m22 -= 1;
         const double preaddp = tailsum;
         tailsum += lastp;
         if (tailsum == preaddp) {
@@ -1112,14 +1005,14 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
     m21 = m2x - m22;
   }
   while (ddr_ltd(tailsum_ddr, 1.0)) {
-    m12 += 1;
-    m21 += 1;
-    lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m11, m22), ddr_mul2d(m12, m21)));
-    m11 -= 1;
-    m22 -= 1;
+    m11 += 1;
+    m22 += 1;
+    lastp_ddr = ddr_mul(lastp_ddr, ddr_accurate_div(ddr_mul2d(m12, m21), ddr_mul2d(m11, m22)));
+    m12 -= 1;
+    m21 -= 1;
     tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
   }
-  return final_return_incr + S_CAST(int64_t, m22);
+  return final_return_incr + S_CAST(int64_t, inv? (m2x - m22) : m22);
 }
 
 // Switch between log- and regular representations at kSwitchThresh.
