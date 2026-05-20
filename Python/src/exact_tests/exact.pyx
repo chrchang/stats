@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
