@@ -92,6 +92,10 @@ BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, ui
 // Not difficult to extend this to obs_m11 + obs_m12 + obs_m21 + obs_m22 <
 // 2^52, if the rational-arithmetic backstop in CompareFactorialProducts() is
 // revised to use qd_reals.
+//
+// (Note that the odds-ratio and odds-ratio-confidence-interval reported by R
+// fisher.test can also be calculated efficiently, using e.g. the approach in
+// the R BiasedUrn package's meanFNCHypergeo() and pFNCHypergeo() functions.)
 BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
@@ -1030,7 +1034,7 @@ static const double kJumpThresh = 314.0; // chosen to guarantee base_prob < kSwi
 // 'rank' instead of 'row' to refer to the set of tables with 3rd column held
 // constant.
 BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tailp_ptr, dd_real* starting_lnprobv_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_probl_ptr, double* orig_base_lnprobl_ptr, double* orig_base_epsl_ptr, double* orig_base_probr_ptr, double* orig_base_lnprobr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
-  // possible todo: have this and Fisher22LnP() call a shared function
+  // possible todo: have this and Fisher22TwoSidedP() call a shared function
   double m11 = obs_m11;
   double m12 = obs_m12;
   double m21 = obs_m21;

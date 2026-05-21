@@ -466,13 +466,13 @@ BoolErr CompareFactorialProductsEx(uint32_t ffac_ct, int64_t odds_ratio_numer, i
 // - ln_odds_ratio_ddr is expected to either be initialized to log(odds_ratio),
 //   or have x[0] initialized to DBL_MAX, etc.
 //
-// - *cmp_resultp is set to positive value if succ has higher likelihood than
-//   obs_succ, 0 if identical likelihood, and negative value if lower
-//   likelihood.
+// - *cmp_resultp is set to positive value if succ has higher probability than
+//   obs_succ, 0 if identical probability, and negative value if lower
+//   probability.
 //
 // - Error is returned iff malloc fails.
 BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t succ, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
-  // Binomial likelihood is
+  // Binomial probability is
   //
   //        n!        k        n-k
   //     --------- * p  * (1-p)
@@ -485,7 +485,7 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
   //
   // where k = # of successes and p is the expected success rate.
   //
-  // Thus, the likelihood ratio of interest is
+  // Thus, the probability ratio of interest is
   //
   //   obs_succ! (obs_tot - obs_succ)!                  succ - obs_succ
   //   ------------------------------- * succ_odds_ratio
@@ -577,26 +577,27 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
       }
     }
   }
-  double lastp = 1;
-  double tailp = 1 - midp * 0.5;
+  double lik = 1;
+  double tail_lik = 1 - midp * 0.5;
   // Iterate outward to floating-point precision limit.
   while (1) {
     fail += 1;
-    lastp *= succ / (succ_odds_ratio * fail);
+    lik *= succ / (succ_odds_ratio * fail);
     succ -= 1;
-    const double preaddp = tailp;
-    tailp += lastp;
-    if (tailp == preaddp) {
+    const double preadd = tail_lik;
+    tail_lik += lik;
+    if (tail_lik == preadd) {
       break;
     }
   }
   // In the common case, where we're close enough to the mode that float64
   // underflow/overflow isn't an issue, use the original algorithm: sum all
   // center relative-likelihoods, sum far-tail relative-likelihoods to
-  // floating-point precision limit, return log(tailp / (tailp + centerp)).
+  // floating-point precision limit, return
+  //   log(tail_lik / (tail_lik + center_lik))
   //
   // Unfortunately, an extremal rate (e.g. (2^63 - 2)/(2^63 - 1), the maximum
-  // possible permitted value) makes center-sum overflow possible much closer
+  // possible permitted value) makes center_lik overflow possible much closer
   // to the mode than is the case for the Fisher/HWE exact tests; 17 steps
   // could be enough.  So instead of checking whether we're a constant number
   // of steps from the mode, we compute a lower bound on the number of
@@ -621,50 +622,50 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
     double one_plus_scaled_eps = 1 + k2m52;
-    double centerp = midp * 0.5;
-    lastp = 1;
+    double center_lik = midp * 0.5;
+    lik = 1;
     while (1) {
       succ += 1;
-      lastp *= succ_odds_ratio * fail / succ;
+      lik *= succ_odds_ratio * fail / succ;
       fail -= 1;
       // succ_odds_ratio is off by up to 0.5 ULP, and we have two multiplies
       // and a divide.
       one_plus_scaled_eps += 2 * k2m52;
-      if (lastp < one_plus_scaled_eps) {
-        if (lastp <= 2 - one_plus_scaled_eps) {
-          tailp += lastp;
+      if (lik < one_plus_scaled_eps) {
+        if (lik <= 2 - one_plus_scaled_eps) {
+          tail_lik += lik;
           break;
         }
-        // Near-tie.  True value of lastp can be greater than, equal to, or
+        // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
         intptr_t cmp_result;
-        if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lastp))) {
+        if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lik))) {
           return 1;
         }
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
-          tailp += lastp;
+          tail_lik += lik;
           if (midp && (cmp_result == 0)) {
-            tailp -= 0.5;
-            centerp += 0.5;
+            tail_lik -= 0.5;
+            center_lik += 0.5;
           }
           break;
         }
       }
-      centerp += lastp;
+      center_lik += lik;
     }
     // Continue down tail to floating-point precision limit.
     while (1) {
       succ += 1;
-      lastp *= succ_odds_ratio * fail / succ;
+      lik *= succ_odds_ratio * fail / succ;
       fail -= 1;
-      const double preaddp = tailp;
-      tailp += lastp;
-      if (tailp == preaddp) {
+      const double preadd = tail_lik;
+      tail_lik += lik;
+      if (tail_lik == preadd) {
         break;
       }
     }
-    const double pval = tailp / (tailp + centerp);
+    const double pval = tail_lik / (tail_lik + center_lik);
     *resultp = logp? log(pval) : pval;
     return 0;
   }
@@ -698,9 +699,9 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   // succ) * 0.5 across the (continuous) mode, performing a full log-likelihood
   // check at the nearest valid point.  Hopefully we find that we're in
   // (starting_lnprob - tolerance, starting_lnprob], so we're at or near a
-  // table that actually contributes to the tail-sum; unlike the Fisher's and
-  // HWE cases, we can't fix the tolerance at 62 * kLn2, but we can compute a
-  // value >= 53 * kLn2 large enough to guarantee at least one point falls
+  // table that contributes non-negligibly to the tail-sum; unlike the Fisher's
+  // and HWE cases, we can't fix the tolerance at 62 * kLn2, but we can compute
+  // a value >= 53 * kLn2 large enough to guarantee at least one point falls
   // inside.
   //
   // If not, we jump again, using Newton's method.
@@ -721,7 +722,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
   if (ddr_geqd(succ_odds_ratio_ddr, obs_totd)) {
-    *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
+    *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
     return 0;
   }
 
@@ -733,10 +734,10 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
 
   // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
   // largest gap between adjacent log-likelihoods on this tail.  Set
-  // |lnprob_diff_min| >= this value.
-  double lnprob_diff_min = log(succ_odds_ratio / obs_totd) * (1 + kSmallEpsilon);
-  if (lnprob_diff_min > -53 * kLn2) {
-    lnprob_diff_min = -53 * kLn2;
+  // |lnprobv_diff_min| >= this value.
+  double lnprobv_diff_min = log(succ_odds_ratio / obs_totd) * (1 + kSmallEpsilon);
+  if (lnprobv_diff_min > -53 * kLn2) {
+    lnprobv_diff_min = -53 * kLn2;
   }
 
   while (1) {
@@ -744,71 +745,71 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     const dd_real lnprobv_ddr =
       ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
               ddr_add_lfacts(succ, fail));
-    const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-    if (lnprob_diff >= k2m53) {
+    const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
+    if (lnprobv_diff >= k2m53) {
       if (fail == 0) {
-        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
+        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
         return 0;
       }
       const double ll_deriv = ln_odds_ratio_ddr.x[0] + log(fail / (succ + 1));
       // Round up, to guarantee that we make progress.
-      // (lnprob_diff is positive and ll_deriv is negative.)
+      // (lnprobv_diff is positive and ll_deriv is negative.)
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      succ += ceil(-lnprob_diff / ll_deriv);
+      succ += ceil(-lnprobv_diff / ll_deriv);
       if (succ > obs_totd) {
         succ = obs_totd;
       }
-    } else if (lnprob_diff > lnprob_diff_min) {
-      lastp = exp(lnprob_diff);
+    } else if (lnprobv_diff > lnprobv_diff_min) {
+      lik = exp(lnprobv_diff);
       break;
     } else {
       const double ll_deriv = ln_odds_ratio_ddr.x[0] + log((fail + 1) / succ);
       // Round down, to guarantee we don't overshoot.
-      // |lnprob_diff| >= |lnprob_diff_min| > |ll_deriv| so we're guaranteed
+      // |lnprobv_diff| >= |lnprobv_diff_min| > |ll_deriv| so we're guaranteed
       // to make progress.
-      succ -= S_CAST(int64_t, lnprob_diff / ll_deriv);
+      succ -= S_CAST(int64_t, lnprobv_diff / ll_deriv);
     }
   }
-  // Sum toward center, until lastp >= 1.
+  // Sum toward center, until lik >= 1.
   double one_minus_scaled_eps = 1 - 3 * k2m52;
-  const double lastp_tail = lastp;
-  const double succ_tail = succ;
-  while (lastp <= one_minus_scaled_eps) {
-    tailp += lastp;
+  const double tailstart_lik = lik;
+  const double tailstart_succ = succ;
+  while (lik <= one_minus_scaled_eps) {
+    tail_lik += lik;
     fail += 1;
-    lastp *= succ / (succ_odds_ratio * fail);
+    lik *= succ / (succ_odds_ratio * fail);
     succ -= 1;
     one_minus_scaled_eps -= 2 * k2m52;
   }
-  if (lastp < 2 - one_minus_scaled_eps) {
+  if (lik < 2 - one_minus_scaled_eps) {
     intptr_t cmp_result;
-    if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lastp))) {
+    if (unlikely(BinomCompare(obs_succ, obs_tot, succ_odds_ratio_numer, succ_odds_ratio_denom, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &cmp_result, &lik))) {
       return 1;
     }
     if (cmp_result <= 0) {
-      tailp += lastp;
+      tail_lik += lik;
       if (midp && (cmp_result == 0)) {
-        tailp -= 0.5;
+        tail_lik -= 0.5;
       }
     }
   }
   // Sum away from center, until sums stop changing.
-  lastp = lastp_tail;
-  succ = succ_tail;
+  lik = tailstart_lik;
+  succ = tailstart_succ;
   fail = obs_totd - succ;
   while (1) {
     succ += 1;
-    lastp *= succ_odds_ratio * fail / succ;
-    const double preaddp = tailp;
-    tailp += lastp;
-    if (tailp == preaddp) {
+    lik *= succ_odds_ratio * fail / succ;
+    const double preadd = tail_lik;
+    tail_lik += lik;
+    if (tail_lik == preadd) {
       break;
     }
     fail -= 1;
   }
-  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
+  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
   return 0;
 }
 
@@ -1104,9 +1105,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
       nmk += 1;
       lastp *= k / (pdq * nmk);
       k -= 1;
-      const double preaddp = left_sum;
+      const double preadd = left_sum;
       left_sum += lastp;
-      if (left_sum == preaddp) {
+      if (left_sum == preadd) {
         break;
       }
     }
@@ -1126,9 +1127,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
       k += 1;
       lastp *= pdq * nmk / k;
       nmk -= 1;
-      const double preaddp = right_sum;
+      const double preadd = right_sum;
       right_sum += lastp;
-      if (right_sum == preaddp) {
+      if (right_sum == preadd) {
         break;
       }
     }
@@ -1163,9 +1164,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
       k += 1;
       lastp *= pdq * nmk / k;
       nmk -= 1;
-      const double preaddp = right_sum;
+      const double preadd = right_sum;
       right_sum += lastp;
-      if (right_sum == preaddp) {
+      if (right_sum == preadd) {
         break;
       }
     }
@@ -1177,9 +1178,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
       nmk += 1;
       lastp *= k / (pdq * nmk);
       k -= 1;
-      const double preaddp = left_sum;
+      const double preadd = left_sum;
       left_sum += lastp;
-      if (left_sum == preaddp) {
+      if (left_sum == preadd) {
         break;
       }
     }
@@ -1217,9 +1218,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     nmk += 1;
     lastp *= k / (pdq * nmk);
     k -= 1;
-    const double preaddp = left_sum;
+    const double preadd = left_sum;
     left_sum += lastp;
-    if (left_sum == preaddp) {
+    if (left_sum == preadd) {
       break;
     }
   }
@@ -1307,9 +1308,9 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
         nmk += 1;
         lastp *= k / (pdq * nmk);
         k -= 1;
-        const double preaddp = left_tail_sum;
+        const double preadd = left_tail_sum;
         left_tail_sum += lastp;
-        if (left_tail_sum == preaddp) {
+        if (left_tail_sum == preadd) {
           break;
         }
       }
@@ -1341,9 +1342,9 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
           k += 1;
           lastp *= pdq * nmk / k;
           nmk -= 1;
-          const double preaddp = right_tail_sum;
+          const double preadd = right_tail_sum;
           right_tail_sum += lastp;
-          if (right_tail_sum == preaddp) {
+          if (right_tail_sum == preadd) {
             break;
           }
         }
@@ -1396,9 +1397,9 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
           k += 1;
           lastp *= pdq * nmk / k;
           nmk -= 1;
-          const double preaddp = right_tail_sum;
+          const double preadd = right_tail_sum;
           right_tail_sum += lastp;
-          if (right_tail_sum == preaddp) {
+          if (right_tail_sum == preadd) {
             break;
           }
         }
@@ -1425,9 +1426,9 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
           nmk += 1;
           lastp *= k / (pdq * nmk);
           k -= 1;
-          const double preaddp = left_tail_sum;
+          const double preadd = left_tail_sum;
           left_tail_sum += lastp;
-          if (left_tail_sum == preaddp) {
+          if (left_tail_sum == preadd) {
             break;
           }
         }
@@ -1460,9 +1461,9 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
         nmk += 1;
         lastp *= k / (pdq * nmk);
         k -= 1;
-        const double preaddp = left_tail_sum;
+        const double preadd = left_tail_sum;
         left_tail_sum += lastp;
-        if (left_tail_sum == preaddp) {
+        if (left_tail_sum == preadd) {
           break;
         }
       }
@@ -1653,9 +1654,9 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
         nmk += 1;
         lastp *= qdp * k / nmk;
         k -= 1;
-        const double preaddp = tailsum;
+        const double preadd = tailsum;
         tailsum += lastp;
-        if (tailsum == preaddp) {
+        if (tailsum == preadd) {
           break;
         }
       }

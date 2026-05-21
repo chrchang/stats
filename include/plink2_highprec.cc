@@ -24,7 +24,7 @@
 namespace plink2 {
 #endif
 
-// Portable "double-double" operations supporting high-accuracy log-likelihood
+// Portable "double-double" operations supporting high-accuracy log-probability
 // calculations, based on a small subset of the QD library
 // (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
@@ -838,13 +838,16 @@ void lshift_multilimb(uint64_t lshift_ct, mp_limb_t* num, uint32_t* num_limb_ctp
 //
 // This could take a precomputed ddr_lfact table as an additional pair of
 // parameters, but I don't think that makes much of a difference.
+//
+// The GMP rational arithmetic in this function will probably be replaced with
+// qd_real arithmetic soon.
 BoolErr CompareFactorialProducts(uint32_t ffac_ct, int64_t pow2, int64_t numer_pow2, uint32_t* numer_factorial_args, uint32_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, mp_limb_t** gmp_wkspacep, uintptr_t* gmp_wkspace_limb_ctp, intptr_t* cmp_resultp, double* dbl_ptr) {
   // 1. Sort numer_factorial_args and denom_factorial_args.  (This has the
   //    effect of cancelling out matching terms.)
   // 2. Iterate through numer_factorial_args[] and denom_factorial_args[] to
   //    determine bignum calculation size.
   // 3. If bignum calculation size is large enough, perform the comparison with
-  //    dd_reals first, returning a result unless the log-likelihoods are
+  //    dd_reals first, returning a result unless the log-probabilities are
   //    within ffac_ct * 2^{-60} of each other.
   // 4. Reallocate workspace if necessary, and iterate properly through
   //    numer_factorial_args[] and denom_factorial_args[].  When
@@ -899,9 +902,10 @@ BoolErr CompareFactorialProducts(uint32_t ffac_ct, int64_t pow2, int64_t numer_p
     }
     const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     // ddr_lfact() result has >= 106 bits of precision, should be accurate to
-    // 96+ bits (mostly dependent on log).
+    // 96+ bits (mostly dependent on log), looks to me like minimum is 99 or
+    // 100 (ignoring denormals).
     // log((2^31)!) is less than 2^36, so we should have at least 60 bits past
-    // the decimal point.
+    // the decimal point for plink2's HWE use cases.
     const double epsilon = k2m60 * u31tod(ffac_ct);
     if (lnprob_diff > epsilon) {
       *cmp_resultp = 1;

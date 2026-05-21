@@ -35,7 +35,7 @@ namespace plink2 {
 
 // Support for computations requiring more precision than double/int64.
 
-// Portable "double-double" operations supporting high-accuracy log-likelihood
+// Portable "double-double" operations supporting high-accuracy log-probability
 // calculations, based on a small subset of the QD library
 // (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
