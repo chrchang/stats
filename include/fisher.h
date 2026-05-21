@@ -19,6 +19,33 @@
 #include "plink2_base.h"
 #include "plink2_highprec.h"
 
+// The main ideas behind these Fisher's Exact Test and hypergeometric-function
+// implementations are:
+// 1. It is expensive to evaluate the (log-)probability of a contingency table
+//    from scratch, but cheap to compute the likelihood-ratio between a pair of
+//    adjacent contingency tables.  Both Fisher's exact test and the
+//    {p,q}hyper() functions involve summing probabilities of many adjacent
+//    contingency tables; we express these sums as
+//      <probability of starting table> * <multiplier>
+//    and calculate the multiplier by repeatedly applying the likelihood-ratio
+//    formula.
+// 2. Log-probabilities drop off at a faster-than-quadratic rate as one moves
+//    away from the mode.  When relative errors around 2^{-53} (float64) or
+//    even 2^{-24} (float32) are acceptable, it's ok to ignore contingency
+//    tables with probabilities less than roughly that multiple of the starting
+//    contingency table's probability; for common large cases, we can ignore
+//    most tables.
+// 3. For 2x3 and larger Fisher's Exact Tests, we also take advantage of
+//    combinatorial identities involving sums of entire lines/planes/etc. of
+//    contingency table probabilities.
+// 4. With the help of the QD high-precision library, we can evaluate the
+//    log-probability of a single contingency table to better-than-float64
+//    precision, and accumulate partial sums with better-than-float64 precision
+//    when worthwhile.  This lets us achieve much higher accuracy *and* much
+//    higher speed than widely-used implementations at the same time!
+// (Implementations of the Mehta/Patel network algorithm get similar mileage
+// from ideas #1 and #3, but take less advantage of #2 and #4.)
+
 #ifdef __cplusplus
 namespace plink2 {
 #endif
