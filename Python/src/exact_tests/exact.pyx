@@ -33,7 +33,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, uint32_t logp) nogil
 
-    int64_t QbinomHalfUlp(dd_real_struct targetp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
+    int64_t QbinomHalfUlp(dd_real_struct targetp_or_lnp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -225,7 +225,8 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
     return flush_if_denormal(Pbinom(k, n, p_ddr, complement, logp))
 
 
-# Returns smallest nonnegative k for which cdf(k) >= targetP.
+# Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
+# is False, and cdf(k) >= exp(targetP) if logTarget is True.
 #
 # Implementation is *not* built on top of pbinom() in a way that e.g.
 # guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
@@ -240,14 +241,14 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     cdef dd_real_struct distp_ddr = DdrMake(succP)
     if not ddr_is_zero(distp_ddr) and (ddr_ltd(distp_ddr, 0.5**960) or not ddr_leqd(distp_ddr, 1.0)):
         raise RuntimeError("succP must be 0, or in [2^{-960}, 1].")
-    cdef dd_real_struct targetp_ddr = DdrMake(targetP)
+    cdef dd_real_struct targetp_or_lnp_ddr = DdrMake(targetP)
     if logTarget:
-        if not ddr_leqd(targetp_ddr, 0.0):
+        if not ddr_leqd(targetp_or_lnp_ddr, 0.0):
             raise RuntimeError("targetP must be <= 0 when logTarget is True.")
     else:
-        if ddr_ltd(targetp_ddr, 0.0) or not ddr_leqd(targetp_ddr, 1.0):
+        if ddr_ltd(targetp_or_lnp_ddr, 0.0) or not ddr_leqd(targetp_or_lnp_ddr, 1.0):
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    return QbinomHalfUlp(targetp_ddr, n, distp_ddr, logTarget)
+    return QbinomHalfUlp(targetp_or_lnp_ddr, n, distp_ddr, logTarget)
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length

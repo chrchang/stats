@@ -41,14 +41,14 @@ HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, uin
 
 double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint32_t logp);
 
-int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target);
+int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target);
 
-HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
-  if (!ddr_is_zero(targetp_ddr)) {
-    const double half_ulp = 0.5 * fabs(targetp_ddr.x[0] - prev_float64(targetp_ddr.x[0]));
-    targetp_ddr = ddr_subd(targetp_ddr, half_ulp);
+HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
+  if (!ddr_is_zero(targetp_or_lnp_ddr)) {
+    const double half_ulp = 0.5 * fabs(targetp_or_lnp_ddr.x[0] - prev_float64(targetp_or_lnp_ddr.x[0]));
+    targetp_or_lnp_ddr = ddr_subd(targetp_or_lnp_ddr, half_ulp);
   }
-  return Qbinom(targetp_ddr, n, succp_ddr, log_target);
+  return Qbinom(targetp_or_lnp_ddr, n, succp_ddr, log_target);
 }
 
 #ifdef __cplusplus

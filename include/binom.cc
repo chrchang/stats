@@ -1098,15 +1098,15 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     // Scale our starting likelihood so that we overflow to INFINITY when we'd
     // want to early-exit and return log(1) or 1; this saves us a comparison in
     // the loop.
-    const double startp = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
-    double lastp = startp;
-    double left_sum = startp;
+    const double start_lik = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
+    double lik = start_lik;
+    double left_sum = start_lik;
     while (1) {
       nmk += 1;
-      lastp *= k / (pdq * nmk);
+      lik *= k / (pdq * nmk);
       k -= 1;
       const double preadd = left_sum;
-      left_sum += lastp;
+      left_sum += lik;
       if (left_sum == preadd) {
         break;
       }
@@ -1114,28 +1114,24 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     if (left_sum == INFINITY) {
       return logp? 0 : 1;
     }
-    // startp is now potentially < 1, so this operation might throw away some
-    // range.
-    // left_sum /= startp;
-
     // Now compute the right-sum to the precision limit.
-    double right_sum = first_right_mult * startp;
+    double right_sum = first_right_mult * start_lik;
     k = obs_k + 1;
     nmk = n - obs_k - 1;
-    lastp = right_sum;
+    lik = right_sum;
     while (1) {
       k += 1;
-      lastp *= pdq * nmk / k;
+      lik *= pdq * nmk / k;
       nmk -= 1;
       const double preadd = right_sum;
-      right_sum += lastp;
+      right_sum += lik;
       if (right_sum == preadd) {
         break;
       }
     }
     // For one-sided test, slightly more convenient to exclude midp term from
     // left_sum and right_sum since it just cancels out in denom
-    const double midp_numer = -0.5 * midp * startp;
+    const double midp_numer = -0.5 * midp * start_lik;
     const double denom = right_sum + left_sum;
     if (!logp) {
       return (left_sum + midp_numer) / denom;
@@ -1158,28 +1154,28 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   const double nd = n;
   const double modal_k = nd * pdq / (1 + pdq);
   if (k + overflow_steps_lower_bound > modal_k) {
-    double lastp = 1;
+    double lik = 1;
     double right_sum = 0;
     while (1) {
       k += 1;
-      lastp *= pdq * nmk / k;
+      lik *= pdq * nmk / k;
       nmk -= 1;
       const double preadd = right_sum;
-      right_sum += lastp;
+      right_sum += lik;
       if (right_sum == preadd) {
         break;
       }
     }
     k = obs_k;
     nmk = n - obs_k;
-    lastp = 1;
+    lik = 1;
     double left_sum = 1;
     while (1) {
       nmk += 1;
-      lastp *= k / (pdq * nmk);
+      lik *= k / (pdq * nmk);
       k -= 1;
       const double preadd = left_sum;
-      left_sum += lastp;
+      left_sum += lik;
       if (left_sum == preadd) {
         break;
       }
@@ -1212,14 +1208,14 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
     return 0;
   }
-  double lastp = 1;
+  double lik = 1;
   double left_sum = 1 - 0.5 * midp;
   while (1) {
     nmk += 1;
-    lastp *= k / (pdq * nmk);
+    lik *= k / (pdq * nmk);
     k -= 1;
     const double preadd = left_sum;
-    left_sum += lastp;
+    left_sum += lik;
     if (left_sum == preadd) {
       break;
     }
@@ -1256,7 +1252,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
   double k = obs_k;
   double nmk = n - obs_k;
   if (k > nmk * pdq_ddr.x[0]) {
-    // We're at or to the right of the mode.  Don't have to worry bout cmf
+    // We're at or to the right of the mode.  Don't have to worry about cmf
     // values < DBL_MIN, so even for e.g. n > 2^51 our relative error is not
     // inflated by a need to work in log-space.
 
@@ -1267,10 +1263,10 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
     const double right_upper_bound = first_right_mult_ddr.x[0] / ddr_negate(ddr_subd(first_right_mult_ddr, 1.0)).x[0];
     // Function contract ensures right_upper_bound > 0.
 
-    // Scale our starting likelihood so that we overflow to INFINITY/nan when
-    // we'd want to early-exit and return 1; this saves us a comparison in the
-    // loop.
-    const double startp = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
+    // Scale our starting likelihood so that we overflow to INFINITY or nan
+    // when we'd want to early-exit and return 1; this saves us a comparison in
+    // the loop.
+    const double start_lik = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
     // We want to compute left_sum_ddr to at most 2^{-57} relative error, but
     // we also want to drop down from this slow dd_real-based loop to the much
     // faster float64-based loop as soon as we can prove that won't make us
@@ -1286,64 +1282,64 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
     //
     // 2^{-57} corresponds to at least 0.03125 ULPs.
     const double min_incr_left = 0.03125 / (k * k);
-    dd_real lastp_ddr = ddr_maked(startp);
-    dd_real left_sum_ddr = lastp_ddr;
+    dd_real lik_ddr = ddr_maked(start_lik);
+    dd_real left_sum_ddr = lik_ddr;
     do {
       nmk += 1;
-      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
       k -= 1;
-      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
+      left_sum_ddr = ddr_add(left_sum_ddr, lik_ddr);
       // This overflows to nan rather than INFINITY in my testing; I'll write
       // this to be agnostic to that detail.
-    } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+    } while (lik_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
     if (!(left_sum_ddr.x[0] < INFINITY)) {
       return logp? 0.0 : 1.0;
     }
     if (k > 0) {
       // Continue the calculation with ordinary precision.
-      const double pdq = pdq_ddr.x[0];
-      double lastp = lastp_ddr.x[0];
+      const double qdp = qdp_ddr.x[0];
+      double lik = lik_ddr.x[0];
       double left_tail_sum = 0.0;
       while (1) {
         nmk += 1;
-        lastp *= k / (pdq * nmk);
+        lik *= qdp * k / nmk;
         k -= 1;
         const double preadd = left_tail_sum;
-        left_tail_sum += lastp;
+        left_tail_sum += lik;
         if (left_tail_sum == preadd) {
           break;
         }
       }
       left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
-      if (left_sum_ddr.x[0] == INFINITY) {
+      if (!(left_sum_ddr.x[0] < INFINITY)) {
         return logp? 0.0 : 1.0;
       }
     }
 
     // Now compute the right-sum to at most 2^{-57} relative error.
-    dd_real right_sum_ddr = ddr_muld(first_right_mult_ddr, startp);
+    dd_real right_sum_ddr = ddr_muld(first_right_mult_ddr, start_lik);
     k = obs_k + 1;
     nmk = n - obs_k - 1;
-    lastp_ddr = right_sum_ddr;
+    lik_ddr = right_sum_ddr;
     if (nmk > 0) {
       const double min_incr_right = 0.03125 / (nmk * nmk);
       do {
         k += 1;
-        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+        lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
         nmk -= 1;
-        right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
-      } while (lastp_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
+        right_sum_ddr = ddr_add(right_sum_ddr, lik_ddr);
+      } while (lik_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
       if (nmk > 0) {
         // Continue the calculation with ordinary precision.
         const double pdq = pdq_ddr.x[0];
-        double lastp = lastp_ddr.x[0];
+        double lik = lik_ddr.x[0];
         double right_tail_sum = 0.0;
         while (1) {
           k += 1;
-          lastp *= pdq * nmk / k;
+          lik *= pdq * nmk / k;
           nmk -= 1;
           const double preadd = right_tail_sum;
-          right_tail_sum += lastp;
+          right_tail_sum += lik;
           if (right_tail_sum == preadd) {
             break;
           }
@@ -1379,26 +1375,26 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
   const double modal_k = nd * p_ddr.x[0];
   if (k + overflow_steps_lower_bound > modal_k) {
     // (ok, this duplicated code belongs in its own function...)
-    dd_real lastp_ddr = ddr_maked(1.0);
+    dd_real lik_ddr = ddr_maked(1.0);
     dd_real right_sum_ddr = ddr_maked(0.0);
     if (nmk > 0) {
       const double min_incr_right = 0.03125 / (nmk * nmk);
       do {
         k += 1;
-        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+        lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
         nmk -= 1;
-        right_sum_ddr = ddr_add(right_sum_ddr, lastp_ddr);
-      } while (lastp_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
+        right_sum_ddr = ddr_add(right_sum_ddr, lik_ddr);
+      } while (lik_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
       if (nmk > 0) {
         const double pdq = pdq_ddr.x[0];
-        double lastp = lastp_ddr.x[0];
+        double lik = lik_ddr.x[0];
         double right_tail_sum = 0.0;
         while (1) {
           k += 1;
-          lastp *= pdq * nmk / k;
+          lik *= pdq * nmk / k;
           nmk -= 1;
           const double preadd = right_tail_sum;
-          right_tail_sum += lastp;
+          right_tail_sum += lik;
           if (right_tail_sum == preadd) {
             break;
           }
@@ -1408,26 +1404,26 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
     }
     k = obs_k;
     nmk = n - obs_k;
-    lastp_ddr = ddr_maked(1.0);
-    dd_real left_sum_ddr = lastp_ddr;
+    lik_ddr = ddr_maked(1.0);
+    dd_real left_sum_ddr = lik_ddr;
     if (k > 0) {
       const double min_incr_left = 0.03125 / (k * k);
       do {
         nmk += 1;
-        lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+        lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
         k -= 1;
-        left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
-      } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+        left_sum_ddr = ddr_add(left_sum_ddr, lik_ddr);
+      } while (lik_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
       if (k > 0) {
         const double pdq = pdq_ddr.x[0];
-        double lastp = lastp_ddr.x[0];
+        double lik = lik_ddr.x[0];
         double left_tail_sum = 0.0;
         while (1) {
           nmk += 1;
-          lastp *= k / (pdq * nmk);
+          lik *= k / (pdq * nmk);
           k -= 1;
           const double preadd = left_tail_sum;
-          left_tail_sum += lastp;
+          left_tail_sum += lik;
           if (left_tail_sum == preadd) {
             break;
           }
@@ -1442,27 +1438,27 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
     return ddr_log(prob_ddr).x[0];
   }
   dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr);
-  dd_real lastp_ddr = ddr_maked(1.0);
-  dd_real left_sum_ddr = lastp_ddr;
+  dd_real lik_ddr = ddr_maked(1.0);
+  dd_real left_sum_ddr = lik_ddr;
   if (k > 0) {
     const double min_incr_left = 0.03125 / (k * k);
     do {
       nmk += 1;
-      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
       k -= 1;
-      left_sum_ddr = ddr_add(left_sum_ddr, lastp_ddr);
-    } while (lastp_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
+      left_sum_ddr = ddr_add(left_sum_ddr, lik_ddr);
+    } while (lik_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
     if (k > 0) {
       // Continue the calculation with ordinary precision.
-      const double pdq = pdq_ddr.x[0];
-      double lastp = lastp_ddr.x[0];
+      const double qdp = qdp_ddr.x[0];
+      double lik = lik_ddr.x[0];
       double left_tail_sum = 0.0;
       while (1) {
         nmk += 1;
-        lastp *= k / (pdq * nmk);
+        lik *= qdp * k / nmk;
         k -= 1;
         const double preadd = left_tail_sum;
-        left_tail_sum += lastp;
+        left_tail_sum += lik;
         if (left_tail_sum == preadd) {
           break;
         }
@@ -1486,28 +1482,29 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
 //   qbinom(fractions.Fraction(2**53, (2**53 - 1) * 9), 2, fractions.Fraction(2, 3))
 // can be trusted to be 1.
 // The QbinomHalfUlp() entry point subtracts the natural epsilon value (0.5
-// times the value of the least significant bit in targetp_ddr.x[0]) off of
-// targetp_ddr, for the goal described above, before calling Qbinom().
+// times the value of the least significant bit in targetp_or_lnp_ddr.x[0]) off
+// of targetp_or_lnp_ddr, for the goal described above, before calling
+// Qbinom().
 //
 // Probable todo: (except possibly on some very large cases) start with faster
 // lower-accuracy interval-math calculation, and fall back on reliable
 // high-accuracy calculation only when needed.
-int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
-  if (ddr_is_zero(targetp_ddr) || ddr_is_zero(succp_ddr) || (n == 0)) {
+int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
+  if (ddr_is_zero(targetp_or_lnp_ddr) || ddr_is_zero(succp_ddr) || (n == 0)) {
     return 0;
   }
-  if (ddr_is_one(succp_ddr) || ddr_is_one(targetp_ddr)) {
+  if (ddr_is_one(succp_ddr) || ddr_is_one(targetp_or_lnp_ddr)) {
     return n;
   }
   // If targetp > 0.5, invert.
-  const uint32_t inv = ((!log_target) && (targetp_ddr.x[0] > 0.5)) || (log_target && (targetp_ddr.x[0] > -_ddr_log2.x[0]));
+  const uint32_t inv = ((!log_target) && (targetp_or_lnp_ddr.x[0] > 0.5)) || (log_target && (targetp_or_lnp_ddr.x[0] > -_ddr_log2.x[0]));
   dd_real failp_ddr = ddr_negate(ddr_subd(succp_ddr, 1.0));
   if (inv) {
     swap_ddr(&succp_ddr, &failp_ddr);
     if (!log_target) {
-      targetp_ddr = ddr_negate(ddr_subd(targetp_ddr, 1.0));
+      targetp_or_lnp_ddr = ddr_negate(ddr_subd(targetp_or_lnp_ddr, 1.0));
     } else {
-      targetp_ddr = ddr_negate(ddr_expm1(targetp_ddr));
+      targetp_or_lnp_ddr = ddr_negate(ddr_expm1(targetp_or_lnp_ddr));
       log_target = 0;
     }
   }
@@ -1515,7 +1512,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   // straightforward to handle directly.
   if (n == 1) {
     // cdf(0) = failp.
-    int64_t k = ddr_lt(failp_ddr, targetp_ddr);
+    const int64_t k = ddr_lt(failp_ddr, targetp_or_lnp_ddr);
     return inv? (1 - k) : k;
   }
   // We make an initial guess, use Newton's method to refine it (in the same
@@ -1525,7 +1522,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   // avoids repetition of the tail-probability calculation.
   //
   // Initial guess is based on fitting a quadratic to three points of the
-  // log-likelihood function near the mode.  Log-likelihood is
+  // log-probability function near the mode.  Log-likelihood is
   //   log(p^k (1-p)^{n-k} n! / (k! (n-k)!))
   //   = k log(p) + (n-k) log(1-p) + log(n!) - log(k!) - log((n-k)!)
   //   = <constant> + k(log(p)-log(1-p)) - log(gamma(k+1)) - log(gamma(n+1-k))
@@ -1547,15 +1544,15 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   const dd_real logq_ddr = ddr_log(failp_ddr);
   // This is usually overkill, but if n is huge we need to compute these to
   // high precision to make a decent initial guess.
-  const dd_real mode_lnlike_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
+  const dd_real mode_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
                                           ddr_add_lfacts(mode, n - mode));
-  const dd_real modem1_lnlike_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
-  const dd_real modep1_lnlike_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
+  const dd_real modem1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
+  const dd_real modep1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
 
-  const double x2_coeff = 0.5 * ddr_add(modem1_lnlike_incr_ddr, modep1_lnlike_incr_ddr).x[0];
-  const double x1_coeff = 0.5 * ddr_sub(modep1_lnlike_incr_ddr, modem1_lnlike_incr_ddr).x[0];
-  // mode^2 * x2_coeff + mode * x1_coeff + x0_coeff = mode_lnlike_ddr
-  const double x0_coeff = ddr_subd(mode_lnlike_ddr, mode * prefer_fma(mode, x2_coeff, x1_coeff)).x[0];
+  const double x2_coeff = 0.5 * ddr_add(modem1_lnprob_incr_ddr, modep1_lnprob_incr_ddr).x[0];
+  const double x1_coeff = 0.5 * ddr_sub(modep1_lnprob_incr_ddr, modem1_lnprob_incr_ddr).x[0];
+  // mode^2 * x2_coeff + mode * x1_coeff + x0_coeff = mode_lnprob_ddr
+  const double x0_coeff = ddr_subd(mode_lnprob_ddr, mode * prefer_fma(mode, x2_coeff, x1_coeff)).x[0];
 
   // 1. Identify k<mode such that
   //      pmf(k) * (k+1) < targetp
@@ -1566,8 +1563,7 @@ int64_t Qbinom(dd_real targetp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_t
   //    k=0, in which case we can immediately return 0.)  Use float64 instead
   //    of dd_real precision when we can get away with it.
   // 4. Sum inward until the sum >= targetp, at which point we return k.
-  //    Again, use float64 precision as far as we can.
-  const dd_real target_lnp_ddr = log_target? targetp_ddr : ddr_log(targetp_ddr);
+  const dd_real target_lnp_ddr = log_target? targetp_or_lnp_ddr : ddr_log(targetp_or_lnp_ddr);
   // Find the x on the left side where the quadratic crosses
   // y=log(targetp/mode).  If there's no such point, just start at
   // x=mode-1.
