@@ -1567,8 +1567,6 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   // Find the x on the left side where the quadratic crosses
   // y=log(targetp/mode).  If there's no such point, just start at
   // x=mode-1.
-  // (Could recalculate target_lnprob with mode replaced with k when
-  // log(pmf(k)) is too high.)
   const double target_lnprob = target_lnp_ddr.x[0] - log(mode);
   // (-b - sqrt(b^2 - 4ac)) / 2a
   const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob);
@@ -1615,6 +1613,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
       if (k == 0) {
         break;
       }
+      // This calculation can be lower-precision.
       const double ll_deriv = log(pdq_ddr.x[0] * (nmk + 1) / k);
       k -= ceil(lnprob_diff / ll_deriv);
       if (k < 0) {
@@ -1629,44 +1628,44 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   }
   // Express current likelihood as a fraction of targetp.
   const double tailstart_k = k;
-  const dd_real tailstart_p_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
-  dd_real lastp_ddr = tailstart_p_ddr;
-  dd_real tailsum_ddr = tailstart_p_ddr;
+  const dd_real tailstart_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
+  dd_real lik_ddr = tailstart_lik_ddr;
+  dd_real tailsum_ddr = tailstart_lik_ddr;
   if (k > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
     const double min_incr_left = 0.125 / (k * k);
     do {
       nmk += 1;
-      lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
       k -= 1;
-      tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
-    } while (lastp_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
+      tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+    } while (lik_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
     if (k > 0) {
       const double qdp = qdp_ddr.x[0];
-      double lastp = lastp_ddr.x[0];
+      double lik = lik_ddr.x[0];
       double tailsum = 0.0;
       while (1) {
         nmk += 1;
-        lastp *= qdp * k / nmk;
+        lik *= qdp * k / nmk;
         k -= 1;
         const double preadd = tailsum;
-        tailsum += lastp;
+        tailsum += lik;
         if (tailsum == preadd) {
           break;
         }
       }
       tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
     }
-    lastp_ddr = tailstart_p_ddr;
+    lik_ddr = tailstart_lik_ddr;
     k = tailstart_k;
     nmk = n - k;
   }
   while (ddr_ltd(tailsum_ddr, 1.0)) {
     k += 1;
-    lastp_ddr = ddr_mul(lastp_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+    lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
     nmk -= 1;
-    tailsum_ddr = ddr_add(tailsum_ddr, lastp_ddr);
+    tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
   }
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }
