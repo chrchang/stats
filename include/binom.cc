@@ -578,15 +578,15 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     }
   }
   double lik = 1;
-  double tail_lik = 1 - midp * 0.5;
+  double tail_sum = 1 - midp * 0.5;
   // Iterate outward to floating-point precision limit.
   while (1) {
     fail += 1;
     lik *= succ / (succ_odds_ratio * fail);
     succ -= 1;
-    const double preadd = tail_lik;
-    tail_lik += lik;
-    if (tail_lik == preadd) {
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
       break;
     }
   }
@@ -594,10 +594,10 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   // underflow/overflow isn't an issue, use the original algorithm: sum all
   // center relative-likelihoods, sum far-tail relative-likelihoods to
   // floating-point precision limit, return
-  //   log(tail_lik / (tail_lik + center_lik))
+  //   log(tail_sum / (tail_sum + center_sum))
   //
   // Unfortunately, an extremal rate (e.g. (2^63 - 2)/(2^63 - 1), the maximum
-  // possible permitted value) makes center_lik overflow possible much closer
+  // possible permitted value) makes center_sum overflow possible much closer
   // to the mode than is the case for the Fisher/HWE exact tests; 17 steps
   // could be enough.  So instead of checking whether we're a constant number
   // of steps from the mode, we compute a lower bound on the number of
@@ -622,7 +622,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
     double one_plus_scaled_eps = 1 + k2m52;
-    double center_lik = midp * 0.5;
+    double center_sum = midp * 0.5;
     lik = 1;
     while (1) {
       succ += 1;
@@ -633,7 +633,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
       one_plus_scaled_eps += 2 * k2m52;
       if (lik < one_plus_scaled_eps) {
         if (lik <= 2 - one_plus_scaled_eps) {
-          tail_lik += lik;
+          tail_sum += lik;
           break;
         }
         // Near-tie.  True value of lik can be greater than, equal to, or
@@ -644,28 +644,28 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
         }
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
-          tail_lik += lik;
+          tail_sum += lik;
           if (midp && (cmp_result == 0)) {
-            tail_lik -= 0.5;
-            center_lik += 0.5;
+            tail_sum -= 0.5;
+            center_sum += 0.5;
           }
           break;
         }
       }
-      center_lik += lik;
+      center_sum += lik;
     }
     // Continue down tail to floating-point precision limit.
     while (1) {
       succ += 1;
       lik *= succ_odds_ratio * fail / succ;
       fail -= 1;
-      const double preadd = tail_lik;
-      tail_lik += lik;
-      if (tail_lik == preadd) {
+      const double preadd = tail_sum;
+      tail_sum += lik;
+      if (tail_sum == preadd) {
         break;
       }
     }
-    const double pval = tail_lik / (tail_lik + center_lik);
+    const double pval = tail_sum / (tail_sum + center_sum);
     *resultp = logp? log(pval) : pval;
     return 0;
   }
@@ -722,7 +722,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
   if (ddr_geqd(succ_odds_ratio_ddr, obs_totd)) {
-    *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
+    *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
     return 0;
   }
 
@@ -748,7 +748,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprobv_diff >= k2m53) {
       if (fail == 0) {
-        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
+        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
         return 0;
       }
       const double ll_deriv = ln_odds_ratio_ddr.x[0] + log(fail / (succ + 1));
@@ -777,7 +777,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   const double tailstart_lik = lik;
   const double tailstart_succ = succ;
   while (lik <= one_minus_scaled_eps) {
-    tail_lik += lik;
+    tail_sum += lik;
     fail += 1;
     lik *= succ / (succ_odds_ratio * fail);
     succ -= 1;
@@ -789,9 +789,9 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
       return 1;
     }
     if (cmp_result <= 0) {
-      tail_lik += lik;
+      tail_sum += lik;
       if (midp && (cmp_result == 0)) {
-        tail_lik -= 0.5;
+        tail_sum -= 0.5;
       }
     }
   }
@@ -802,14 +802,14 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   while (1) {
     succ += 1;
     lik *= succ_odds_ratio * fail / succ;
-    const double preadd = tail_lik;
-    tail_lik += lik;
-    if (tail_lik == preadd) {
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
       break;
     }
     fail -= 1;
   }
-  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_lik, logp);
+  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
   return 0;
 }
 

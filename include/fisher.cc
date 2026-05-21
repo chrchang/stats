@@ -39,13 +39,13 @@ dd_real fisher22_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t
 }
 
 // *cmp_resultp is set to positive value if m22 = obs_m22 + m22_incr has higher
-// likelihood than m22 = obs_m22, 0 if identical likelihood, and negative value
-// if lower likelihood.
+// probability than m22 = obs_m22, 0 if identical probability, and negative
+// value if lower probability.
 // Error is returned iff malloc fails.
 // If neg_numer_ddr has not been computed yet, set its x[0] to DBL_MAX; it will
 // be filled in if necessary.
 BoolErr Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m22_incr, dd_real* neg_numer_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
-  // Fisher 2x2 likelihood is
+  // Fisher 2x2 probability is
   //
   //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
   //   -------------------------------------------
@@ -125,24 +125,25 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
   double m12 = obs_m12;
   double m21 = obs_m21;
   double m22 = obs_m22;
-  double lastp = 1;
-  double tailp = 1 - 0.5 * midp;
+  double lik = 1;
+  double tail_sum = 1 - 0.5 * midp;
   while (1) {
     m12 += 1;
     m21 += 1;
-    lastp *= (m11 * m22) / (m12 * m21);
+    lik *= (m11 * m22) / (m12 * m21);
     m11 -= 1;
     m22 -= 1;
-    const double preaddp = tailp;
-    tailp += lastp;
-    if (tailp == preaddp) {
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
       break;
     }
   }
   // In the common case, where we're close enough to the mode that float64
   // underflow/overflow isn't an issue, use the original algorithm: sum all
   // center relative-likelihoods, sum far-tail relative-likelihoods to
-  // floating-point precision limit, return log(tailp / (tailp + centerp)).
+  // floating-point precision limit, return
+  //   log(tail_sum / (tail_sum + center_sum))
   //
   // As with HweLnP(), we note that if we're within 172 steps of the mode and
   // the starting relative-likelihood is normalized to 1, the modal
@@ -151,62 +152,62 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
   // which leaves enough headroom to accumulate the rest of the center-sum and
   // represent intermediate values without overflowing.
   if ((obs_m11 + 172LL) * (obs_m22 + 172LL) >= (obs_m12 - 172LL) * (obs_m21 - 172LL)) {
-    lastp = 1;
+    lik = 1;
     m11 = obs_m11;
     m12 = obs_m12;
     m21 = obs_m21;
     m22 = obs_m22;
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-    double centerp = 0.5 * midp;
+    double center_sum = 0.5 * midp;
     while (1) {
       m11 += 1;
       m22 += 1;
-      lastp *= (m12 * m21) / (m11 * m22);
+      lik *= (m12 * m21) / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
       // Number of center contingency tables is maximized with obs_m22 = 0,
       // modal_m22 = 172, other values large.
       // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited to
-      // ~53000 tables.  Each lastp update involves 4 operations which can each
+      // ~53000 tables.  Each lik update involves 4 operations which can each
       // introduce up to 0.5 ULP relative error under the default rounding
       // mode.
-      if (lastp < 1 + 53000 * 2 * k2m52) {
-        if (lastp <= 1 - 53000 * 2 * k2m52) {
-          tailp += lastp;
+      if (lik < 1 + 53000 * 2 * k2m52) {
+        if (lik <= 1 - 53000 * 2 * k2m52) {
+          tail_sum += lik;
           break;
         }
-        // Near-tie.  True value of lastp can be greater than, equal to, or
+        // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
         const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
         intptr_t cmp_result;
-        if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &cmp_result, &lastp))) {
+        if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
           return 1;
         }
         if (cmp_result <= 0) {
-          tailp += lastp;
+          tail_sum += lik;
           if (midp && (cmp_result == 0)) {
-            tailp -= 0.5;
-            centerp += 0.5;
+            tail_sum -= 0.5;
+            center_sum += 0.5;
           }
           break;
         }
       }
-      centerp += lastp;
+      center_sum += lik;
     }
     // Continue down tail to floating-point precision limit.
     while (1) {
       m11 += 1;
       m22 += 1;
-      lastp *= (m12 * m21) / (m11 * m22);
+      lik *= (m12 * m21) / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      const double preaddp = tailp;
-      tailp += lastp;
-      if (tailp == preaddp) {
+      const double preadd = tail_sum;
+      tail_sum += lik;
+      if (tail_sum == preadd) {
         break;
       }
     }
-    const double pval = tailp / (tailp + centerp);
+    const double pval = tail_sum / (tail_sum + center_sum);
     *resultp = logp? log(pval) : pval;
     return 0;
   }
@@ -276,91 +277,91 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
     m22 = m2x - m21;
     const dd_real lnprobv_ddr =
       ddr_negate(ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
-    const double lnprob_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
+    const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     // Could tighten this threshold further; I haven't performed a careful
     // error analysis yet but CompareFactorialProducts() includes a plausible
     // assumption that 2^{-60} is safe.  But code is correct as long as we're
-    // guaranteed to enter the "lastp < 2 - one_minus_scaled_eps" branch for
-    // positive lnprob_diff.
-    if (lnprob_diff >= k2m53) {
+    // guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch for
+    // positive lnprobv_diff.
+    if (lnprobv_diff >= k2m53) {
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
+        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
         return 0;
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
       // Round up, to guarantee that we make progress.
-      // (lnprob_diff is positive and ll_deriv is negative.)
+      // (lnprobv_diff is positive and ll_deriv is negative.)
       // This may overshoot.  But the function is guaranteed to terminate
       // because we never overshoot (and we do always make progress on each
       // step) once we're on the other side.
-      m21 -= ceil(-lnprob_diff / ll_deriv);
+      m21 -= ceil(-lnprobv_diff / ll_deriv);
       if (m21 < 0) {
         m21 = 0;
       }
-    } else if (lnprob_diff > -62 * kLn2) {
-      lastp = exp(lnprob_diff);
+    } else if (lnprobv_diff > -62 * kLn2) {
+      lik = exp(lnprobv_diff);
       break;
     } else {
       const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
       // Round down, to guarantee we don't overshoot.
-      // We're guaranteed to make progress, since lnprob_diff <= -62 * log(2),
+      // We're guaranteed to make progress, since lnprobv_diff <= -62 * log(2),
       // m11 * m22 < 2^62, and (m12 + 1) * (m21 + 1) >= 1.
-      m21 += S_CAST(int64_t, lnprob_diff / ll_deriv);
+      m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
     }
   }
-  // Sum toward center, until lastp >= 1.
-  // lastp should be accurate to 3 ULP as we enter this loop (max 1.5 ULP
-  // observed error from exp, tiny bit over 0.5 from lnprob_diff), so near-tie
+  // Sum toward center, until lik >= 1.
+  // lik should be accurate to 3 ULP as we enter this loop (max 1.5 ULP
+  // observed error from exp, tiny bit over 0.5 from lnprobv_diff), so near-tie
   // detection can use a tight epsilon here.
   double one_minus_scaled_eps = 1 - 3 * k2m52;
-  const double lastp_tail = lastp;
-  const double m11_tail = m11;
-  const double m12_tail = m12;
-  const double m21_tail = m21;
-  const double m22_tail = m22;
-  while (lastp <= one_minus_scaled_eps) {
-    tailp += lastp;
+  const double tailstart_lik = lik;
+  const double tailstart_m11 = m11;
+  const double tailstart_m12 = m12;
+  const double tailstart_m21 = m21;
+  const double tailstart_m22 = m22;
+  while (lik <= one_minus_scaled_eps) {
+    tail_sum += lik;
     m12 += 1;
     m21 += 1;
-    lastp *= m11 * m22 / (m12 * m21);
+    lik *= m11 * m22 / (m12 * m21);
     m11 -= 1;
     m22 -= 1;
     one_minus_scaled_eps -= 2 * k2m52;
   }
-  if (lastp < 2 - one_minus_scaled_eps) {
+  if (lik < 2 - one_minus_scaled_eps) {
     const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
     intptr_t cmp_result;
-    if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &cmp_result, &lastp))) {
+    if (unlikely(Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
       return 1;
     }
     if (cmp_result <= 0) {
-      tailp += lastp;
+      tail_sum += lik;
       if (midp && (cmp_result == 0)) {
-        tailp -= 0.5;
+        tail_sum -= 0.5;
       }
     }
   }
   // Sum away from center, until sums stop changing.
-  lastp = lastp_tail;
-  m11 = m11_tail;
-  m12 = m12_tail;
-  m21 = m21_tail;
-  m22 = m22_tail;
+  lik = tailstart_lik;
+  m11 = tailstart_m11;
+  m12 = tailstart_m12;
+  m21 = tailstart_m21;
+  m22 = tailstart_m22;
   while (1) {
     m11 += 1;
     m22 += 1;
-    lastp *= m12 * m21 / (m11 * m22);
-    const double preaddp = tailp;
-    tailp += lastp;
-    if (tailp == preaddp) {
+    lik *= m12 * m21 / (m11 * m22);
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
       break;
     }
     m12 -= 1;
     m21 -= 1;
   }
-  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tailp, logp);
+  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
   return 0;
 }
 
@@ -419,9 +420,9 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
       lastp *= m11 * m22 / (m12 * m21);
       m11 -= 1;
       m22 -= 1;
-      const double preaddp = left_sum;
+      const double preadd = left_sum;
       left_sum += lastp;
-      if (left_sum == preaddp) {
+      if (left_sum == preadd) {
         break;
       }
     }
@@ -442,9 +443,9 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
       lastp *= m12 * m21 / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      const double preaddp = right_sum;
+      const double preadd = right_sum;
       right_sum += lastp;
-      if (right_sum == preaddp) {
+      if (right_sum == preadd) {
         break;
       }
     }
@@ -480,9 +481,9 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
       lastp *= m12 * m21 / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      const double preaddp = right_sum;
+      const double preadd = right_sum;
       right_sum += lastp;
-      if (right_sum == preaddp) {
+      if (right_sum == preadd) {
         break;
       }
     }
@@ -498,9 +499,9 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
       lastp *= m11 * m22 / (m12 * m21);
       m11 -= 1;
       m22 -= 1;
-      const double preaddp = left_sum;
+      const double preadd = left_sum;
       left_sum += lastp;
-      if (left_sum == preaddp) {
+      if (left_sum == preadd) {
         break;
       }
     }
@@ -529,9 +530,9 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     lastp *= m11 * m22 / (m12 * m21);
     m11 -= 1;
     m22 -= 1;
-    const double preaddp = left_sum;
+    const double preadd = left_sum;
     left_sum += lastp;
-    if (left_sum == preaddp) {
+    if (left_sum == preadd) {
       break;
     }
   }
@@ -593,9 +594,9 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
         lastp *= m11 * m22 / (m12 * m21);
         m11 -= 1;
         m22 -= 1;
-        const double preaddp = left_tail_sum;
+        const double preadd = left_tail_sum;
         left_tail_sum += lastp;
-        if (left_tail_sum == preaddp) {
+        if (left_tail_sum == preadd) {
           break;
         }
       }
@@ -632,9 +633,9 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
           lastp *= m12 * m21 / (m11 * m22);
           m12 -= 1;
           m21 -= 1;
-          const double preaddp = right_tail_sum;
+          const double preadd = right_tail_sum;
           right_tail_sum += lastp;
-          if (right_tail_sum == preaddp) {
+          if (right_tail_sum == preadd) {
             break;
           }
         }
@@ -690,9 +691,9 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
           lastp *= m12 * m21 / (m11 * m22);
           m12 -= 1;
           m21 -= 1;
-          const double preaddp = right_tail_sum;
+          const double preadd = right_tail_sum;
           right_tail_sum += lastp;
-          if (right_tail_sum == preaddp) {
+          if (right_tail_sum == preadd) {
             break;
           }
         }
@@ -724,9 +725,9 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
           lastp *= m11 * m22 / (m12 * m21);
           m11 -= 1;
           m22 -= 1;
-          const double preaddp = left_tail_sum;
+          const double preadd = left_tail_sum;
           left_tail_sum += lastp;
-          if (left_tail_sum == preaddp) {
+          if (left_tail_sum == preadd) {
             break;
           }
         }
@@ -761,9 +762,9 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
         lastp *= m11 * m22 / (m12 * m21);
         m11 -= 1;
         m22 -= 1;
-        const double preaddp = left_tail_sum;
+        const double preadd = left_tail_sum;
         left_tail_sum += lastp;
-        if (left_tail_sum == preaddp) {
+        if (left_tail_sum == preadd) {
           break;
         }
       }
@@ -994,9 +995,9 @@ int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp)
         lastp *= m11 * m22 / (m12 * m21);
         m11 -= 1;
         m22 -= 1;
-        const double preaddp = tailsum;
+        const double preadd = tailsum;
         tailsum += lastp;
-        if (tailsum == preaddp) {
+        if (tailsum == preadd) {
           break;
         }
       }
@@ -1070,9 +1071,9 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
       lastp *= m12 * m21 / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      const double preaddp = tailp;
+      const double preadd = tailp;
       tailp += lastp;
-      if (tailp == preaddp) {
+      if (tailp == preadd) {
         break;
       }
     }
@@ -1227,9 +1228,9 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
       m12 += 1;
       m21 += 1;
       lastp *= m11 * m22 / (m12 * m21);
-      const double preaddp = tailp;
+      const double preadd = tailp;
       tailp += lastp;
-      if (tailp == preaddp) {
+      if (tailp == preadd) {
         break;
       }
       m11 -= 1;
@@ -1250,9 +1251,9 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
     lastp *= m11 * m22 / (m12 * m21);
     m11 -= 1;
     m22 -= 1;
-    const double preaddp = tailp;
+    const double preadd = tailp;
     tailp += lastp;
-    if (tailp == preaddp) {
+    if (tailp == preadd) {
       break;
     }
   }
@@ -1396,9 +1397,9 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
     m11 += 1;
     m22 += 1;
     lastp *= m12 * m21 / (m11 * m22);
-    const double preaddp = tailp;
+    const double preadd = tailp;
     tailp += lastp;
-    if (tailp == preaddp) {
+    if (tailp == preadd) {
       break;
     }
     m12 -= 1;
@@ -1628,9 +1629,9 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
     lastp *= m11 * m22 / (m12 * m21);
     m11 -= 1;
     m22 -= 1;
-    const double preaddp = total;
+    const double preadd = total;
     total += lastp;
-    if (total == preaddp) {
+    if (total == preadd) {
       break;
     }
   }
@@ -1826,9 +1827,9 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
         double rank_prob = exp(ddr_sub(rank_relative_lnprobf_ddr, rank_adj_ddr).x[0]);
         if (m13_decreasing) {
           while (1) {
-            const double preaddp = tailp;
+            const double preadd = tailp;
             tailp += rank_prob;
-            if (tailp == preaddp) {
+            if (tailp == preadd) {
               break;
             }
             m11_12 += 1;
@@ -1839,9 +1840,9 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
           }
         } else {
           while (1) {
-            const double preaddp = tailp;
+            const double preadd = tailp;
             tailp += rank_prob;
-            if (tailp == preaddp) {
+            if (tailp == preadd) {
               break;
             }
             m13 += 1;
