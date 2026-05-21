@@ -165,6 +165,12 @@ HEADER_CINLINE dd_real ddr_make(const double a, const double b) {
   return retval;
 }
 
+HEADER_INLINE dd_real ddr_add2d(double a, double b) {
+  double s2;
+  double s1 = qd_two_sum(a, b, &s2);
+  return ddr_make(s1, s2);
+}
+
 HEADER_INLINE dd_real ddr_addd(const dd_real a, double b) {
   double s1, s2;
   s1 = qd_two_sum(a.x[0], b, &s2);

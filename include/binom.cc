@@ -903,10 +903,10 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   // prefix always 1
   // aa and bb always large
   double cc = aa + bb;
-  const dd_real gh_ddr = {{kLanczosDoubleG - 0.5, 0.0}};
-  const dd_real agh_ddr = ddr_addd(gh_ddr, aa);
-  const dd_real bgh_ddr = ddr_addd(gh_ddr, bb);
-  const dd_real cgh_ddr = ddr_addd(gh_ddr, cc);
+  const double gh = kLanczosDoubleG - 0.5;
+  const dd_real agh_ddr = ddr_add2d(gh, aa);
+  const dd_real bgh_ddr = ddr_add2d(gh, bb);
+  const dd_real cgh_ddr = ddr_add2d(gh, cc);
 
   double numer_a;
   const double denom_a = lanczos_sum_d_expg_scaled_imp(aa, &numer_a);
@@ -923,8 +923,8 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
   // exceed that of ln(nonlog).
   // This removes the need for special cases.
-  const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh_ddr.x[0]))), agh_ddr);
-  const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh_ddr.x[0])), bgh_ddr);
+  const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh))), agh_ddr);
+  const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh)), bgh_ddr);
   return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
                  ddr_muld(ddr_log1p(l2_ddr), bb));
 }
