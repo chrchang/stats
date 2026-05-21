@@ -39,14 +39,14 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
 
 double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp);
 
-int64_t Qhyper(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp);
+int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp);
 
-HEADER_INLINE int64_t QhyperHalfUlp(dd_real p_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) {
-  if (!ddr_is_zero(p_ddr)) {
-    const double half_ulp = 0.5 * fabs(p_ddr.x[0] - prev_float64(p_ddr.x[0]));
-    p_ddr = ddr_subd(p_ddr, half_ulp);
+HEADER_INLINE int64_t QhyperHalfUlp(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) {
+  if (!ddr_is_zero(p_or_lnp_ddr)) {
+    const double half_ulp = 0.5 * fabs(p_or_lnp_ddr.x[0] - prev_float64(p_or_lnp_ddr.x[0]));
+    p_or_lnp_ddr = ddr_subd(p_or_lnp_ddr, half_ulp);
   }
-  return Qhyper(p_ddr, ac, bd, ab, logp);
+  return Qhyper(p_or_lnp_ddr, ac, bd, ab, logp);
 }
 
 BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp);
