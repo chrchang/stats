@@ -316,11 +316,14 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
   // observed error from exp, tiny bit over 0.5 from lnprobv_diff), so near-tie
   // detection can use a tight epsilon here.
   double one_minus_scaled_eps = 1 - 3 * k2m52;
-  const double tailstart_lik = lik;
-  const double tailstart_m11 = m11;
-  const double tailstart_m12 = m12;
-  const double tailstart_m21 = m21;
-  const double tailstart_m22 = m22;
+  // Save where we're starting on this tail, which isn't necessarily on the
+  // boundary.  We sum inward until relative-likelihood > 1, then we jump back
+  // to tailenter_{m11,m12,m21,m22} and sum outward.
+  const double tailenter_lik = lik;
+  const double tailenter_m11 = m11;
+  const double tailenter_m12 = m12;
+  const double tailenter_m21 = m21;
+  const double tailenter_m22 = m22;
   while (lik <= one_minus_scaled_eps) {
     tail_sum += lik;
     m12 += 1;
@@ -344,11 +347,11 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
     }
   }
   // Sum away from center, until sums stop changing.
-  lik = tailstart_lik;
-  m11 = tailstart_m11;
-  m12 = tailstart_m12;
-  m21 = tailstart_m21;
-  m22 = tailstart_m22;
+  lik = tailenter_lik;
+  m11 = tailenter_m11;
+  m12 = tailenter_m12;
+  m21 = tailenter_m21;
+  m22 = tailenter_m22;
   while (1) {
     m11 += 1;
     m22 += 1;
@@ -971,10 +974,10 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
     }
   }
   // Express current likelihood as a fraction of p.
-  const double tailstart_m22 = m22;
-  const dd_real tailstart_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
-  dd_real lik_ddr = tailstart_lik_ddr;
-  dd_real tailsum_ddr = tailstart_lik_ddr;
+  const double tailenter_m22 = m22;
+  const dd_real tailenter_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnprob_ddr));
+  dd_real lik_ddr = tailenter_lik_ddr;
+  dd_real tailsum_ddr = tailenter_lik_ddr;
   if (m22 > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
@@ -1004,8 +1007,8 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
       }
       tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
     }
-    lik_ddr = tailstart_lik_ddr;
-    m22 = tailstart_m22;
+    lik_ddr = tailenter_lik_ddr;
+    m22 = tailenter_m22;
     m11 = m11_minus_m22 + m22;
     m12 = mx2 - m22;
     m21 = m2x - m22;
@@ -1185,7 +1188,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
       }
       // Sum toward center, until lik >= 1.
       double one_minus_scaled_eps = 1 - 3 * k2m52;
-      const double tailstart_lik = lik;
+      const double tailenter_lik = lik;
       const double m11_tail = m11;
       const double m12_tail = m12;
       const double m21_tail = m21;
@@ -1217,7 +1220,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
       *orig_saved_l22_ptr = m22;
       *orig_base_likl_ptr = lik;
       *orig_base_epsl_ptr = 1 - one_minus_scaled_eps;
-      lik = tailstart_lik;
+      lik = tailenter_lik;
       m11 = m11_tail;
       m12 = m12_tail;
       m21 = m21_tail;
@@ -1354,7 +1357,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
     }
     // Sum toward center, until lik >= 1.
     double one_minus_scaled_eps = 1 - 3 * k2m52;
-    const double tailstart_lik = lik;
+    const double tailenter_lik = lik;
     const double m11_tail = m11;
     const double m12_tail = m12;
     const double m21_tail = m21;
@@ -1386,7 +1389,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
     *orig_saved_r22_ptr = m22;
     *orig_base_likr_ptr = lik;
     *orig_base_epsr_ptr = 1 - one_minus_scaled_eps;
-    lik = tailstart_lik;
+    lik = tailenter_lik;
     m11 = m11_tail;
     m12 = m12_tail;
     m21 = m21_tail;
@@ -1548,7 +1551,7 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
     m12_tail = m12;
     m21_tail = m21;
     m22_tail = m22;
-    const double tailstart_lik = lik;
+    const double tailenter_lik = lik;
     uint32_t tie_ct_incr = 0;
     while (1) {
       if (lik > 1 - cur_eps) {
@@ -1608,7 +1611,7 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
     }
     *base_likp = lik;
     *tie_ctp += tie_ct_incr;
-    lik = tailstart_lik;
+    lik = tailenter_lik;
   }
   *base_epsp = cur_eps;
   *saved_m11p = m11;

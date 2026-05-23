@@ -774,8 +774,11 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   }
   // Sum toward center, until lik >= 1.
   double one_minus_scaled_eps = 1 - 3 * k2m52;
-  const double tailstart_lik = lik;
-  const double tailstart_succ = succ;
+  // Save where we're starting on this tail, which isn't necessarily on the
+  // boundary.  We sum inward until relative-likelihood > 1, then we jump back
+  // to tailenter_succ and sum outward.
+  const double tailenter_lik = lik;
+  const double tailenter_succ = succ;
   while (lik <= one_minus_scaled_eps) {
     tail_sum += lik;
     fail += 1;
@@ -796,8 +799,8 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     }
   }
   // Sum away from center, until sums stop changing.
-  lik = tailstart_lik;
-  succ = tailstart_succ;
+  lik = tailenter_lik;
+  succ = tailenter_succ;
   fail = obs_totd - succ;
   while (1) {
     succ += 1;
@@ -1744,10 +1747,10 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
     }
   }
   // Express current likelihood as a fraction of targetp.
-  const double tailstart_k = k;
-  const dd_real tailstart_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
-  dd_real lik_ddr = tailstart_lik_ddr;
-  dd_real tailsum_ddr = tailstart_lik_ddr;
+  const double tailenter_k = k;
+  const dd_real tailenter_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
+  dd_real lik_ddr = tailenter_lik_ddr;
+  dd_real tailsum_ddr = tailenter_lik_ddr;
   if (k > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
@@ -1774,8 +1777,8 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
       }
       tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
     }
-    lik_ddr = tailstart_lik_ddr;
-    k = tailstart_k;
+    lik_ddr = tailenter_lik_ddr;
+    k = tailenter_k;
     nmk = n - k;
   }
   while (ddr_ltd(tailsum_ddr, 1.0)) {
