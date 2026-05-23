@@ -952,17 +952,26 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // caller responsible for guaranteeing ay - bx >= 0
   double ff;
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
-  // Sometimes, ibeta_power_terms_ln() is both slower and less accurate than
+  // Sometimes, ibeta_power_terms_d_ln() is both slower and less accurate than
   // the following.  Can we improve the logic below to the point where we can
-  // delete ibeta_power_terms_ln()?
+  // delete ibeta_power_terms_d_ln()?
   /*
   dd_real ddrs[5];
-  ddrs[0] = ddr_muld(ddr_log(p_ddr), aa);
-  ddrs[1] = ddr_muld(ddr_log(q_ddr), bb);
+  dd_real logp_ddr = ddr_negate(_ddr_log2);
+  dd_real logq_ddr = ddr_negate(_ddr_log2);
+  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
+    logp_ddr = ddr_log(p_ddr);
+  }
+  if ((q_ddr.x[0] != 0.5) || (q_ddr.x[1] != 0.0)) {
+    logq_ddr = ddr_log(q_ddr);
+  }
+  ddrs[0] = ddr_muld(logp_ddr, aa);
+  ddrs[1] = ddr_muld(logq_ddr, bb);
   ddrs[2] = ddr_lfact(aa + bb - 1);
   ddrs[3] = ddr_negate(ddr_lfact(aa - 1));
   ddrs[4] = ddr_negate(ddr_lfact(bb - 1));
   dd_real result_ln_ddr = ddr_sort_and_add(5, ddrs);
+  ff = 1.0;
   */
 
   // see Boost continued_fraction_b()
