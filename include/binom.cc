@@ -844,6 +844,90 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
 
 // static const double kLentzFpmin = DBL_MIN * 16;
 
+static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
+static const double kLanczosDoubleSumExpgNumer[13] = {
+  56906521.91347156388090791033559122686859,
+  103794043.1163445451906271053616070238554,
+  86363131.28813859145546927288977868422342,
+  43338889.32467613834773723740590533316085,
+  14605578.08768506808414169982791359218571,
+  3481712.15498064590882071018964774556468,
+  601859.6171681098786670226533699352302507,
+  75999.29304014542649875303443598909137092,
+  6955.999602515376140356310115515198987526,
+  449.9445569063168119446858607650988409623,
+  19.51992788247617482847860966235652136208,
+  0.5098416655656676188125178644804694509993,
+  0.006061842346248906525783753964555936883222
+};
+
+// this depends on the polynomial coefficients above
+// exactly 808618867 * 2^{-27}, don't need to represent this as dd_real
+static const double kLanczosDoubleG = 6.024680040776729583740234375;
+
+double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
+  double s1;
+  double s2;
+  // zz currently guaranteed to be >1.
+  /*
+  if (zz <= 1) {
+    s1 = kLanczosDoubleSumExpgNumer[12];
+    s2 = kLanczosDoubleSumDenom[12];
+    for (int32_t ii = 11; ii >= 0; --ii) {
+      s1 *= zz;
+      s2 *= zz;
+      s1 += kLanczosDoubleSumExpgNumer[S_CAST(uint32_t, ii)];
+      s2 += kLanczosDoubleSumDenom[S_CAST(uint32_t, ii)];
+    }
+  } else {
+  */
+  zz = 1 / zz;
+  s1 = kLanczosDoubleSumExpgNumer[0];
+  s2 = kLanczosDoubleSumDenom[0];
+  for (uint32_t uii = 1; uii != 13; ++uii) {
+    s1 *= zz;
+    s2 *= zz;
+    s1 += kLanczosDoubleSumExpgNumer[uii];
+    s2 += kLanczosDoubleSumDenom[uii];
+  }
+  // }
+  *s2_ptr = s2;
+  return s1;
+}
+
+dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, double* nonlog_ptr) {
+  // returns log((x^a)(y^b) / Beta(a,b))
+  //
+  // normalized always true
+  // prefix always 1
+  // aa and bb always large
+  double cc = aa + bb;
+  const double gh = kLanczosDoubleG - 0.5;
+  const dd_real agh_ddr = ddr_add2d(gh, aa);
+  const dd_real bgh_ddr = ddr_add2d(gh, bb);
+  const dd_real cgh_ddr = ddr_add2d(gh, cc);
+
+  double numer_a;
+  const double denom_a = lanczos_sum_d_expg_scaled_imp(aa, &numer_a);
+  double numer_b;
+  const double denom_b = lanczos_sum_d_expg_scaled_imp(bb, &numer_b);
+  double denom_c;
+  const double numer_c = lanczos_sum_d_expg_scaled_imp(cc, &denom_c);
+  // Calculate result with ordinary precision; pointless to go further here
+  // unless we widen Lanczos sum calculations.
+  // (With more Lanczos terms, may need (numer_a / denom_a) * etc. to avoid
+  // intermediate overflow.)
+  double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
+  *nonlog_ptr = result * sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
+  // Calculate l1 and l2 with extra precision, since magnitude can greatly
+  // exceed that of ln(nonlog).
+  // This removes the need for special cases.
+  const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh))), agh_ddr);
+  const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh)), bgh_ddr);
+  return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
+                 ddr_muld(ddr_log1p(l2_ddr), bb));
+}
+
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
 // continued fraction introduced in
 //   Aroian LA (1941) Continued fractions for the incomplete beta function.
@@ -866,9 +950,12 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
-
-  // This seems a bit faster and more accurate than the ibeta_power_terms_ln()
-  // approach when aa and bb are integers.
+  double ff;
+  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
+  // Sometimes, ibeta_power_terms_ln() is both slower and less accurate than
+  // the following.  Can we improve the logic below to the point where we can
+  // delete ibeta_power_terms_ln()?
+  /*
   dd_real ddrs[5];
   ddrs[0] = ddr_muld(ddr_log(p_ddr), aa);
   ddrs[1] = ddr_muld(ddr_log(q_ddr), bb);
@@ -876,13 +963,14 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   ddrs[3] = ddr_negate(ddr_lfact(aa - 1));
   ddrs[4] = ddr_negate(ddr_lfact(bb - 1));
   dd_real result_ln_ddr = ddr_sort_and_add(5, ddrs);
+  */
 
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
   double cc = (aa * ay_minus_bx_plus1) / (aa + 1.0);
   const double xx = p_ddr.x[0];
   const double two_minus_x = 2 - xx;
-  double ff = cc;
+  ff = cc / ff;
   double dd = 0.0;
   double mm = 1.0;
   while (1) {
@@ -1006,11 +1094,11 @@ dd_real ibeta_fraction2_ln_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_d
 //
 //   >>> import exact_tests, scipy, timeit
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.021541208028793335
+//   0.012564708013087511
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.027054250007495284
+//   0.008181249955669045
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.02769733313471079
+//   0.012667750008404255
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
 //   1.005605333019048
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
