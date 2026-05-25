@@ -32,6 +32,7 @@ namespace plink2 {
 const dd_real _ddr_e = {{2.718281828459045091e+00, 1.445646891729250158e-16}};
 const dd_real _ddr_log2 = {{6.931471805599452862e-01, 2.319046813846299558e-17}};
 const dd_real _ddr_log05 = {{-6.931471805599452862e-01, -2.319046813846299558e-17}};
+const dd_real _ddr_64log2 = {{64 * 6.931471805599452862e-01, 64 * 2.319046813846299558e-17}};
 const dd_real _ddr_half_log_2pi = {{9.1893853320467278056e-01, -3.8782941580672414498e-17}};
 const dd_real _ddr_12th = {{8.3333333333333328707e-02,  4.6259292692714853283e-18}};
 const dd_real _ddr_1188th = {{8.4175084175084171397e-04,  3.6870174889237693563e-20}};
@@ -373,14 +374,13 @@ dd_real ddr_exp(const dd_real a) {
     return _ddr_e;
   }
 
-  double m = floor(a.x[0] / _ddr_log2.x[0] + 0.5);
-  dd_real r = ddr_mul_pwr2(ddr_sub(a, ddr_muld(_ddr_log2, m)), inv_k);
-  dd_real s, t, p;
+  const double m = floor(a.x[0] / _ddr_log2.x[0] + 0.5);
+  const dd_real r = ddr_mul_pwr2(ddr_sub(a, ddr_muld(_ddr_log2, m)), inv_k);
 
-  p = ddr_sqr(r);
-  s = ddr_add(r, ddr_mul_pwr2(p, 0.5));
+  dd_real p = ddr_sqr(r);
+  dd_real s = ddr_add(r, ddr_mul_pwr2(p, 0.5));
   p = ddr_mul(p, r);
-  t = ddr_mul(p, _ddr_inv_fact_offset3[0]);
+  dd_real t = ddr_mul(p, _ddr_inv_fact_offset3[0]);
   int32_t i = 0;
   do {
     s = ddr_add(s, t);

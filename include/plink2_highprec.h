@@ -35,9 +35,9 @@ namespace plink2 {
 
 // Support for computations requiring more precision than double/int64.
 
-// Portable "double-double" operations supporting high-accuracy log-probability
-// calculations, based on a small subset of the QD library
-// (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
+// Portable "double-double" and "quad-double" operations, primarily supporting
+// high-accuracy log-likelihood calculations, based on a subset of the QD
+// library (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
 
 typedef struct dd_real_struct {
@@ -52,6 +52,7 @@ HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
 
 extern const dd_real _ddr_log2;
 extern const dd_real _ddr_log05;
+extern const dd_real _ddr_64log2;
 
 CONSTI32(_ddr_n_ln_fact, 256);
 extern const dd_real _ddr_ln_fact[_ddr_n_ln_fact];
@@ -173,8 +174,8 @@ HEADER_INLINE dd_real ddr_add2d(double a, double b) {
 }
 
 HEADER_INLINE dd_real ddr_addd(const dd_real a, double b) {
-  double s1, s2;
-  s1 = qd_two_sum(a.x[0], b, &s2);
+  double s2;
+  double s1 = qd_two_sum(a.x[0], b, &s2);
   s2 += a.x[1];
   s1 = qd_quick_two_sum(s1, s2, &s2);
   return ddr_make(s1, s2);
@@ -182,9 +183,8 @@ HEADER_INLINE dd_real ddr_addd(const dd_real a, double b) {
 
 // Only satisfies Cray-style error bound.
 HEADER_INLINE dd_real ddr_sloppy_add(const dd_real a, const dd_real b) {
-  double s, e;
-
-  s = qd_two_sum(a.x[0], b.x[0], &e);
+  double e;
+  double s = qd_two_sum(a.x[0], b.x[0], &e);
   e += a.x[1] + b.x[1];
   s = qd_quick_two_sum(s, e, &e);
   return ddr_make(s, e);
@@ -192,10 +192,10 @@ HEADER_INLINE dd_real ddr_sloppy_add(const dd_real a, const dd_real b) {
 
 /*
 HEADER_INLINE dd_real ddr_ieee_add(const dd_real a, const dd_real b) {
-  double s1, s2, t1, t2;
-
-  s1 = qd_two_sum(a.x[0], b.x[0], &s2);
-  t1 = qd_two_sum(a.x[1], b.x[1], &t2);
+  double s2;
+  double t2;
+  double s1 = qd_two_sum(a.x[0], b.x[0], &s2);
+  double t1 = qd_two_sum(a.x[1], b.x[1], &t2);
   s2 += t1;
   s1 = qd_quick_two_sum(s1, s2, &s2);
   s2 += t2;
@@ -210,16 +210,16 @@ HEADER_CINLINE dd_real ddr_negate(const dd_real a) {
 
 // double-double - double
 HEADER_INLINE dd_real ddr_subd(const dd_real a, double b) {
-  double s1, s2;
-  s1 = qd_two_diff(a.x[0], b, &s2);
+  double s2;
+  double s1 = qd_two_diff(a.x[0], b, &s2);
   s2 += a.x[1];
   s1 = qd_quick_two_sum(s1, s2, &s2);
   return ddr_make(s1, s2);
 }
 
 HEADER_INLINE dd_real ddr_sloppy_sub(const dd_real a, const dd_real b) {
-  double s, e;
-  s = qd_two_diff(a.x[0], b.x[0], &e);
+  double e;
+  double s = qd_two_diff(a.x[0], b.x[0], &e);
   e += a.x[1];
   e -= b.x[1];
   s = qd_quick_two_sum(s, e, &e);
@@ -227,9 +227,10 @@ HEADER_INLINE dd_real ddr_sloppy_sub(const dd_real a, const dd_real b) {
 }
 
 HEADER_INLINE dd_real ddr_ieee_sub(const dd_real a, const dd_real b) {
-  double s1, s2, t1, t2;
-  s1 = qd_two_diff(a.x[0], b.x[0], &s2);
-  t1 = qd_two_diff(a.x[1], b.x[1], &t2);
+  double s2;
+  double t2;
+  double s1 = qd_two_diff(a.x[0], b.x[0], &s2);
+  double t1 = qd_two_diff(a.x[1], b.x[1], &t2);
   s2 += t1;
   s1 = qd_quick_two_sum(s1, s2, &s2);
   s2 += t2;
@@ -255,18 +256,16 @@ HEADER_INLINE dd_real ddr_mul2d(double a, double b) {
 }
 
 HEADER_INLINE dd_real ddr_muld(const dd_real a, double b) {
-  double p1, p2;
-
-  p1 = qd_two_prod(a.x[0], b, &p2);
+  double p2;
+  double p1 = qd_two_prod(a.x[0], b, &p2);
   p2 += a.x[1] * b;
   p1 = qd_quick_two_sum(p1, p2, &p2);
   return ddr_make(p1, p2);
 }
 
 HEADER_INLINE dd_real ddr_mul(const dd_real a, const dd_real b) {
-  double p1, p2;
-
-  p1 = qd_two_prod(a.x[0], b.x[0], &p2);
+  double p2;
+  double p1 = qd_two_prod(a.x[0], b.x[0], &p2);
   p2 += (a.x[0] * b.x[1] + a.x[1] * b.x[0]);
   p1 = qd_quick_two_sum(p1, p2, &p2);
   return ddr_make(p1, p2);
@@ -274,20 +273,19 @@ HEADER_INLINE dd_real ddr_mul(const dd_real a, const dd_real b) {
 
 HEADER_INLINE dd_real ddr_divd(const dd_real a, double b) {
 
-  double q1, q2;
-  double p1, p2;
-  double s, e;
+  double p2;
+  double e;
   dd_real r;
 
-  q1 = a.x[0] / b;  // approximate quotient
+  const double q1 = a.x[0] / b;  // approximate quotient
 
-  p1 = qd_two_prod(q1, b, &p2);
-  s = qd_two_diff(a.x[0], p1, &e);
+  const double p1 = qd_two_prod(q1, b, &p2);
+  double s = qd_two_diff(a.x[0], p1, &e);
   e += a.x[1];
   e -= p2;
 
   // get next approximation
-  q2 = (s + e) / b;
+  const double q2 = (s + e) / b;
 
   // renormalize
   r.x[0] = qd_quick_two_sum(q1, q2, &r.x[1]);
@@ -297,19 +295,18 @@ HEADER_INLINE dd_real ddr_divd(const dd_real a, double b) {
 
 /*
 HEADER_INLINE dd_real ddr_sloppy_div(const dd_real a, const dd_real b) {
-  double s1, s2;
-  double q1, q2;
+  double s2;
   dd_real r;
 
-  q1 = a.x[0] / b.x[0];  // approximate quotient
+  const double q1 = a.x[0] / b.x[0];  // approximate quotient
 
   r = ddr_muld(b, q1);
-  s1 = qd_two_diff(a.x[0], r.x[0], &s2);
+  const double s1 = qd_two_diff(a.x[0], r.x[0], &s2);
   s2 -= r.x[1];
   s2 += a.x[1];
 
   // get next approximation
-  q2 = (s1 + s2) / b.x[0];
+  const double q2 = (s1 + s2) / b.x[0];
 
   // renormalize
   r.x[0] = qd_quick_two_sum(q1, q2, &r.x[1]);
@@ -318,29 +315,26 @@ HEADER_INLINE dd_real ddr_sloppy_div(const dd_real a, const dd_real b) {
 */
 
 static inline dd_real ddr_accurate_div(const dd_real a, const dd_real b) {
-  double q1, q2, q3;
-  dd_real r;
+  double q1 = a.x[0] / b.x[0];  // approximate quotient
 
-  q1 = a.x[0] / b.x[0];  // approximate quotient
+  dd_real r = ddr_ieee_sub(a, ddr_muld(b, q1));
 
-  r = ddr_ieee_sub(a, ddr_muld(b, q1));
-
-  q2 = r.x[0] / b.x[0];
+  double q2 = r.x[0] / b.x[0];
   r = ddr_ieee_sub(r, ddr_muld(b, q2));
 
-  q3 = r.x[0] / b.x[0];
+  const double q3 = r.x[0] / b.x[0];
 
   q1 = qd_quick_two_sum(q1, q2, &q2);
   return ddr_addd(ddr_make(q1, q2), q3);
 }
 
 HEADER_INLINE dd_real ddr_sqr(const dd_real a) {
-  double p1, p2;
-  double s1, s2;
-  p1 = qd_two_sqr(a.x[0], &p2);
+  double p2;
+  double s2;
+  const double p1 = qd_two_sqr(a.x[0], &p2);
   p2 += 2.0 * a.x[0] * a.x[1];
   p2 += a.x[1] * a.x[1];
-  s1 = qd_quick_two_sum(p1, p2, &s2);
+  const double s1 = qd_quick_two_sum(p1, p2, &s2);
   return ddr_make(s1, s2);
 }
 
@@ -493,7 +487,6 @@ HEADER_INLINE dd_real ddr_sort_and_add_5_lfacts(double a, double b, double c, do
   return ddr_sort_and_add_lfacts(5, args);
 }
 
-static const dd_real _ddr_64log2 = ddr_mul_pwr2(_ddr_log2, 64);
 // lnprob_ddr <= 0, mult < 2^52, exp(lnprob_ddr) * mult < 0.5 or so.
 // Avoids intermediate underflow when exp(lnprob_ddr) would underflow, but
 // final result does not underflow.  Doesn't try to preserve last bit of
@@ -505,6 +498,283 @@ HEADER_INLINE double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32
   }
   return mult * k2m64 * ddr_exp(ddr_add(lnprob_ddr, _ddr_64log2)).x[0];
 }
+
+
+typedef struct qd_real_struct {
+  double x[4];
+} qd_real;
+
+HEADER_INLINE void qd_quick_renorm(double* c0p, double* c1p, double* c2p, double* c3p, double* c4p) {
+  double t0;
+  double t1;
+  double t2;
+  double t3;
+  double s = qd_quick_two_sum(*c3p, *c4p, &t3);
+  s = qd_quick_two_sum(*c2p, s, &t2);
+  s = qd_quick_two_sum(*c1p, s, &t1);
+  *c0p = qd_quick_two_sum(*c0p, s, &t0);
+
+  s = qd_quick_two_sum(t2, t3, &t2);
+  s = qd_quick_two_sum(t1, s, &t1);
+  *c1p = qd_quick_two_sum(t0, s, &t0);
+
+  s = qd_quick_two_sum(t1, t2, &t1);
+  *c2p = qd_quick_two_sum(t0, s, &t0);
+
+  *c3p = t0 + t1;
+}
+
+HEADER_INLINE void qd_renorm4(double* c0p, double* c1p, double* c2p, double* c3p) {
+  if ((*c0p == INFINITY_D) || (*c0p == -INFINITY_D)) {
+    return;
+  }
+
+  double s2 = 0.0;
+  double s3 = 0.0;
+
+  double s0 = qd_quick_two_sum(*c2p, *c3p, c3p);
+  s0 = qd_quick_two_sum(*c1p, s0, c2p);
+  *c0p = qd_quick_two_sum(*c0p, s0, c1p);
+
+  s0 = *c0p;
+  double s1 = *c1p;
+  if (s1 != 0.0) {
+    s1 = qd_quick_two_sum(s1, *c1p, &s2);
+    if (s2 != 0.0) {
+      s2 = qd_quick_two_sum(s0, *c2p, &s1);
+    } else {
+      s1 = qd_quick_two_sum(s1, *c3p, &s2);
+    }
+  } else {
+    s0 = qd_quick_two_sum(s0, *c2p, &s1);
+    if (s1 != 0.0) {
+      s1 = qd_quick_two_sum(s1, *c3p, &s2);
+    } else {
+      s0 = qd_quick_two_sum(s0, *c3p, &s1);
+    }
+  }
+
+  *c0p = s0;
+  *c1p = s1;
+  *c2p = s2;
+  *c3p = s3;
+}
+
+HEADER_INLINE void qd_renorm5(double* c0p, double* c1p, double* c2p, double* c3p, double* c4p) {
+  if ((*c0p == INFINITY_D) || (*c0p == -INFINITY_D)) {
+    return;
+  }
+
+  double s2 = 0.0;
+  double s3 = 0.0;
+
+  double s0 = qd_quick_two_sum(*c3p, *c4p, c4p);
+  s0 = qd_quick_two_sum(*c2p, s0, c3p);
+  s0 = qd_quick_two_sum(*c1p, s0, c2p);
+  *c0p = qd_quick_two_sum(*c0p, s0, c1p);
+
+  s0 = *c0p;
+  double s1 = *c1p;
+
+  if (s1 != 0.0) {
+    s1 = qd_quick_two_sum(s1, *c1p, &s2);
+    if (s2 != 0.0) {
+      s2 = qd_quick_two_sum(s0, *c2p, &s3);
+      if (s3 != 0.0) {
+        s3 += *c4p;
+      } else {
+        s2 = qd_quick_two_sum(s2, *c4p, &s3);
+      }
+    } else {
+      s1 = qd_quick_two_sum(s1, *c3p, &s2);
+      if (s2 != 0.0) {
+        s2 = qd_quick_two_sum(s2, *c4p, &s3);
+      } else {
+        s1 = qd_quick_two_sum(s1, *c4p, &s2);
+      }
+    }
+  } else {
+    s0 = qd_quick_two_sum(s0, *c2p, &s1);
+    if (s1 != 0.0) {
+      s1 = qd_quick_two_sum(s1, *c3p, &s2);
+      if (s2 != 0.0) {
+        s2 = qd_quick_two_sum(s2, *c4p, &s3);
+      } else {
+        s1 = qd_quick_two_sum(s1, *c4p, &s2);
+      }
+    } else {
+      s0 = qd_quick_two_sum(s0, *c3p, &s1);
+      if (s1 != 0.0) {
+        s1 = qd_quick_two_sum(s1, *c4p, &s2);
+      } else {
+        s0 = qd_quick_two_sum(s0, *c4p, &s1);
+      }
+    }
+  }
+
+  *c0p = s0;
+  *c1p = s1;
+  *c2p = s2;
+  *c3p = s3;
+}
+
+HEADER_INLINE void qdr_renorm(qd_real* xp) {
+  qd_renorm4(&(xp->x[0]), &(xp->x[1]), &(xp->x[2]), &(xp->x[3]));
+}
+
+HEADER_INLINE void qdr_renormd(qd_real* xp, double* ep) {
+  qd_renorm5(&(xp->x[0]), &(xp->x[1]), &(xp->x[2]), &(xp->x[3]), ep);
+}
+
+HEADER_INLINE void qd_three_sum(double* ap, double* bp, double* cp) {
+  double t2;
+  double t3;
+  double t1 = qd_two_sum(*ap, *bp, &t2);
+  *ap = qd_two_sum(*cp, t1, &t3);
+  *bp = qd_two_sum(t2, t3, cp);
+}
+
+HEADER_INLINE void qd_three_sum2(double* ap, double* bp, double c) {
+  double t2;
+  double t3;
+  double t1 = qd_two_sum(*ap, *bp, &t2);
+  *ap = qd_two_sum(c, t1, &t3);
+  *bp = t2 + t3;
+}
+
+HEADER_CINLINE qd_real qdr_make1(const double a) {
+  const qd_real retval = {{a, 0.0, 0.0, 0.0}};
+  return retval;
+}
+
+HEADER_CINLINE qd_real qdr_make2(const double a, const double b) {
+  const qd_real retval = {{a, b, 0.0, 0.0}};
+  return retval;
+}
+
+HEADER_CINLINE qd_real qdr_make(double a, double b, double c, double d) {
+  const qd_real retval = {{a, b, c, d}};
+  return retval;
+}
+
+HEADER_INLINE qd_real qd_addd(const qd_real a, double b) {
+  double e;
+  double c0 = qd_two_sum(a.x[0], b, &e);
+  double c1 = qd_two_sum(a.x[1], e, &e);
+  double c2 = qd_two_sum(a.x[2], e, &e);
+  double c3 = qd_two_sum(a.x[3], e, &e);
+
+  qd_renorm5(&c0, &c1, &c2, &c3, &e);
+
+  return qdr_make(c0, c1, c2, c3);
+}
+
+// s = qd_quick_three_accum(a, b, c) adds c to the dd-pair (a, b).
+// If the result does not fit in two doubles, then the sum is
+// output into s and (a,b) contains the remainder.  Otherwise
+// s is zero and (a,b) contains the sum.
+HEADER_INLINE double qd_quick_three_accum(double* ap, double* bp, double c) {
+  double s = qd_two_sum(*bp, c, bp);
+  s = qd_two_sum(*ap, s, ap);
+
+  const uint32_t za = (*ap != 0.0);
+  const uint32_t zb = (*bp != 0.0);
+
+  if (za && zb) {
+    return s;
+  }
+
+  if (!zb) {
+    *bp = *ap;
+    *ap = s;
+  } else {
+    *ap = s;
+  }
+
+  return 0.0;
+}
+
+/*
+HEADER_INLINE qd_real qdr_ieee_add(const qd_real a, const qd_real b) {
+  int32_t i = 0;
+  int32_t j = 0;
+  int32_t k = 0;
+  // (u,v) = double-length accumulator
+  double u;
+  double v;
+  if (fabs(a.x[i]) > fabs(b.x[j])) {
+    u = a.x[i++];
+  } else {
+    u = b.x[j++];
+  }
+  if (fabs(a.x[i]) > fabs(b.x[j])) {
+    v = a.x[i++];
+  } else {
+    v = b.x[j++];
+  }
+
+  u = qd_quick_two_sum(u, v, &v);
+
+  double x[4];
+  x[0] = 0.0;
+  x[1] = 0.0;
+  x[2] = 0.0;
+  x[3] = 0.0;
+  do {
+    if ((i >= 4) && (j >= 4)) {
+
+    }
+  } while (k < 4);
+  ;;;
+}
+*/
+
+HEADER_INLINE qd_real qdr_sloppy_add(const qd_real a, const qd_real b) {
+  double s0 = a.x[0] + b.x[0];
+  double s1 = a.x[1] + b.x[1];
+  double s2 = a.x[2] + b.x[2];
+  double s3 = a.x[3] + b.x[3];
+
+  const double v0 = s0 - a.x[0];
+  const double v1 = s1 - a.x[1];
+  const double v2 = s2 - a.x[2];
+  const double v3 = s3 - a.x[3];
+
+  double u0 = s0 - v0;
+  double u1 = s1 - v1;
+  double u2 = s2 - v2;
+  double u3 = s3 - v3;
+
+  const double w0 = a.x[0] - u0;
+  const double w1 = a.x[1] - u1;
+  const double w2 = a.x[2] - u2;
+  const double w3 = a.x[3] - u3;
+
+  u0 = b.x[0] - v0;
+  u1 = b.x[1] - v1;
+  u2 = b.x[2] - v2;
+  u3 = b.x[3] - v3;
+
+  double t0 = w0 + u0;
+  double t1 = w1 + u1;
+  double t2 = w2 + u2;
+  const double t3 = w3 + u3;
+
+  s1 = qd_two_sum(s1, t0, &t0);
+  qd_three_sum(&s2, &t0, &t1);
+  qd_three_sum2(&s3, &t0, t2);
+  t0 = t0 + t1 + t3;
+
+  qd_renorm5(&s0, &s1, &s2, &s3, &t0);
+  return qdr_make(s0, s1, s2, s3);
+}
+
+HEADER_CINLINE qd_real qdr_negate(const qd_real a) {
+  return qdr_make(-a.x[0], -a.x[1], -a.x[2], -a.x[3]);
+}
+
+;;;
+
 
 int32_t falling_factorial(mp_limb_t top, uint32_t ct, mp_limb_t* result, uint32_t* result_limb_ctp, mp_limb_t* wkspace);
 
