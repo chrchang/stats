@@ -68,7 +68,7 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 // happens far past DBL_MIN).  That should remain < 2^{-53} for the domain of
 // interest until n > ~2^38.
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
-  dd_real ln_q_ddr = ddr_negate(_ddr_log2);
+  dd_real ln_q_ddr = _ddr_log05;
   if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
     ln_q_ddr = ddr_log1p(ddr_negate(p_ddr));
   }
@@ -76,7 +76,7 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
   if (k == 0) {
     return nmk_ln_q_ddr;
   }
-  dd_real ln_p_ddr = ddr_negate(_ddr_log2);
+  dd_real ln_p_ddr = _ddr_log05;
   if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
     ln_p_ddr = ddr_log(p_ddr);
   }
@@ -673,7 +673,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
             ddr_add_lfacts(succ, fail));
-  dd_real lnfail_ddr = {{-_ddr_log2.x[0], -_ddr_log2.x[1]}};
+  dd_real lnfail_ddr = _ddr_log05;
   if (!ddr_is_zero(ln_odds_ratio_ddr)) {
     // probable todo: this is a bit redundant with earlier initialization
     const dd_real fail_ddr = ddr_makei(succ_odds_ratio_denom);
@@ -960,8 +960,8 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // delete ibeta_power_terms_d_ln()?
   /*
   dd_real ddrs[5];
-  dd_real logp_ddr = ddr_negate(_ddr_log2);
-  dd_real logq_ddr = ddr_negate(_ddr_log2);
+  dd_real logp_ddr = _ddr_log05;
+  dd_real logq_ddr = _ddr_log05;
   if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
     logp_ddr = ddr_log(p_ddr);
   }
@@ -1167,7 +1167,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
     if (midp) {
       // Subtract 0.5 * pmf(k, n, p).
-      const dd_real ln_half_pmf_ddr = ddr_sub(binom_ln_prob_internal(obs_k, n, p_ddr), _ddr_log2);
+      const dd_real ln_half_pmf_ddr = ddr_add(binom_ln_prob_internal(obs_k, n, p_ddr), _ddr_log05);
       const dd_real ln_ratio_ddr = ddr_sub(ln_half_pmf_ddr, result_ln_ddr);
       result_ln_ddr = ddr_add(result_ln_ddr, ddr_log(ddr_negate(ddr_expm1(ln_ratio_ddr))));
     }
@@ -1294,7 +1294,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
   const dd_real starting_lnprobv_ddr =
     ddr_sub(ddr_muld(ddr_log(pdq_ddr), k),
             ddr_add_lfacts(k, nmk));
-  dd_real ln_nmk_ddr = {{-_ddr_log2.x[0], -_ddr_log2.x[1]}};
+  dd_real ln_nmk_ddr = _ddr_log05;
   if (pdq != 1.0) {
     // log(1 / (1 + pdq)) = -log(1 + pdq)
     ln_nmk_ddr = ddr_negate(ddr_log(ddr_addd(pdq_ddr, 1.0)));
@@ -1617,7 +1617,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
     return n;
   }
   // If targetp > 0.5, invert.
-  const uint32_t inv = ((!log_target) && (targetp_or_lnp_ddr.x[0] > 0.5)) || (log_target && (targetp_or_lnp_ddr.x[0] > -_ddr_log2.x[0]));
+  const uint32_t inv = ((!log_target) && (targetp_or_lnp_ddr.x[0] > 0.5)) || (log_target && (targetp_or_lnp_ddr.x[0] > _ddr_log05.x[0]));
   dd_real failp_ddr = ddr_negate(ddr_subd(succp_ddr, 1.0));
   if (inv) {
     swap_ddr(&succp_ddr, &failp_ddr);

@@ -51,6 +51,7 @@ HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
 }
 
 extern const dd_real _ddr_log2;
+extern const dd_real _ddr_log05;
 
 CONSTI32(_ddr_n_ln_fact, 256);
 extern const dd_real _ddr_ln_fact[_ddr_n_ln_fact];

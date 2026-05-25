@@ -818,7 +818,7 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
     return abcd + final_return_incr;
   }
   // If p > 0.5, work with (1-p) and flipped columns.
-  const uint32_t inv = ((!logp) && (p_or_lnp_ddr.x[0] > 0.5)) || (logp && (p_or_lnp_ddr.x[0] > -_ddr_log2.x[0]));
+  const uint32_t inv = ((!logp) && (p_or_lnp_ddr.x[0] > 0.5)) || (logp && (p_or_lnp_ddr.x[0] > _ddr_log05.x[0]));
   if (inv) {
     swap_i64(&ac, &bd);
     a_minus_d = ab - bd;

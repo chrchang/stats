@@ -24,13 +24,14 @@
 namespace plink2 {
 #endif
 
-// Portable "double-double" operations supporting high-accuracy log-probability
-// calculations, based on a small subset of the QD library
-// (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
+// Portable "double-double" and "quad-double" operations, primarily supporting
+// high-accuracy log-probability calculations, based on a subset of the QD
+// library (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
 
 const dd_real _ddr_e = {{2.718281828459045091e+00, 1.445646891729250158e-16}};
 const dd_real _ddr_log2 = {{6.931471805599452862e-01, 2.319046813846299558e-17}};
+const dd_real _ddr_log05 = {{-6.931471805599452862e-01, -2.319046813846299558e-17}};
 const dd_real _ddr_half_log_2pi = {{9.1893853320467278056e-01, -3.8782941580672414498e-17}};
 const dd_real _ddr_12th = {{8.3333333333333328707e-02,  4.6259292692714853283e-18}};
 const dd_real _ddr_1188th = {{8.4175084175084171397e-04,  3.6870174889237693563e-20}};
