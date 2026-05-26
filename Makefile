@@ -9,15 +9,12 @@ ISRC = include/binom.cc \
        include/plink2_hwe.cc \
        include/plink2_ln.cc
 
-GCSRC = mini-gmp/mini-gmp.c
-
 CCHDR = $(ISRC:.cc=.h)
-GCHDR = $(GCSRC:.c=.h)
 
-OBJ = $(ISRC:.cc=.o) $(GCSRC:.c=.o)
+OBJ = $(ISRC:.cc=.o)
 
-CINCLUDE = -Imini-gmp
-CXXINCLUDE = -Imini-gmp
+CINCLUDE =
+CXXINCLUDE =
 
 CLEAN = *.o \
         include/*.o \
@@ -33,7 +30,7 @@ ifeq ($(UNAME), Darwin)
   CXXFLAGS=-O2 -std=c++17 -stdlib=libc++ ${BASEFLAGS}
 endif
 
-%.o: %.c $(GCHDR)
+%.o: %.c
 	gcc -c $(CFLAGS) -o $@ $<
 
 %.o: %.cc $(CCHDR)

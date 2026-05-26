@@ -23,25 +23,25 @@
 namespace plink2 {
 #endif
 
-BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp);
+double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp);
 
 // these return 0 if close enough to Hardy-Weinberg equilibrium
-BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh, uint32_t* out_of_eqp);
+uint32_t HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh);
 
-BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh, uint32_t* out_of_eqp);
+uint32_t HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh);
 
-BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double ln_thresh, uint32_t* out_of_eqp);
+uint32_t HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double ln_thresh);
 
-HEADER_INLINE BoolErr HweThreshLn(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t midp, double thresh, double ln_thresh, uint32_t* out_of_eqp) {
+HEADER_INLINE uint32_t HweThreshLn(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, uint32_t midp, double thresh, double ln_thresh) {
   // kLnNormalMin = -708.3964185...
   if (ln_thresh > -708.396) {
     if (!midp) {
-      return HweThresh(obs_hets, obs_hom1, obs_hom2, thresh, out_of_eqp);
+      return HweThresh(obs_hets, obs_hom1, obs_hom2, thresh);
     } else {
-      return HweThreshMidp(obs_hets, obs_hom1, obs_hom2, thresh, out_of_eqp);
+      return HweThreshMidp(obs_hets, obs_hom1, obs_hom2, thresh);
     }
   }
-  return HweThreshLnMain(obs_hets, obs_hom1, obs_hom2, midp, ln_thresh, out_of_eqp);
+  return HweThreshLnMain(obs_hets, obs_hom1, obs_hom2, midp, ln_thresh);
 }
 
 #ifdef __cplusplus

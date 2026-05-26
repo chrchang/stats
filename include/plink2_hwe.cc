@@ -32,12 +32,10 @@ namespace plink2 {
 //   hasn't happened.  In the latter case, it may be set to the former value
 //   if that is needed in the calculation.
 //
-// - *cmp_resultp is set to positive value if hets := obs_hets + 2*hom_decr has
-//   higher probability than hets := obs_hets, 0 if identical probability, and
+// - Returns positive value if hets := obs_hets + 2*hom_decr has higher
+//   probability than hets := obs_hets, 0 if identical probability, and
 //   negative value if lower probability.
-//
-// - Error is returned iff malloc fails.
-BoolErr HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int32_t hom_decr, dd_real* starting_lnprobv_ddr_ptr, intptr_t* cmp_resultp, double* dbl_ptr) {
+intptr_t HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int32_t hom_decr, dd_real* starting_lnprobv_ddr_ptr, double* dbl_ptr) {
   // From e.g. the Wigginton paper, P(N_{AB}=n_{AB} | N, n_A) is
   //
   //      2^{n_{AB}} N! n_A! n_B!
@@ -51,24 +49,20 @@ BoolErr HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int3
   //   (obs_hets + 2j)!   (obs_hom1-j)!(obs_hom2-j)!
   //
   // where j=hom_decr.
-  uint32_t numer_factorial_args[3];
+  uint64_t numer_factorial_args[3];
   numer_factorial_args[0] = obs_hets;
   numer_factorial_args[1] = obs_hom1;
   numer_factorial_args[2] = obs_hom2;
-  uint32_t denom_factorial_args[3];
+  uint64_t denom_factorial_args[3];
   denom_factorial_args[0] = obs_hets + 2 * hom_decr;
   denom_factorial_args[1] = obs_hom1 - hom_decr;
   denom_factorial_args[2] = obs_hom2 - hom_decr;
-
-  mp_limb_t* gmp_wkspace = nullptr;
-  uintptr_t gmp_wkspace_limb_ct = 0;
-  BoolErr reterr = CompareFactorialProducts(3, hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, &gmp_wkspace, &gmp_wkspace_limb_ct, cmp_resultp, dbl_ptr);
-  free_cond(gmp_wkspace);
-  return reterr;
+  dd_real ln_odds_ratio_ddr = _ddr_log2;
+  return CompareFactorialProducts(3, ddr_maked(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, &ln_odds_ratio_ddr, dbl_ptr);
 }
 
 // obs_hets + obs_hom1 + obs_hom2 assumed to be <2^31.
-BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) {
+double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp) {
   // This function implements an exact SNP test of Hardy-Weinberg
   // Equilibrium as described in Wigginton, JE, Cutler, DJ, and
   // Abecasis, GR (2005) A Note on Exact Tests of Hardy-Weinberg
@@ -91,14 +85,11 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
   //    (2013) The mid p-value in exact tests for Hardy-Weinberg equilibrium.
   // 5. Log-p-value return (added Jan 2024).  A p-value of 1e-400 may be worth
   //    distinguishing from 1e-40000 in a biobank-scale dataset.
-  // 6. Accurate handling of near-ties (added Mar 2026), using the QD and GMP
-  //    libraries.  The QD library is used to efficiently perform computations
+  // 6. Highly accurate handling of near-ties (added Mar-May 2026), using the
+  //    QD library.  The QD library is used to efficiently perform computations
   //    on log-factorials with >60 bits of accuracy past the decimal point;
   //    this lets us jump from one tail to the other with negligible accuracy
-  //    loss, and correctly resolve almost all near-ties without a full-blown
-  //    rational expansion.  The GMP library supports the rational expansion
-  //    when we need it; this can theoretically require large memory
-  //    allocations, but that is very unlikely to come up in practice.
+  //    loss, and correctly resolve almost all near-ties.
   //    (Note that we continue to allow the returned value to have a few bits
   //    of floating-point error.  But misclassification of a near-tie can
   //    result in a *large* relative error, so I've decided to go through the
@@ -128,8 +119,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
   }
   const int32_t rare_ct = 2 * obs_homr + obs_hets;
   if (rare_ct < 2) {
-    *resultp = midp * (-kLn2);
-    return 0;
+    return midp * (-kLn2);
   }
   // MAF: rare_ct / allele_ct
   // modal #hets:
@@ -171,8 +161,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     if ((!midp) && (het_delta < 2.0)) {
       // Fast path for p=1.
       if (obs_hets * (obs_hets - 1LL) <= 4 * (obs_homc + 1LL) * (obs_homr + 1)) {
-        *resultp = 0;
-        return 0;
+        return 0.0;
       }
     }
     // Iterate outward to floating-point precision limit.
@@ -224,10 +213,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
           // Near-tie.  True value of lik can be greater than, equal to, or
           // less than 1.
           const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-          intptr_t cmp_result;
-          if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-            return 1;
-          }
+          const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
           if (cmp_result <= 0) {
             tail_sum += lik;
             if (midp && (cmp_result == 0)) {
@@ -254,8 +240,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
           break;
         }
       }
-      *resultp = log(tail_sum / (tail_sum + center_sum));
-      return 0;
+      return log(tail_sum / (tail_sum + center_sum));
     }
     // starting_lnprobv_ddr is guaranteed to be negative for hets >= 4, and no
     // larger than ln(2) otherwise.
@@ -321,17 +306,14 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
         ddr_sub(ddr_muld(_ddr_log2, hets),
                 ddr_add3_lfacts(homr, hets, homc));
       const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-      // Could tighten this threshold further; I haven't performed a careful
-      // error analysis yet but CompareFactorialProducts() includes a plausible
-      // assumption that 2^{-60} is safe.  But code is correct as long as we're
-      // guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch for
-      // positive lnprobv_diff.
-      if (lnprobv_diff >= k2m53) {
+      // Could tighten this threshold further.  But code is correct as long as
+      // we're guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch
+      // for positive lnprobv_diff.
+      if (lnprobv_diff >= k2m60) {
         if (homr == max_homr) {
           // All tables on this tail are larger than the starting table.  Exit.
           // (This is possible when obs_hom1 == obs_hom2 == 0.)
-          *resultp = starting_lnprob + log(tail_sum);
-          return 0;
+          return starting_lnprob + log(tail_sum);
         }
         const double lnprobv_deriv = log(hets * (hets - 1) / (4 * (homr + 1) * (homc + 1)));
         // Round absolute value up, to guarantee that we make progress.
@@ -381,10 +363,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     }
     if (lik < 2 - one_minus_scaled_eps) {
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-      intptr_t cmp_result;
-      if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-        return 1;
-      }
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
       if (cmp_result <= 0) {
         tail_sum += lik;
         if (midp && (cmp_result == 0)) {
@@ -408,16 +387,14 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
       }
       hets -= 2;
     }
-    *resultp = starting_lnprob + log(tail_sum);
-    return 0;
+    return starting_lnprob + log(tail_sum);
   }
   // Same as above, just with directions flipped.
   const double het_delta = cmodal_nhet - hets;
   if ((!midp) && (het_delta < 2.0)) {
     // Fast path for p=1.
     if ((4LL * obs_homr) * obs_homc <= (obs_hets + 2LL) * (obs_hets + 1LL)) {
-      *resultp = 0;
-      return 0;
+      return 0.0;
     }
   }
   // Iterate outward to floating-point precision limit.
@@ -456,10 +433,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
         // Near-tie.  True value of lik can be greater than, equal to, or less
         // than 1.
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-        intptr_t cmp_result;
-        if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-          return 1;
-        }
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
         if (cmp_result <= 0) {
           tail_sum += lik;
           if (midp && (cmp_result == 0)) {
@@ -483,8 +457,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
         break;
       }
     }
-    *resultp = log(tail_sum / (tail_sum + center_sum));
-    return 0;
+    return log(tail_sum / (tail_sum + center_sum));
   }
   const double c_minus_r = homc - homr;
   dd_real starting_lnprobv_ddr =
@@ -515,12 +488,11 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
       ddr_sub(ddr_muld(_ddr_log2, hets),
               ddr_add3_lfacts(homr, hets, homc));
     const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-    if (lnprobv_diff >= k2m53) {
+    if (lnprobv_diff >= k2m60) {
       if (homr == 0) {
         // All tables on this tail have higher probability than the starting
         // table.  Exit.
-        *resultp = starting_lnprob + log(tail_sum);
-        return 0;
+        return starting_lnprob + log(tail_sum);
       }
       const double lnprobv_deriv = log(4 * homr * homc / ((hets + 2) * (hets + 1)));
       homr -= ceil(-lnprobv_diff / lnprobv_deriv);
@@ -552,10 +524,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
   }
   if (lik < 2 - one_minus_scaled_eps) {
     const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-    intptr_t cmp_result;
-    if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-      return 1;
-    }
+    const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
     if (cmp_result <= 0) {
       tail_sum += lik;
       if (midp && (cmp_result == 0)) {
@@ -579,8 +548,7 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
     homr -= 1;
     homc -= 1;
   }
-  *resultp = starting_lnprob + log(tail_sum);
-  return 0;
+  return starting_lnprob + log(tail_sum);
 }
 
 // 2^{-83} bias to give plink 1.9-style exact tests maximum ability to
@@ -591,15 +559,13 @@ BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t mid
 // constant to be compatible with them doesn't cost us anything.)
 static const double kExactTestBias = k2m50 / (1LL << 33);
 
-BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh, uint32_t* out_of_eqp) {
+uint32_t HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh) {
   // Threshold-test-only version of HweLnP() which is usually able to exit
   // from the calculation earlier.  Assumes DBL_MIN <= pval_thresh <= 1 (note
   // that some older versions of this function didn't handle pval_thresh=1
   // correctly, and plink2 still avoids calling this with pval_thresh=1).
-  // Returns *out_of_eqp=0 if these counts are close enough to Hardy-Weinberg
-  // equilibrium, 1 otherwise.
-  //
-  // BoolErr corresponds to malloc failure when resolving a near-tie.
+  // Returns 0 if these counts are close enough to Hardy-Weinberg equilibrium,
+  // 1 otherwise.
   //
   // Suppose, for definiteness, that the number of observed hets is no less
   // than expectation.  (Same ideas apply for the other case.)  We proceed as
@@ -625,7 +591,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
   }
   const int64_t genotypes2 = (obs_hets + obs_homc + obs_homr) * 2LL;
   if (!genotypes2) {
-    *out_of_eqp = 0;
     return 0;
   }
   const int32_t rare_copies = 2 * obs_homr + obs_hets;
@@ -664,7 +629,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
   if (obs_hets * genotypes2 > rare_copies * (genotypes2 - rare_copies)) {
     // tail 1 = upper hets
     if (obs_hets < 2) {
-      *out_of_eqp = 0;
       return 0;
     }
 
@@ -684,10 +648,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
         double unshifted_lik = lik2 * (1.0 / kExactTestBias);
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
         dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-        intptr_t cmp_result;
-        if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &unshifted_lik))) {
-          return 1;
-        }
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &unshifted_lik);
         lik2 = unshifted_lik * kExactTestBias;
         if (cmp_result <= 0) {
           tail_sum2 = lik2;
@@ -701,8 +662,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
       }
       center_sum += lik2;
       if (center_sum >= center_sum_exit_thresh) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
     } while (hets_t2 > 1);
     // hets_t2 guaranteed to be nonnegative on loop exit, so ratio
@@ -712,7 +672,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
     // true on NaN.
     const double tail_sum_exit_thresh = center_sum / center_div_tail_thresh;
     if (!(tail_sum1 + tail_sum2 < tail_sum_exit_thresh)) {
-      *out_of_eqp = 0;
       return 0;
     }
     // c + cr + cr^2 + ... = c/(1-r), which is an upper bound for the tail sum
@@ -725,8 +684,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
     double lik1 = (4 * homr_t1 * homc_t1) / (hets_t1 * (hets_t1 - 1));
     const double tail1_ceil = tail_sum1 / (1 - lik1);
     if (tail1_ceil + tail2_ceil < tail_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     lik1 *= tail_sum1;
     tail_sum1 += lik1;
@@ -742,7 +700,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
         const double preadd = tail_sum1;
         tail_sum1 += lik1;
         if (tail_sum1 >= tail_sum1_exit_thresh) {
-          *out_of_eqp = 0;
           return 0;
         }
         // homr_t1 == 1 check isn't necessary for correctness, but it provides
@@ -753,8 +710,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
       }
     }
     if (tail_sum1 + tail2_ceil < tail_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     const double tail_sum2_exit_thresh = tail_sum_exit_thresh - tail_sum1;
     while (1) {
@@ -764,19 +720,16 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
       const double preadd = tail_sum2;
       tail_sum2 += lik2;
       if (tail_sum2 >= tail_sum2_exit_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       if (tail_sum2 == preadd) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
       hets_t2 -= 2;
     }
   }
   // tail 1 = lower hets
   if (!obs_homr) {
-    *out_of_eqp = 0;
     return 0;
   }
   do {
@@ -793,10 +746,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
       double unshifted_lik = lik2 * (1.0 / kExactTestBias);
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
       dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-      intptr_t cmp_result;
-      if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &unshifted_lik))) {
-        return 1;
-      }
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &unshifted_lik);
       lik2 = unshifted_lik * kExactTestBias;
       if (cmp_result <= 0) {
         tail_sum2 = lik2;
@@ -806,8 +756,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
     }
     center_sum += lik2;
     if (center_sum >= center_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
   } while (homr_t2 > 0);
   // homr_t2 guaranteed to be nonnegative on loop exit, so ratio
@@ -815,7 +764,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
 
   const double tail_sum_exit_thresh = center_sum / center_div_tail_thresh;
   if (!(tail_sum1 + tail_sum2 < tail_sum_exit_thresh)) {
-    *out_of_eqp = 0;
     return 0;
   }
   const double ratio = (4 * homr_t2 * homc_t2) / ((hets_t2 + 2) * (hets_t2 + 1));
@@ -826,8 +774,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
   double lik1 = (hets_t1 * (hets_t1 - 1)) / (4 * homr_t1 * homc_t1);
   const double tail1_ceil = tail_sum1 / (1 - lik1);
   if (tail1_ceil + tail2_ceil < tail_sum_exit_thresh) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
   lik1 *= tail_sum1;
   tail_sum1 += lik1;
@@ -842,7 +789,6 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
       const double preadd = tail_sum1;
       tail_sum1 += lik1;
       if (tail_sum1 >= tail_sum1_exit_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       if ((tail_sum1 == preadd) || (hets_t1 < 4)) {
@@ -851,8 +797,7 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
     }
   }
   if (tail_sum1 + tail2_ceil < tail_sum_exit_thresh) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
   const double tail_sum2_exit_thresh = tail_sum_exit_thresh - tail_sum1;
   while (1) {
@@ -863,17 +808,15 @@ BoolErr HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double p
     const double preadd = tail_sum2;
     tail_sum2 += lik2;
     if (tail_sum2 >= tail_sum2_exit_thresh) {
-      *out_of_eqp = 0;
       return 0;
     }
     if (tail_sum2 == preadd) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
   }
 }
 
-BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh, uint32_t* out_of_eqp) {
+uint32_t HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double pval_thresh) {
   // Mid-p version of HweThresh().  (There are enough fiddly differences that I
   // think it's better for this to be a separate function.)  Assumes
   // DBL_MIN <= pval_thresh < 0.5.
@@ -888,7 +831,6 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
   }
   const int64_t genotypes2 = (obs_hets + obs_homc + obs_homr) * 2LL;
   if (!genotypes2) {
-    *out_of_eqp = 0;
     return 0;
   }
   int32_t rare_copies = 2 * obs_homr + obs_hets;
@@ -904,7 +846,6 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
   double scaled_one_plus_eps = kExactTestBias * (1 + k2m52);
   if (obs_hets * genotypes2 > rare_copies * (genotypes2 - rare_copies)) {
     if (obs_hets < 2) {
-      *out_of_eqp = 0;
       return 0;
     }
     do {
@@ -921,10 +862,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
         double lik = lik2 * (1.0 / kExactTestBias);
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
         dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-        intptr_t cmp_result;
-        if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-          return 1;
-        }
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
         lik2 = lik * kExactTestBias;
         if (cmp_result <= 0) {
           if (cmp_result == 0) {
@@ -939,14 +877,12 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
       }
       center_sum += lik2;
       if (center_sum >= center_sum_exit_thresh) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
     } while (hets_t2 > 1);
 
     const double tail_sum_exit_thresh = center_sum / center_div_tail_thresh;
     if (!(tail_sum1 + tail_sum2 < tail_sum_exit_thresh)) {
-      *out_of_eqp = 0;
       return 0;
     }
     const double ratio = (hets_t2 * (hets_t2 - 1)) / (4 * (homr_t2 + 1) * (homc_t2 + 1));
@@ -959,8 +895,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
     // always a tie here
     const double tail1_ceil = (tail_sum1 * 2) / (1 - lik1) - tail_sum1;
     if (tail1_ceil + tail2_ceil < tail_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     lik1 *= tail_sum1 * 2;
     tail_sum1 += lik1;
@@ -975,7 +910,6 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
         const double preadd = tail_sum1;
         tail_sum1 += lik1;
         if (tail_sum1 >= tail_sum1_exit_thresh) {
-          *out_of_eqp = 0;
           return 0;
         }
         if ((tail_sum1 == preadd) || (homr_t1 == 1)) {
@@ -984,8 +918,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
       }
     }
     if (tail_sum1 + tail2_ceil < tail_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     const double tail_sum2_exit_thresh = tail_sum_exit_thresh - tail_sum1;
     while (1) {
@@ -995,18 +928,15 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
       const double preadd = tail_sum2;
       tail_sum2 += lik2;
       if (tail_sum2 >= tail_sum2_exit_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       if (tail_sum2 == preadd) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
       hets_t2 -= 2;
     }
   }
   if (!obs_homr) {
-    *out_of_eqp = 0;
     return 0;
   }
   do {
@@ -1023,10 +953,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
       double lik = lik2 * (1.0 / kExactTestBias);
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
       dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-      intptr_t cmp_result;
-      if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-        return 1;
-      }
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
       lik2 = lik * kExactTestBias;
       if (cmp_result <= 0) {
         if (cmp_result == 0) {
@@ -1041,14 +968,12 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
     }
     center_sum += lik2;
     if (center_sum >= center_sum_exit_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
   } while (homr_t2 > 0);
 
   const double tail_sum_exit_thresh = center_sum / center_div_tail_thresh;
   if (!(tail_sum1 + tail_sum2 < tail_sum_exit_thresh)) {
-    *out_of_eqp = 0;
     return 0;
   }
   const double ratio = (4 * homr_t2 * homc_t2) / ((hets_t2 + 2) * (hets_t2 + 1));
@@ -1062,8 +987,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
   tail_sum1 += lik1;
 
   if (tail1_ceil + tail2_ceil < tail_sum_exit_thresh) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
   if (obs_hets >= 4) {
     const double tail_sum1_exit_thresh = tail_sum_exit_thresh - tail_sum2;
@@ -1075,7 +999,6 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
       const double preadd = tail_sum1;
       tail_sum1 += lik1;
       if (tail_sum1 >= tail_sum1_exit_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       if ((tail_sum1 == preadd) || (hets_t1 < 4)) {
@@ -1084,8 +1007,7 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
     }
   }
   if (tail_sum1 + tail2_ceil < tail_sum_exit_thresh) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
   const double tail_sum2_exit_thresh = tail_sum_exit_thresh - tail_sum1;
   while (1) {
@@ -1096,17 +1018,15 @@ BoolErr HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, doub
     const double preadd = tail_sum2;
     tail_sum2 += lik2;
     if (tail_sum2 >= tail_sum2_exit_thresh) {
-      *out_of_eqp = 0;
       return 0;
     }
     if (tail_sum2 == preadd) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
   }
 }
 
-BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double ln_thresh, uint32_t* out_of_eqp) {
+uint32_t HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double ln_thresh) {
   assert(ln_thresh < -708);
   // Threshold-test-only version of HweLnP() which is usually able to exit
   // from the calculation earlier.  Returns *out_of_eqp=0 if these counts are
@@ -1136,7 +1056,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   // Change this to "rare_ct < 2" if ln_thresh restriction is being loosened
   // (to e.g. compare results against HweThresh()).
   if (fabs(hets - cmodal_nhet) < 344.0) {
-    *out_of_eqp = 0;
     return 0;
   }
 
@@ -1157,13 +1076,11 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
             ddr_add3_lfacts(homr, hets, homc));
   const double starting_lnprob = ddr_add(lnprobf_ddr, starting_lnprobv_ddr).x[0];
   if (ln_thresh <= starting_lnprob - midp * kLn2) {
-    *out_of_eqp = 0;
     return 0;
   }
   const double max_homr = S_CAST(double, rare_ct >> 1);
   if (ln_thresh > starting_lnprob + log(max_homr + 1 - midp * 0.5)) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
 
   const double c_minus_r = homc - homr;
@@ -1185,7 +1102,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
         break;
       }
       if (tail_sum >= tail_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       homr -= 1;
@@ -1203,10 +1119,9 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
         ddr_sub(ddr_muld(_ddr_log2, hets),
                 ddr_add3_lfacts(homr, hets, homc));
       const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-      if (lnprobv_diff >= k2m53) {
+      if (lnprobv_diff >= k2m60) {
         if (homr == max_homr) {
-          *out_of_eqp = 1;
-          return 0;
+          return 1;
         }
         const double lnprobv_deriv = log(hets * (hets - 1) / (4 * (homr + 1) * (homc + 1)));
         homr += ceil(-lnprobv_diff / lnprobv_deriv);
@@ -1230,7 +1145,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     while (lik <= one_minus_scaled_eps) {
       tail_sum += lik;
       if (tail_sum >= tail_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       hets += 2;
@@ -1241,10 +1155,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     }
     if (lik < 2 - one_minus_scaled_eps) {
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-      intptr_t cmp_result;
-      if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-        return 1;
-      }
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
       if (cmp_result <= 0) {
         if (cmp_result == 0) {
           tail_sum += 1 - midp * 0.5;
@@ -1252,7 +1163,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
           tail_sum += lik;
         }
         if (tail_sum >= tail_thresh) {
-          *out_of_eqp = 0;
           return 0;
         }
       }
@@ -1271,18 +1181,15 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
     lik *= cur_ratio;
     const double remaining_ceil = tailenter_lik / (1 - cur_ratio);
     if (tail_sum + remaining_ceil < tail_thresh) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     while (1) {
       const double preadd = tail_sum;
       tail_sum += lik;
       if (tail_sum == preadd) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
       if (tail_sum >= tail_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
       hets -= 2;
@@ -1303,7 +1210,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
       break;
     }
     if (tail_sum >= tail_thresh) {
-      *out_of_eqp = 0;
       return 0;
     }
   }
@@ -1322,10 +1228,9 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
       ddr_sub(ddr_muld(_ddr_log2, hets),
               ddr_add3_lfacts(homr, hets, homc));
     const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-    if (lnprobv_diff >= k2m53) {
+    if (lnprobv_diff >= k2m60) {
       if (homr <= 0) {
-        *out_of_eqp = 1;
-        return 0;
+        return 1;
       }
       const double lnprobv_deriv = log(4 * homr * homc / ((hets + 2) * (hets + 1)));
       homr -= ceil(-lnprobv_diff / lnprobv_deriv);
@@ -1349,7 +1254,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   while (lik <= one_minus_scaled_eps) {
     tail_sum += lik;
     if (tail_sum >= tail_thresh) {
-      *out_of_eqp = 0;
       return 0;
     }
     homr += 1;
@@ -1360,10 +1264,7 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   }
   if (lik < 2 - one_minus_scaled_eps) {
     const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-    intptr_t cmp_result;
-    if (unlikely(HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &cmp_result, &lik))) {
-      return 1;
-    }
+    const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
     if (cmp_result <= 0) {
       if (cmp_result == 0) {
         tail_sum += 1 - midp * 0.5;
@@ -1371,7 +1272,6 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
         tail_sum += lik;
       }
       if (tail_sum >= tail_thresh) {
-        *out_of_eqp = 0;
         return 0;
       }
     }
@@ -1386,18 +1286,15 @@ BoolErr HweThreshLnMain(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, in
   lik *= cur_ratio;
   const double remaining_ceil = lik / (1 - cur_ratio);
   if (tail_sum + remaining_ceil < tail_thresh) {
-    *out_of_eqp = 1;
-    return 0;
+    return 1;
   }
   while (1) {
     const double preadd = tail_sum;
     tail_sum += lik;
     if (tail_sum == preadd) {
-      *out_of_eqp = 1;
-      return 0;
+      return 1;
     }
     if (tail_sum >= tail_thresh) {
-      *out_of_eqp = 0;
       return 0;
     }
     homr -= 1;

@@ -37,10 +37,7 @@ int32_t main(int argc, char** argv) {
         goto main_ret_1;
       }
       if (argc == 4) {
-        double logp;
-        if (unlikely(HweLnP(hets, homs1, homs2, midp, &logp))) {
-          goto main_ret_NOMEM;
-        }
+        double logp = HweLnP(hets, homs1, homs2, midp);
         char buf[80];
         char* write_iter = strcpya(buf, "P-value: ");
         write_iter = lntoa_g(logp, write_iter);
@@ -52,10 +49,7 @@ int32_t main(int argc, char** argv) {
           fprintf(stderr, "Error: Invalid p-value threshold '%s'.\n", argv[4]);
           goto main_ret_INVALID_CMDLINE;
         }
-        uint32_t passed;
-        if (unlikely(HweThreshLn(hets, homs1, homs2, midp, exp(ln_thresh), ln_thresh, &passed))) {
-          goto main_ret_NOMEM;
-        }
+        uint32_t passed = HweThreshLn(hets, homs1, homs2, midp, exp(ln_thresh), ln_thresh);
         if (passed) {
           printf("Test failed (p-value below threshold).\n");
         } else {
@@ -93,10 +87,7 @@ int32_t main(int argc, char** argv) {
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
         }
-        double logp;
-        if (unlikely(HweLnP(hets, homs1, homs2, midp, &logp))) {
-          goto main_ret_NOMEM;
-        }
+        double logp = HweLnP(hets, homs1, homs2, midp);
         fputs("P-value for ", stdout);
         fputs(name, stdout);
         char buf[80];
@@ -108,10 +99,6 @@ int32_t main(int argc, char** argv) {
     }
   }
   while (0) {
-  main_ret_NOMEM:
-    fputs("Error: Out of memory.\n", stderr);
-    reterr = kPglRetNomem;
-    break;
   main_ret_OPEN_FAIL:
     reterr = kPglRetOpenFail;
     break;

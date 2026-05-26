@@ -19,21 +19,13 @@
 
 #include "plink2_base.h"
 
-#ifdef IGNORE_BUNDLED_MINI_GMP
-#  include <gmp.h>  // IWYU pragma: export
-#endif
 #include <math.h>
 
-#ifndef IGNORE_BUNDLED_MINI_GMP
-#  include "../mini-gmp/mini-gmp.h"  // IWYU pragma: export
-#endif
 #include "plink2_float.h"
 
 #ifdef __cplusplus
 namespace plink2 {
 #endif
-
-// Support for computations requiring more precision than double/int64.
 
 // Portable "double-double" and "quad-double" operations, primarily supporting
 // high-accuracy log-likelihood calculations, based on a subset of the QD
@@ -43,6 +35,10 @@ namespace plink2 {
 typedef struct dd_real_struct {
   double x[2];
 } dd_real;
+
+typedef struct qd_real_struct {
+  double x[4];
+} qd_real;
 
 HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
   const dd_real swaptmp = *ap;
@@ -54,8 +50,8 @@ extern const dd_real _ddr_log2;
 extern const dd_real _ddr_log05;
 extern const dd_real _ddr_64log2;
 
-CONSTI32(_ddr_n_ln_fact, 256);
-extern const dd_real _ddr_ln_fact[_ddr_n_ln_fact];
+CONSTI32(_qdr_n_ln_fact, 256);
+extern const qd_real _qdr_ln_fact[_qdr_n_ln_fact];
 
 // Fast float64-accuracy version.
 // Assumes xx is a nonnegative integer.
@@ -159,6 +155,11 @@ HEADER_CINLINE dd_real ddr_makei(const int64_t a) {
 HEADER_CINLINE dd_real ddr_makeu64(const uint64_t a) {
   const double hi = S_CAST(double, a);
   const dd_real retval = {{hi, S_CAST(double, S_CAST(int64_t, a - S_CAST(uint64_t, hi)))}};
+  return retval;
+}
+
+HEADER_CINLINE dd_real ddr_make_qd(const qd_real a) {
+  const dd_real retval = {{a.x[0], a.x[1]}};
   return retval;
 }
 
@@ -346,6 +347,10 @@ HEADER_CINLINE int32_t ddr_is_one(const dd_real a) {
   return (a.x[0] == 1.0) && (a.x[1] == 0.0);
 }
 
+HEADER_CINLINE int32_t ddr_is_two(const dd_real a) {
+  return (a.x[0] == 2.0) && (a.x[1] == 0.0);
+}
+
 
 HEADER_CINLINE int32_t ddr_ltd(const dd_real a, const double b) {
   return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] < 0));
@@ -438,14 +443,6 @@ HEADER_INLINE dd_real ddr_add3_lfacts(const double a, const double b1, const dou
 
 // ddr_add{4,5}_lfacts() removed to encourage sort-and-add for those cases.
 
-#if defined(__LP64__) && !defined(_WIN32)
-static_assert(sizeof(mp_limb_t) == 8, "Unexpected mp_limb_t size (expected 8).");
-CONSTI32(kInt32PerLimb, 2);
-#else
-static_assert(sizeof(mp_limb_t) == 4, "Unexpected mp_limb_t size (expected 4).");
-CONSTI32(kInt32PerLimb, 1);
-#endif
-
 // Sorts ddrs in place from least to greatest magnitude, and then adds.
 // Assumes ct positive.
 dd_real ddr_sort_and_add(uint32_t ct, dd_real* ddrs);
@@ -500,10 +497,6 @@ HEADER_INLINE double join_log_and_nonlog(dd_real lnprob_ddr, double mult, uint32
 }
 
 
-typedef struct qd_real_struct {
-  double x[4];
-} qd_real;
-
 HEADER_INLINE void qd_quick_renorm(double* c0p, double* c1p, double* c2p, double* c3p, double* c4p) {
   double t0;
   double t1;
@@ -539,9 +532,9 @@ HEADER_INLINE void qd_renorm4(double* c0p, double* c1p, double* c2p, double* c3p
   s0 = *c0p;
   double s1 = *c1p;
   if (s1 != 0.0) {
-    s1 = qd_quick_two_sum(s1, *c1p, &s2);
+    s1 = qd_quick_two_sum(s1, *c2p, &s2);
     if (s2 != 0.0) {
-      s2 = qd_quick_two_sum(s0, *c2p, &s1);
+      s2 = qd_quick_two_sum(s2, *c3p, &s3);
     } else {
       s1 = qd_quick_two_sum(s1, *c3p, &s2);
     }
@@ -577,9 +570,9 @@ HEADER_INLINE void qd_renorm5(double* c0p, double* c1p, double* c2p, double* c3p
   double s1 = *c1p;
 
   if (s1 != 0.0) {
-    s1 = qd_quick_two_sum(s1, *c1p, &s2);
+    s1 = qd_quick_two_sum(s1, *c2p, &s2);
     if (s2 != 0.0) {
-      s2 = qd_quick_two_sum(s0, *c2p, &s3);
+      s2 = qd_quick_two_sum(s2, *c3p, &s3);
       if (s3 != 0.0) {
         s3 += *c4p;
       } else {
@@ -637,7 +630,7 @@ HEADER_INLINE void qd_three_sum(double* ap, double* bp, double* cp) {
 HEADER_INLINE void qd_three_sum2(double* ap, double* bp, double c) {
   double t2;
   double t3;
-  double t1 = qd_two_sum(*ap, *bp, &t2);
+  const double t1 = qd_two_sum(*ap, *bp, &t2);
   *ap = qd_two_sum(c, t1, &t3);
   *bp = t2 + t3;
 }
@@ -652,12 +645,17 @@ HEADER_CINLINE qd_real qdr_make2(const double a, const double b) {
   return retval;
 }
 
+HEADER_CINLINE qd_real qdr_make_dd(const dd_real a) {
+  const qd_real retval = {{a.x[0], a.x[1], 0.0, 0.0}};
+  return retval;
+}
+
 HEADER_CINLINE qd_real qdr_make(double a, double b, double c, double d) {
   const qd_real retval = {{a, b, c, d}};
   return retval;
 }
 
-HEADER_INLINE qd_real qd_addd(const qd_real a, double b) {
+HEADER_INLINE qd_real qdr_addd(const qd_real a, double b) {
   double e;
   double c0 = qd_two_sum(a.x[0], b, &e);
   double c1 = qd_two_sum(a.x[1], e, &e);
@@ -667,6 +665,25 @@ HEADER_INLINE qd_real qd_addd(const qd_real a, double b) {
   qd_renorm5(&c0, &c1, &c2, &c3, &e);
 
   return qdr_make(c0, c1, c2, c3);
+}
+
+HEADER_INLINE qd_real qdr_add_dd(const qd_real a, const dd_real b) {
+  double t0;
+  double t1;
+
+  double s0 = qd_two_sum(a.x[0], b.x[0], &t0);
+  double s1 = qd_two_sum(a.x[1], b.x[1], &t1);
+
+  s1 = qd_two_sum(s1, t0, &t0);
+
+  double s2 = a.x[2];
+  qd_three_sum(&s2, &t0, &t1);
+
+  double s3 = qd_two_sum(t0, a.x[3], &t0);
+  t0 += t1;
+
+  qd_renorm5(&s0, &s1, &s2, &s3, &t0);
+  return qdr_make(s0, s1, s2, s3);
 }
 
 // s = qd_quick_three_accum(a, b, c) adds c to the dd-pair (a, b).
@@ -694,7 +711,6 @@ HEADER_INLINE double qd_quick_three_accum(double* ap, double* bp, double c) {
   return 0.0;
 }
 
-/*
 HEADER_INLINE qd_real qdr_ieee_add(const qd_real a, const qd_real b) {
   int32_t i = 0;
   int32_t j = 0;
@@ -722,86 +738,156 @@ HEADER_INLINE qd_real qdr_ieee_add(const qd_real a, const qd_real b) {
   x[3] = 0.0;
   do {
     if ((i >= 4) && (j >= 4)) {
+      x[k] = u;
+      if (k < 3) {
+        x[++k] = v;
+      }
+      break;
+    }
 
+    double t;
+    if (i >= 4) {
+      t = b.x[j++];
+    } else if (j >= 4) {
+      t = a.x[i++];
+    } else if (fabs(a.x[i]) > fabs(b.x[j])) {
+      t = a.x[i++];
+    } else {
+      t = b.x[j++];
+    }
+
+    const double s = qd_quick_three_accum(&u, &v, t);
+
+    if (s != 0.0) {
+      x[k++] = s;
     }
   } while (k < 4);
-  ;;;
+
+  // add the rest.
+  for (k = i; k < 4; k++) {
+    x[3] += a.x[k];
+  }
+  for (k = j; k < 4; k++) {
+    x[3] += b.x[k];
+  }
+
+  qd_renorm4(&(x[0]), &(x[1]), &(x[2]), &(x[3]));
+  return qdr_make(x[0], x[1], x[2], x[3]);
 }
-*/
 
-HEADER_INLINE qd_real qdr_sloppy_add(const qd_real a, const qd_real b) {
-  double s0 = a.x[0] + b.x[0];
-  double s1 = a.x[1] + b.x[1];
-  double s2 = a.x[2] + b.x[2];
-  double s3 = a.x[3] + b.x[3];
-
-  const double v0 = s0 - a.x[0];
-  const double v1 = s1 - a.x[1];
-  const double v2 = s2 - a.x[2];
-  const double v3 = s3 - a.x[3];
-
-  double u0 = s0 - v0;
-  double u1 = s1 - v1;
-  double u2 = s2 - v2;
-  double u3 = s3 - v3;
-
-  const double w0 = a.x[0] - u0;
-  const double w1 = a.x[1] - u1;
-  const double w2 = a.x[2] - u2;
-  const double w3 = a.x[3] - u3;
-
-  u0 = b.x[0] - v0;
-  u1 = b.x[1] - v1;
-  u2 = b.x[2] - v2;
-  u3 = b.x[3] - v3;
-
-  double t0 = w0 + u0;
-  double t1 = w1 + u1;
-  double t2 = w2 + u2;
-  const double t3 = w3 + u3;
-
-  s1 = qd_two_sum(s1, t0, &t0);
-  qd_three_sum(&s2, &t0, &t1);
-  qd_three_sum2(&s3, &t0, t2);
-  t0 = t0 + t1 + t3;
-
-  qd_renorm5(&s0, &s1, &s2, &s3, &t0);
-  return qdr_make(s0, s1, s2, s3);
-}
+// qdr_sloppy_add() deliberately omitted
 
 HEADER_CINLINE qd_real qdr_negate(const qd_real a) {
   return qdr_make(-a.x[0], -a.x[1], -a.x[2], -a.x[3]);
 }
 
-;;;
+HEADER_INLINE qd_real qdr_subd(const qd_real a, double b) {
+  return qdr_addd(a, -b);
+}
 
+HEADER_INLINE qd_real qdr_sub_dd(const qd_real a, const dd_real b) {
+  return qdr_add_dd(a, ddr_negate(b));
+}
 
-int32_t falling_factorial(mp_limb_t top, uint32_t ct, mp_limb_t* result, uint32_t* result_limb_ctp, mp_limb_t* wkspace);
+HEADER_INLINE qd_real qdr_ldexp(const qd_real a, int32_t expi) {
+  return qdr_make(ldexp(a.x[0], expi), ldexp(a.x[1], expi), ldexp(a.x[2], expi), ldexp(a.x[3], expi));
+}
 
-void lshift_multilimb(uint64_t lshift_ct, mp_limb_t* num, uint32_t* num_limb_ctp);
+HEADER_CINLINE qd_real qdr_mul_pwr2(const qd_real a, double b) {
+  return qdr_make(a.x[0] * b, a.x[1] * b, a.x[2] * b, a.x[3] * b);
+}
+
+HEADER_INLINE qd_real qdr_muld(const qd_real a, double b) {
+  double q0;
+  double q1;
+  double q2;
+  double s2;
+  const double p0 = qd_two_prod(a.x[0], b, &q0);
+  const double p1 = qd_two_prod(a.x[1], b, &q1);
+  double p2 = qd_two_prod(a.x[2], b, &q2);
+  const double p3 = a.x[3] * b;
+
+  double s0 = p0;
+
+  double s1 = qd_two_sum(q0, p1, &s2);
+
+  qd_three_sum(&s2, &q1, &p2);
+
+  qd_three_sum2(&q1, &q2, p3);
+  double s3 = q1;
+
+  double s4 = q2 + p2;
+
+  qd_renorm5(&s0, &s1, &s2, &s3, &s4);
+  return qdr_make(s0, s1, s2, s3);
+}
+
+// qdr_sloppy_mul() deliberately omitted
+
+qd_real qdr_accurate_mul(const qd_real a, const qd_real b);
+
+qd_real qdr_divd(const qd_real a, double b);
+
+qd_real qdr_accurate_div(const qd_real a, const qd_real b);
+
+qd_real qdr_sqr(const qd_real a);
+
+HEADER_CINLINE int32_t qdr_is_zero(const qd_real a) {
+  return (a.x[0] == 0.0);
+}
+
+HEADER_CINLINE int32_t qdr_is_one(const qd_real a) {
+  // a.x[1] == 0 should guarantee a.x[2] == a.x[3] == 0.0.
+  return (a.x[0] == 1.0) && (a.x[1] == 0.0);
+}
+
+// We only use these routines in the rare cases where dd_real arithmetic
+// doesn't naturally yield relative error < ~2^{-53} (or we are validating the
+// dd_real routines).  Not worthwhile to try to trade off accuracy for a ~2x
+// speedup in this context.
+HEADER_INLINE qd_real qdr_add(const qd_real a, const qd_real b) {
+  return qdr_ieee_add(a, b);
+}
+
+HEADER_INLINE qd_real qdr_sub(const qd_real a, const qd_real b) {
+  return qdr_add(a, qdr_negate(b));
+}
+
+HEADER_INLINE qd_real qdr_mul(const qd_real a, const qd_real b) {
+  return qdr_accurate_mul(a, b);
+}
+
+qd_real qdr_exp(const qd_real a);
+
+qd_real qdr_log(const qd_real a);
+
+qd_real qdr_lfact(double xx);
+
 
 // Preconditions:
 // - numer_factorial_args[] and denom_factorial_args[] are
 //   not-necessarily-sorted lists of length ffac_ct, describing a quotient of
 //   factorial-products.  (If one list is longer than the other, just pad the
-//   other with zeroes.)
-// - pow2 is a power of 2 to multiply the quotient by at the end.
+//   other with zeroes.)  All entries < 2^52.
+// - odds_ratio^odds_ratio_pow is an exponential term to multiply the quotient
+//   by at the end.
 // - starting_lnprobv_ddr is either initialized to
-//     log(2^numer_pow2 / (numer_factorial_args[0]! ... numer_factorial_args[ffac_ct-1]!))
+//     log(numer_odds_ratio_pow / (numer_factorial_args[0]! ...
+//                                 numer_factorial_args[ffac_ct-1]!))
 //   or it has x[0] initialized to DBL_MAX to indicate that the calculation
 //   hasn't happened.  In the latter case, it may be set to the former value
 //   if that is needed.
-//
-// This function errors out iff memory allocation fails.
+// - Similarly, ln_odds_ratio_ddr is either initialized to log(odds_ratio), or
+//   it has x[0] initialized to DBL_MAX.
 //
 // Postconditions on success:
-// - *cmp_resultp is set to a positive value if the fraction > 1, a negative
-//   value if the fraction < 1, and zero if it's exactly 1.
+// - Return value is positive if the fraction > 1, negative if the fraction <
+//   1, and zero if it's exactly 1.
 // - *dbl_ptr is the double representation of the fraction, error limited to
 //   1-2 ulps.
 // - numer_factorial_args[] and denom_factorial_args[] are sorted in
 //   nondecreasing order.
-BoolErr CompareFactorialProducts(uint32_t ffac_ct, int64_t pow2, int64_t numer_pow2, uint32_t* numer_factorial_args, uint32_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, mp_limb_t** gmp_wkspacep, uintptr_t* gmp_wkspace_limb_ctp, intptr_t* cmp_resultp, double* dbl_ptr);
+intptr_t CompareFactorialProducts(uint32_t ffac_ct, dd_real odds_ratio_ddr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, double* dbl_ptr);
 
 #ifdef __cplusplus
 }
