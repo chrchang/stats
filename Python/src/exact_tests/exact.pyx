@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
@@ -60,7 +60,7 @@ cdef extern from "../include/plink2_float.h" namespace "plink2":
 
 
 cdef extern from "../include/plink2_hwe.h" namespace "plink2":
-    BoolErr HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp, double* resultp) nogil
+    double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp) nogil
 
 
 # For dbinom() and pbinom(), we want to be able to deliver <1 ULP relative
@@ -414,8 +414,7 @@ def HWE(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", b
         raise RuntimeError("one-sided tests not implemented yet")
     else:
         # note different parameter order
-        if HweLnP(hets, hom1, hom2, midp, &ln_result):
-            raise MemoryError()
+        ln_result = HweLnP(hets, hom1, hom2, midp)
     if logp:
         return ln_result
     return exp_flush(ln_result)

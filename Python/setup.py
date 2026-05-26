@@ -4,10 +4,6 @@ import setuptools
 from setuptools.extension import Extension
 from Cython.Build import cythonize
 
-clib = ("clib",
-        {"sources": ["src/mini-gmp/mini-gmp.c"]
-         })
-
 ext_modules = [
     Extension("exact_tests",
               sources = ["src/exact_tests/exact.pyx",
@@ -29,7 +25,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.4.4",
+    version="0.4.5",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",
@@ -47,6 +43,5 @@ setuptools.setup(
     package_dir={"": "src"},
     packages=setuptools.find_namespace_packages(where="src"),
     python_requires=">=3.10",
-    libraries=[clib],
     ext_modules=cythonize(ext_modules),
 )
