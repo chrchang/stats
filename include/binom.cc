@@ -485,7 +485,7 @@ BoolErr BinomCompare(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_
   //
   // where k = # of successes and p is the expected success rate.
   //
-  // Thus, the probability ratio of interest is
+  // Thus, the likelihood ratio of interest is
   //
   //   obs_succ! (obs_tot - obs_succ)!                  succ - obs_succ
   //   ------------------------------- * succ_odds_ratio
