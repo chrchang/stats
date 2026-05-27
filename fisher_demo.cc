@@ -60,10 +60,7 @@ int32_t main(int argc, char** argv) {
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
         }
-        double ln_pval;
-        if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &ln_pval))) {
-          goto main_ret_NOMEM;
-        }
+        double ln_pval = Fisher23LnP(m11, m21, m31, m12, m22, m32, midp);
         char buf[80];
         char* write_iter = strcpya(buf, "P-value: ");
         write_iter = lntoa_g(ln_pval, write_iter);
@@ -76,10 +73,7 @@ int32_t main(int argc, char** argv) {
           goto main_ret_1;
         }
         if (argc == 5) {
-          double ln_pval;
-          if (unlikely(Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1, &ln_pval))) {
-            goto main_ret_NOMEM;
-          }
+          double ln_pval = Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1);
           char buf[80];
           char* write_iter = strcpya(buf, "P-value: ");
           write_iter = lntoa_g(ln_pval, write_iter);
@@ -149,13 +143,9 @@ int32_t main(int argc, char** argv) {
             // skip improperly formatted line
             continue;
           }
-          if (unlikely(Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1, &ln_pval))) {
-            goto main_ret_NOMEM;
-          }
+          ln_pval = Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1);
         } else {
-          if (unlikely(Fisher23LnP(m11, m21, m31, m12, m22, m32, midp, &ln_pval))) {
-            goto main_ret_NOMEM;
-          }
+          ln_pval = Fisher23LnP(m11, m21, m31, m12, m22, m32, midp);
         }
         char buf[80];
         fputs("P-value for ", stdout);

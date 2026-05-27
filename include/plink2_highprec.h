@@ -32,13 +32,15 @@ namespace plink2 {
 // library (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
 
-typedef struct dd_real_struct {
-  double x[2];
-} dd_real;
-
 typedef struct qd_real_struct {
   double x[4];
 } qd_real;
+
+extern const qd_real _qdr_log05;
+
+typedef struct dd_real_struct {
+  double x[2];
+} dd_real;
 
 HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
   const dd_real swaptmp = *ap;
@@ -861,7 +863,11 @@ qd_real qdr_exp(const qd_real a);
 
 qd_real qdr_log(const qd_real a);
 
+qd_real qdr_log1p(const qd_real a);
+
 qd_real qdr_lfact(double xx);
+
+qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 
 
 // Preconditions:

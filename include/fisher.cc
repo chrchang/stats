@@ -91,7 +91,7 @@ intptr_t Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, u
 // (Note that the odds-ratio and odds-ratio-confidence-interval reported by R
 // fisher.test can also be calculated efficiently, using e.g. the approach in
 // the R BiasedUrn package's meanFNCHypergeo() and pFNCHypergeo() functions.)
-BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) {
+double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
   // spurious index differences between Fisher22 and Fisher23.
@@ -108,8 +108,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
   if (!midp) {
     // Fast path for p=1.
     if ((obs_m11 + 1LL) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
-      *resultp = logp? 0.0 : 1.0;
-      return 0;
+      return logp? 0.0 : 1.0;
     }
   }
   // Iterate outward to floating-point precision limit.
@@ -200,8 +199,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
       }
     }
     const double pval = tail_sum / (tail_sum + center_sum);
-    *resultp = logp? log(pval) : pval;
-    return 0;
+    return logp? log(pval) : pval;
   }
   dd_real starting_lnprobv_ddr =
     ddr_negate(ddr_sort_and_add_4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
@@ -279,8 +277,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
         // table.  Exit.
-        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
-        return 0;
+        return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
       }
       const double ll_deriv = log(m12 * m21 / ((m11 + 1) * (m22 + 1)));
       // Round up, to guarantee that we make progress.
@@ -353,8 +350,7 @@ BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int
     m12 -= 1;
     m21 -= 1;
   }
-  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
-  return 0;
+  return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
 }
 
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^52.  (I'll keep the
@@ -1027,7 +1023,7 @@ static const double kJumpThresh = 314.0; // chosen to guarantee base_lik < kSwit
 // Since each Fisher's exact test contigency table has rows and columns, we use
 // 'rank' instead of 'row' to refer to the set of tables with 3rd column held
 // constant.
-BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tail_sum_ptr, dd_real* starting_lnprobv_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_likl_ptr, double* orig_base_lnlikl_ptr, double* orig_base_epsl_ptr, double* orig_base_likr_ptr, double* orig_base_lnlikr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
+void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, double* tail_sum_ptr, dd_real* starting_lnprobv_ddr_ptr, int32_t* tie_ct_ptr, double* orig_base_likl_ptr, double* orig_base_lnlikl_ptr, double* orig_base_epsl_ptr, double* orig_base_likr_ptr, double* orig_base_lnlikr_ptr, double* orig_base_epsr_ptr, double* orig_saved_l11_ptr, double* orig_saved_l12_ptr, double* orig_saved_l21_ptr, double* orig_saved_l22_ptr, double* orig_saved_r11_ptr, double* orig_saved_r12_ptr, double* orig_saved_r21_ptr, double* orig_saved_r22_ptr) {
   // possible todo: have this and Fisher22TwoSidedP() call a shared function
   double m11 = obs_m11;
   double m12 = obs_m12;
@@ -1149,7 +1145,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
               *orig_base_lnlikl_ptr = lnprobv_diff;
               *orig_base_epsl_ptr = (1 + ceil(lnprobv_diff)) * k2m52;
             }
-            return 0;
+            return;
           }
           const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
           // Round up, to guarantee that we make progress.
@@ -1224,7 +1220,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
       m22 -= 1;
     }
     *tail_sum_ptr = tail_sum;
-    return 0;
+    return;
   }
   *orig_base_likl_ptr = 1;
   *orig_base_epsl_ptr = k2m52;
@@ -1319,7 +1315,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
             *orig_base_lnlikr_ptr = lnprobv_diff;
             *orig_base_epsr_ptr = (1 + ceil(lnprobv_diff)) * k2m52;
           }
-          return 0;
+          return;
         }
         // Derivative is w.r.t. m21.
         const double ll_deriv = log((m11 + 1) * (m22 + 1) / (m12 * m21));
@@ -1387,7 +1383,7 @@ BoolErr Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21
     m21 -= 1;
   }
   *tail_sum_ptr = tail_sum;
-  return 0;
+  return;
 }
 
 intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t cur_m11, uint32_t cur_m12, dd_real* neg_numer_ddr_ptr, double* dbl_ptr) {
@@ -1427,7 +1423,7 @@ intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, u
 }
 
 // 'Left' = small m11 and m22.
-BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, double* base_likp, double* base_lnlikp, double* base_epsp, double* saved_m11p, double* saved_m12p, double* saved_m21p, double* saved_m22p, int32_t* tie_ctp, double* totalp, uint32_t* center_is_emptyp) {
+void Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, double* base_likp, double* base_lnlikp, double* base_epsp, double* saved_m11p, double* saved_m12p, double* saved_m21p, double* saved_m22p, int32_t* tie_ctp, double* totalp, uint32_t* center_is_emptyp) {
   double total = 0;
   double lik = *base_likp;
   double cur_eps = *base_epsp;
@@ -1450,7 +1446,7 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
           *saved_m12p = m12;
           *saved_m21p = m21;
           *saved_m22p = m22;
-          return 0;
+          return;
         }
         m12 += 1;
         m21 += 1;
@@ -1490,7 +1486,7 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
           *base_lnlikp = last_lnp;
           *base_epsp = cur_eps + ceil(last_lnp) * k2m52;
         }
-        return 0;
+        return;
       }
       m12 += 1;
       m21 += 1;
@@ -1568,7 +1564,7 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
             *tie_ctp += tie_ct_incr + (lik_mult_numer == lik_mult_denom);
           }
           *center_is_emptyp = 1;
-          return 0;
+          return;
         }
       }
       lik *= lik_mult;
@@ -1608,17 +1604,16 @@ BoolErr Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, u
   }
   *totalp = total;
   *center_is_emptyp = 0;
-  return 0;
 }
 
-static inline BoolErr Fisher23LnPRightTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, double* base_likp, double* base_lnlikp, double* base_epsp, double* saved_m11p, double* saved_m12p, double* saved_m21p, double* saved_m22p, int32_t* tie_ctp, double* totalp) {
+static inline void Fisher23LnPRightTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, double* base_likp, double* base_lnlikp, double* base_epsp, double* saved_m11p, double* saved_m12p, double* saved_m21p, double* saved_m22p, int32_t* tie_ctp, double* totalp) {
   uint32_t unused;
-  return Fisher23LnPLeftTailsum(starting_lnprobv_ddr, obs_m12, obs_m11, obs_m13, obs_m22, obs_m21, obs_m23, base_likp, base_lnlikp, base_epsp, saved_m12p, saved_m11p, saved_m22p, saved_m21p, tie_ctp, totalp, &unused);
+  Fisher23LnPLeftTailsum(starting_lnprobv_ddr, obs_m12, obs_m11, obs_m13, obs_m22, obs_m21, obs_m23, base_likp, base_lnlikp, base_epsp, saved_m12p, saved_m11p, saved_m22p, saved_m21p, tie_ctp, totalp, &unused);
 }
 
 // obs_m11 + obs_m12 + obs_m13 + obs_m21 + obs_m22 + obs_m23 assumed to be
 // <2^31.
-BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) {
+double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) {
   // Normalize: m11 + m21 >= m12 + m22 >= m13 + m23,
   //            m13 * (m21 + m22) <= m23 * (m11 + m12)
   // Note that columns are reversed from PLINK 1.9 fisher23().
@@ -1639,7 +1634,7 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
           swap_i32(&mx2i, &mx3i);
         }
         if (mx3i == 0) {
-          return Fisher22TwoSidedP(obs_m11, obs_m12, obs_m21, obs_m22, midp, 1, resultp);
+          return Fisher22TwoSidedP(obs_m11, obs_m12, obs_m21, obs_m22, midp, 1);
         }
       }
       if (mx1i < mx2i) {
@@ -1671,9 +1666,7 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
   double orig_saved_r12;
   double orig_saved_r21;
   double orig_saved_r22;
-  if (unlikely(Fisher23LnStartingRank(obs_m11, obs_m12, obs_m21, obs_m22, &outer_sum, &starting_lnprobv_ddr, &tie_ct, &orig_base_likl, &orig_base_lnlikl, &orig_base_epsl, &orig_base_likr, &orig_base_lnlikr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22))) {
-    return 1;
-  }
+  Fisher23LnStartingRank(obs_m11, obs_m12, obs_m21, obs_m22, &outer_sum, &starting_lnprobv_ddr, &tie_ct, &orig_base_likl, &orig_base_lnlikl, &orig_base_epsl, &orig_base_likr, &orig_base_lnlikr, &orig_base_epsr, &orig_saved_l11, &orig_saved_l12, &orig_saved_l21, &orig_saved_l22, &orig_saved_r11, &orig_saved_r12, &orig_saved_r21, &orig_saved_r22);
 
   // Returned starting_lnprobv_ddr is for a single rank, corresponding to
   // 1 / (obs_m11! obs_m12! obs_m21! obs_m22!).
@@ -1787,9 +1780,7 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
       }
       double tail_incr1 = 0.0;
       uint32_t center_is_empty;
-      if (unlikely(Fisher23LnPLeftTailsum(starting_lnprobv_ddr, obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, &base_likl, &base_lnlikl, &base_epsl, &l11, &l12, &l21, &l22, &tie_ct, &tail_incr1, &center_is_empty))) {
-        return 1;
-      }
+      Fisher23LnPLeftTailsum(starting_lnprobv_ddr, obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, &base_likl, &base_lnlikl, &base_epsl, &l11, &l12, &l21, &l22, &tie_ct, &tail_incr1, &center_is_empty);
       if (center_is_empty) {
         // All tables in this rank, and all subsequent ranks, are no more
         // probable than the initial table, and we've already counted ties.
@@ -1862,9 +1853,7 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
         base_epsr += 2 * k2m52;
       }
       double tail_incr2 = 0.0;
-      if (unlikely(Fisher23LnPRightTailsum(starting_lnprobv_ddr, obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, &base_likr, &base_lnlikr, &base_epsr, &r11, &r12, &r21, &r22, &tie_ct, &tail_incr2))) {
-        return 1;
-      }
+      Fisher23LnPRightTailsum(starting_lnprobv_ddr, obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, &base_likr, &base_lnlikr, &base_epsr, &r11, &r12, &r21, &r22, &tie_ct, &tail_incr2);
       outer_sum += tail_incr2;
     }
   }
@@ -1874,13 +1863,12 @@ BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t o
     outer_sum -= tie_ct * 0.5;
   }
   const double result = log(outer_sum) + starting_lnprob;
-  *resultp = result;
   if (result > -k2m35) {
     // true p-value should always be 1 here
     // (possible todo: check boundary cases with total near 2^31)
-    *resultp = 0;
+    return 0.0;
   }
-  return 0;
+  return result;
 }
 
 #ifdef __cplusplus

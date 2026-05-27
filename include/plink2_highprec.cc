@@ -31,6 +31,7 @@ namespace plink2 {
 
 const qd_real _qdr_e = {{2.718281828459045091e+00, 1.445646891729250158e-16, -2.127717108038176765e-33, 1.515630159841218954e-49}};
 const qd_real _qdr_log2 = {{6.931471805599452862e-01, 2.319046813846299558e-17, 5.707708438416212066e-34, -3.582432210601811423e-50}};
+const qd_real _qdr_log05 = {{-6.931471805599452862e-01, -2.319046813846299558e-17, -5.707708438416212066e-34, 3.582432210601811423e-50}};
 static const qd_real _qdr_half_log_2pi = {{9.1893853320467278056e-01, -3.8782941580672414498e-17, -1.3239715968498069736e-33,  5.1508604368716851602e-50}};
 static const qd_real _qdr_12th = {{8.3333333333333328707e-02,  4.6259292692714853283e-18, 2.5679065925163143282e-34,  1.4254745120491709321e-50}};
 static const qd_real _qdr_neg_360th = {{-2.7777777777777778838e-03,  1.0601087908747154118e-19, 3.4773735106991755191e-36,  3.2667124234460167937e-52}};
@@ -578,7 +579,8 @@ int32_t dd_real_abs_cmp(const void* aa, const void* bb) {
   if (aa0 != bb0) {
     return (aa0 < bb0)? -1 : 1;
   }
-  // Ensure deterministic results by defining a total ordering.
+  // Ensure deterministic results (without nans, anyway) by defining a total
+  // ordering.
   // We arbitrarily define |x| as having smaller magnitude than -|x|.
   const uint32_t aa_was_neg = (aa0 < 0);
   const uint32_t bb_was_neg = (bb0 < 0);
@@ -902,6 +904,11 @@ qd_real qdr_lfact(double xx) {
   const qd_real invn2_qdr = qdr_sqr(invn_qdr);
   // First omitted term is (-3392780147/93960)x^27.  For x >= 256, this is <
   // 2^{-200}, which is small enough not to matter.
+  //
+  // Probable todo: replace with for-loop which starts from an appropriate
+  // term.  We only call this when ddr_lfact() isn't good enough; this can mean
+  // x is in the trillions and we don't actually need any terms past x^5 or
+  // even x^3.
   qd_real sum_qdr =
     qdr_mul(
       invn_qdr,
@@ -961,6 +968,69 @@ qd_real qdr_lfact(double xx) {
   sum_qdr = qdr_subd(sum_qdr, xx);
   const qd_real logn_qdr = qdr_log(qdr_make1(xx));
   return qdr_add(sum_qdr, qdr_muld(logn_qdr, xx + 0.5));
+}
+
+qd_real qdr_log1p(const qd_real a) {
+  if (fabs(a.x[0]) >= 0.03125) {
+    return qdr_log(qdr_addd(a, 1.0));
+  }
+  // log(1+x) = x - (x^2)/2 + (x^3)/3 - ...
+  const double thresh = fabs(a.x[0]) * (4 * _qdr_eps);
+  qd_real p = qdr_sqr(a);
+  qd_real s = qdr_sub(a, qdr_mul_pwr2(p, 0.5));
+  p = qdr_mul(p, a);
+  const qd_real neg_a = qdr_negate(a);
+  double tidx_d = 3.0;
+  while (1) {
+    const qd_real t = qdr_divd(p, tidx_d);
+    if (fabs(t.x[0]) <= thresh) {
+      return s;
+    }
+    s = qdr_add(s, t);
+    tidx_d += 1.0;
+    p = qdr_mul(p, neg_a);
+  }
+}
+
+int32_t qd_real_abs_cmp(const void* aa, const void* bb) {
+  qd_real aa_qdr = *S_CAST(const qd_real*, aa);
+  qd_real bb_qdr = *S_CAST(const qd_real*, bb);
+  const double aa0 = fabs(aa_qdr.x[0]);
+  const double bb0 = fabs(bb_qdr.x[0]);
+  if (aa0 != bb0) {
+    return (aa0 < bb0)? -1 : 1;
+  }
+  // Ensure deterministic results (without nans, anyway) by defining a total
+  // ordering.
+  // We arbitrarily define |x| as having smaller magnitude than -|x|.
+  const uint32_t aa_was_neg = (aa0 < 0);
+  const uint32_t bb_was_neg = (bb0 < 0);
+  if (aa_was_neg) {
+    aa_qdr = qdr_negate(aa_qdr);
+  }
+  if (bb_was_neg) {
+    bb_qdr = qdr_negate(bb_qdr);
+  }
+  for (uint32_t limb_idx = 1; limb_idx < 4; ++limb_idx) {
+    const double aa_limb = fabs(aa_qdr.x[limb_idx]);
+    const double bb_limb = fabs(bb_qdr.x[limb_idx]);
+    if (aa_limb != bb_limb) {
+      return (aa_limb < bb_limb)? -1 : 1;
+    }
+  }
+  if (aa_was_neg != bb_was_neg) {
+    return (aa_was_neg < bb_was_neg)? -1 : 1;
+  }
+  return 0;
+}
+
+qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs) {
+  qsort(qdrs, ct, sizeof(qd_real), qd_real_abs_cmp);
+  qd_real sum_qdr = qdrs[0];
+  for (uint32_t uii = 1; uii < ct; ++uii) {
+    sum_qdr = qdr_add(sum_qdr, qdrs[uii]);
+  }
+  return sum_qdr;
 }
 
 // Preconditions:

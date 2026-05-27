@@ -48,7 +48,7 @@ double LnBinomCoeff(int64_t n, int64_t k);
 
 double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp);
 
-BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp);
+double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp);
 
 double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, int32_t midp, uint32_t logp);
 

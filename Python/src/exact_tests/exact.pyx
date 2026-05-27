@@ -23,11 +23,9 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
 
 cdef extern from "../include/binom.h" namespace "plink2":
-    ctypedef uint32_t BoolErr
-
     double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
-    BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) nogil
+    double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp) nogil
 
     double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
 
@@ -39,7 +37,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 cdef extern from "../include/fisher.h" namespace "plink2":
     double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp)
 
-    BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp) nogil
+    double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) nogil
 
     double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp) nogil
 
@@ -47,7 +45,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     int64_t QhyperHalfUlp(dd_real_struct p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) nogil
 
-    BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp) nogil
+    double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
 
 cdef extern from "../include/plink2_float.h" namespace "plink2":
@@ -164,8 +162,7 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
             raise RuntimeError("For alternative='two-sided', p must be 0 or in (2^{-63}, 1].")
         if denom >= 2**63:
             raise RuntimeError("For alternative='two-sided', fractions.Fraction(p) must have denominator < 2^63.  If an exact decimal value (e.g. 0.0001) is intended, it can be passed in as a string, otherwise a generic workaround is to pass in fractions.Fraction(p).limit_denominator(2**63 - 1).")
-        if BinomTwoSidedP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, logp, &result):
-            raise MemoryError()
+        result = BinomTwoSidedP(k, n, <int64_t>(numer), <int64_t>(denom - numer), midp, logp)
         return flush_if_denormal(result)
     cdef bint complement = (alternative == "greater")
     if alternative != "less" and not complement:
@@ -293,8 +290,7 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
     if nrow == 2 and ncol == 2:
         if total > 0x7fffffff:
             raise RuntimeError("table entries must sum to <2^31")
-        if Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp, &ln_result):
-            raise MemoryError()
+        ln_result = Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp)
         return flush_if_denormal(ln_result)
     cdef int32_t m13
     cdef int32_t m23
@@ -310,8 +306,7 @@ def fisher(list table, str alternative="two-sided", bint midp=0, bint logp=0):
         if m13 < 0 or m23 < 0 or total > 0x7fffffff:
             raise RuntimeError("table entries must be nonnegative and sum to <2^31")
         with nogil:
-            if Fisher23LnP(m11, m12, m13, m21, m22, m23, midp, &ln_result):
-                raise MemoryError()
+            ln_result = Fisher23LnP(m11, m12, m13, m21, m22, m23, midp)
     else:
          raise RuntimeError("tables larger than 2x3 not yet supported")
     if logp:

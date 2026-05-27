@@ -30,64 +30,92 @@ double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  return ddr_sub(ddr_lfact(n),
-                 ddr_add_lfacts(k, n-k)).x[0];
+  if (n < (1LL << 40)) {
+    return ddr_sub(ddr_lfact(n),
+                   ddr_add_lfacts(k, n-k)).x[0];
+  }
+  return qdr_sub(qdr_lfact(n),
+                 qdr_add(qdr_lfact(k), qdr_lfact(n-k))).x[0];
 }
 
-// Currently assumes k < n.
+// Currently assumes k < n.  Should always have <1 ULP error; and
+// ddr_exp(result) also has <1 ULP error when it isn't < DBL_MIN.
 //
-// For p=0.5, this doesn't reach relative error > 2^{-53} until n > ~2^43.
-// (ddr_lfact(2^43) ~= 2^43 * log(2^43) ~= 2^43 * 40 * 0.693 ~= 2^48.
-// Reviewing the operations required by ddr_lfact() (dominated by a ddr_log()
-// call, which is in turn dominated by a ddr_exp() call), I'm pretty sure
-// ddr_lfact()'s relative error < 2^{-99} for our domain (while I would be
+// For p=0.5, dd_real calculation doesn't reach relative error > 2^{-53} until
+// n > ~2^42.  (ddr_lfact(2^42) ~= 2^42 * log(2^42) ~= 2^42 * 40 * 0.693 ~=
+// 2^47.  Reviewing the operations required by ddr_lfact() (dominated by a
+// ddr_log() call, which is in turn dominated by a ddr_exp() call), I'm pretty
+// sure ddr_lfact()'s relative error < 2^{-98} for our domain (while I would be
 // surprised if it was always < 2^{-101}).  We need to add one number near
 // ddr_lfact(n) (or two numbers near ddr_lfact(n/2)) and subtract ddr_lfact(n);
 // that translates to absolute error ~2^{-50}.  The return value is always <
-// -15 in that region, so absolute error < 2^{-50} translates into relative
+// -14 in that region, so absolute error < 2^{-50} translates into relative
 // error < 2^{-53}.)
 //
 // The p~=DBL_MIN case can be broken into two subcases, k=0 and k>0.
 // - If k=0, no log-factorials are computed, ddr_log1p() should have relative
-//   error < 2^{-99} w.r.t. p, and the only operation after that is the
+//   error < 2^{-98} w.r.t. p, and the only operation after that is the
 //   high-accuracy ddr_muld().
 // - If k>>0 and n is huge, the k_ln_p_ddr term may be dominant.  When it is,
-//   ddr_muld(ddr_log(p_ddr), k) should have relative error < 2^{-99}, which
+//   ddr_muld(ddr_log(p_ddr), k) should have relative error < 2^{-98}, which
 //   corresponds to absolute error
-//     2^{-99} * k * log(p) ~= k * 2^{-89}
+//     2^{-98} * k * log(p) ~= k * 2^{-88}
 //   which can be much worse than the p=0.5 case.  But the relative error
 //   doesn't wind up being much worse (equivalent at worst to ~doubling n?)
 //   since the final return value has larger magnitude.
 //
 // p intermediate between these two values won't result in behavior much worse
 // than these three limiting cases, so I expect the relative-error goal is met
-// for any n < ~2^41.
+// for any n < ~2^40.
 //
 // Note that when e.g. BinomMass() is called with logp is false, we care about
 // absolute instead of relative error of this function (and stop caring what
 // happens far past DBL_MIN).  That should remain < 2^{-53} for the domain of
-// interest until n > ~2^38.
+// interest until n > ~2^37.
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
-  dd_real ln_q_ddr = _ddr_log05;
-  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
-    ln_q_ddr = ddr_log1p(ddr_negate(p_ddr));
+  const uint32_t p_is_half = (p_ddr.x[0] == 0.5) && (p_ddr.x[1] == 0.0);
+  if ((n < (1LL << 37)) || (p_is_half && (n < (1LL << 42)))) {
+    dd_real ln_q_ddr = _ddr_log05;
+    if (!p_is_half) {
+      ln_q_ddr = ddr_log1p(ddr_negate(p_ddr));
+    }
+    const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
+    if (k == 0) {
+      return nmk_ln_q_ddr;
+    }
+    dd_real ln_p_ddr = _ddr_log05;
+    if (!p_is_half) {
+      ln_p_ddr = ddr_log(p_ddr);
+    }
+    const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
+    dd_real ddrs[5];
+    ddrs[0] = k_ln_p_ddr;
+    ddrs[1] = nmk_ln_q_ddr;
+    ddrs[2] = ddr_lfact(n);
+    ddrs[3] = ddr_negate(ddr_lfact(k));
+    ddrs[4] = ddr_negate(ddr_lfact(n-k));
+    return ddr_sort_and_add(5, ddrs);
   }
-  const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
+  qd_real ln_q_qdr = _qdr_log05;
+  if (!p_is_half) {
+    ln_q_qdr = qdr_log1p(qdr_make2(-p_ddr.x[0], -p_ddr.x[1]));
+  }
+  const qd_real nmk_ln_q_qdr = qdr_muld(ln_q_qdr, n-k);
   if (k == 0) {
-    return nmk_ln_q_ddr;
+    return ddr_make_qd(nmk_ln_q_qdr);
   }
-  dd_real ln_p_ddr = _ddr_log05;
-  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
-    ln_p_ddr = ddr_log(p_ddr);
+  qd_real ln_p_qdr = _qdr_log05;
+  if (!p_is_half) {
+    ln_p_qdr = qdr_log(qdr_make_dd(p_ddr));
   }
-  const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
-  dd_real ddrs[5];
-  ddrs[0] = k_ln_p_ddr;
-  ddrs[1] = nmk_ln_q_ddr;
-  ddrs[2] = ddr_lfact(n);
-  ddrs[3] = ddr_negate(ddr_lfact(k));
-  ddrs[4] = ddr_negate(ddr_lfact(n-k));
-  return ddr_sort_and_add(5, ddrs);
+  const qd_real k_ln_p_qdr = qdr_muld(ln_p_qdr, k);
+  qd_real qdrs[5];
+  qdrs[0] = k_ln_p_qdr;
+  qdrs[1] = nmk_ln_q_qdr;
+  qdrs[2] = qdr_lfact(n);
+  qdrs[3] = qdr_negate(qdr_lfact(k));
+  qdrs[4] = qdr_negate(qdr_lfact(n-k));
+  return ddr_make_qd(qdr_sort_and_add(5, qdrs));
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
@@ -110,8 +138,7 @@ double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
 }
 
 
-// - succ_odds_ratio must be initialized to p / (1-p) reduced to lowest terms,
-//   where p is the expected success rate.
+// - succ_odds_ratio_ddr must be p/(1-p), where p is the expected success rate.
 //
 // - starting_lnprobv_ddr is expected to either be initialized to
 //     log(succ_odds_ratio^obs_succ / (obs_succ! (obs_tot - obs_succ)!)),
@@ -179,14 +206,12 @@ intptr_t BinomCompare(int32_t obs_succ, int32_t obs_tot, dd_real succ_odds_ratio
 // 4. Add its tail pbinom() value, return.
 // Several other 2-sided exact tests based on unimodal distributions (e.g.
 // Fisher's 2x2) can be performed in the same manner.
-BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp, double* resultp) {
+double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp) {
   if (!obs_tot) {
     if (midp) {
-      *resultp = logp? -kLn2 : 0.5;
-    } else {
-      *resultp = logp? 0.0 : 1.0;
+      return logp? -kLn2 : 0.5;
     }
-    return 0;
+    return logp? 0.0 : 1.0;
   }
   double succ = obs_succ;
   double fail = obs_tot - obs_succ;
@@ -212,16 +237,14 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     // Might we be at the mode?
     if (first_inward_mult <= 1 + 2 * k2m52) {
       if (first_inward_mult <= 1 - 2 * k2m52) {
-        *resultp = logp? 0.0 : 1.0;
-        return 0;
+        return logp? 0.0 : 1.0;
       }
       uint64_t numer_hi;
       uint64_t numer_lo = multiply64to128(obs_tot - obs_succ, succ_odds_ratio_numer, &numer_hi);
       uint64_t denom_hi;
       uint64_t denom_lo = multiply64to128(obs_succ + 1, succ_odds_ratio_denom, &denom_hi);
       if ((denom_hi > numer_hi) || ((denom_hi == numer_hi) && (denom_lo >= numer_lo))) {
-        *resultp = logp? 0.0 : 1.0;
-        return 0;
+        return logp? 0.0 : 1.0;
       }
     }
   }
@@ -311,8 +334,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
       }
     }
     const double pval = tail_sum / (tail_sum + center_sum);
-    *resultp = logp? log(pval) : pval;
-    return 0;
+    return logp? log(pval) : pval;
   }
   dd_real ln_odds_ratio_ddr = ddr_log(succ_odds_ratio_ddr);
   dd_real starting_lnprobv_ddr =
@@ -367,8 +389,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
   if (ddr_geqd(succ_odds_ratio_ddr, obs_totd)) {
-    *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
-    return 0;
+    return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
   }
 
   succ = 2 * modal_succ - (succ + smallest_evaluated_succ) * 0.5;
@@ -393,8 +414,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
     if (lnprobv_diff >= k2m53) {
       if (fail == 0) {
-        *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
-        return 0;
+        return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
       }
       const double ll_deriv = ln_odds_ratio_ddr.x[0] + log(fail / (succ + 1));
       // Round up, to guarantee that we make progress.
@@ -454,8 +474,7 @@ BoolErr BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_rati
     }
     fail -= 1;
   }
-  *resultp = join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
-  return 0;
+  return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
 }
 
 // ibeta_fraction2_ln_ddr{1,2}() adapted from Boost 1.91.0.  This derived code

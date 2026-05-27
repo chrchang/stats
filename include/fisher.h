@@ -60,7 +60,7 @@ HEADER_INLINE double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_
   return ddr_exp(ln_prob_ddr).x[0];
 }
 
-BoolErr Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp, double* resultp);
+double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp);
 
 double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp);
 
@@ -76,7 +76,7 @@ HEADER_INLINE int64_t QhyperHalfUlp(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd
   return Qhyper(p_or_lnp_ddr, ac, bd, ab, logp);
 }
 
-BoolErr Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp, double* resultp);
+double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp);
 
 // Probable todos:
 // - Function implementing 2xk for k>2, recursion can just follow how
