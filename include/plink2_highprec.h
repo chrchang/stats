@@ -36,11 +36,18 @@ typedef struct qd_real_struct {
   double x[4];
 } qd_real;
 
+extern const qd_real _qdr_log2;
 extern const qd_real _qdr_log05;
 
 typedef struct dd_real_struct {
   double x[2];
 } dd_real;
+
+HEADER_INLINE void swap_qdr(qd_real* ap, qd_real* bp) {
+  const qd_real swaptmp = *ap;
+  *ap = *bp;
+  *bp = swaptmp;
+}
 
 HEADER_INLINE void swap_ddr(dd_real* ap, dd_real* bp) {
   const dd_real swaptmp = *ap;
@@ -345,12 +352,8 @@ HEADER_CINLINE int32_t ddr_is_zero(const dd_real a) {
   return (a.x[0] == 0.0);
 }
 
-HEADER_CINLINE int32_t ddr_is_one(const dd_real a) {
-  return (a.x[0] == 1.0) && (a.x[1] == 0.0);
-}
-
-HEADER_CINLINE int32_t ddr_is_two(const dd_real a) {
-  return (a.x[0] == 2.0) && (a.x[1] == 0.0);
+HEADER_CINLINE int32_t ddr_is(const dd_real a, double b) {
+  return (a.x[0] == b) && (a.x[1] == 0.0);
 }
 
 
@@ -642,6 +645,12 @@ HEADER_CINLINE qd_real qdr_make1(const double a) {
   return retval;
 }
 
+HEADER_CINLINE qd_real qdr_makeu64(const uint64_t a) {
+  const double hi = S_CAST(double, a);
+  const qd_real retval = {{hi, S_CAST(double, S_CAST(int64_t, a - S_CAST(uint64_t, hi))), 0.0, 0.0}};
+  return retval;
+}
+
 HEADER_CINLINE qd_real qdr_make2(const double a, const double b) {
   const qd_real retval = {{a, b, 0.0, 0.0}};
   return retval;
@@ -838,10 +847,79 @@ HEADER_CINLINE int32_t qdr_is_zero(const qd_real a) {
   return (a.x[0] == 0.0);
 }
 
-HEADER_CINLINE int32_t qdr_is_one(const qd_real a) {
+HEADER_CINLINE int32_t qdr_is(const qd_real a, double b) {
   // a.x[1] == 0 should guarantee a.x[2] == a.x[3] == 0.0.
-  return (a.x[0] == 1.0) && (a.x[1] == 0.0);
+  return (a.x[0] == b) && (a.x[1] == 0.0);
 }
+
+HEADER_CINLINE int32_t qdr_ltd(const qd_real a, const double b) {
+  return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] < 0));
+}
+
+HEADER_CINLINE int32_t qdr_lt(const qd_real a, const qd_real b) {
+  if (a.x[0] != b.x[0]) {
+    return (a.x[0] < b.x[0]);
+  }
+  if (a.x[1] != b.x[1]) {
+    return (a.x[1] < b.x[1]);
+  }
+  if (a.x[2] != b.x[2]) {
+    return (a.x[2] < b.x[2]);
+  }
+  return (a.x[3] < b.x[3]);
+}
+
+HEADER_CINLINE int32_t qdr_leqd(const qd_real a, const double b) {
+  return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] <= 0));
+}
+
+HEADER_CINLINE int32_t qdr_leq(const qd_real a, const qd_real b) {
+  if (a.x[0] != b.x[0]) {
+    return (a.x[0] < b.x[0]);
+  }
+  if (a.x[1] != b.x[1]) {
+    return (a.x[1] < b.x[1]);
+  }
+  if (a.x[2] != b.x[2]) {
+    return (a.x[2] < b.x[2]);
+  }
+  return (a.x[3] <= b.x[3]);
+}
+
+HEADER_CINLINE int32_t qdr_geqd(const qd_real a, const double b) {
+  return (a.x[0] > b) || ((a.x[0] == b) && (a.x[1] >= 0));
+}
+
+HEADER_CINLINE int32_t qdr_geq(const qd_real a, const qd_real b) {
+  if (a.x[0] != b.x[0]) {
+    return (a.x[0] > b.x[0]);
+  }
+  if (a.x[1] != b.x[1]) {
+    return (a.x[1] > b.x[1]);
+  }
+  if (a.x[2] != b.x[2]) {
+    return (a.x[2] > b.x[2]);
+  }
+  return (a.x[3] >= b.x[3]);
+}
+
+HEADER_CINLINE int32_t qdr_gtd(const qd_real a, const double b) {
+  return (a.x[0] > b) || ((a.x[0] == b) && (a.x[1] > 0));
+}
+
+HEADER_CINLINE int32_t qdr_gt(const qd_real a, const qd_real b) {
+  if (a.x[0] != b.x[0]) {
+    return (a.x[0] > b.x[0]);
+  }
+  if (a.x[1] != b.x[1]) {
+    return (a.x[1] > b.x[1]);
+  }
+  if (a.x[2] != b.x[2]) {
+    return (a.x[2] > b.x[2]);
+  }
+  return (a.x[3] > b.x[3]);
+}
+
 
 // We only use these routines in the rare cases where dd_real arithmetic
 // doesn't naturally yield relative error < ~2^{-53} (or we are validating the
@@ -883,7 +961,7 @@ qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 //   or it has x[0] initialized to DBL_MAX to indicate that the calculation
 //   hasn't happened.  In the latter case, it may be set to the former value
 //   if that is needed.
-// - Similarly, ln_odds_ratio_ddr is either initialized to log(odds_ratio), or
+// - Similarly, ln_odds_ratio_qdr is either initialized to log(odds_ratio), or
 //   it has x[0] initialized to DBL_MAX.
 //
 // Postconditions on success:
@@ -893,7 +971,7 @@ qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 //   1-2 ulps.
 // - numer_factorial_args[] and denom_factorial_args[] are sorted in
 //   nondecreasing order.
-intptr_t CompareFactorialProducts(uint32_t ffac_ct, dd_real odds_ratio_ddr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, double* dbl_ptr);
+intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr);
 
 #ifdef __cplusplus
 }

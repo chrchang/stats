@@ -73,8 +73,8 @@ intptr_t Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, u
   denom_factorial_args[1] = obs_m12 - m22_incr;
   denom_factorial_args[2] = obs_m21 - m22_incr;
   denom_factorial_args[3] = obs_m22 + m22_incr;
-  dd_real ln_odds_ratio_ddr = ddr_maked(0.0);
-  return CompareFactorialProducts(4, ddr_maked(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_ddr, dbl_ptr);
+  qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
+  return CompareFactorialProducts(4, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
 }
 
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
@@ -799,7 +799,7 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
   if ((ddr_is_zero(p_or_lnp_ddr) && (!logp)) || (max_d == 0)) {
     return final_return_incr;
   }
-  if ((ddr_is_one(p_or_lnp_ddr) && (!logp)) || (ddr_is_zero(p_or_lnp_ddr) && logp)) {
+  if ((ddr_is(p_or_lnp_ddr, 1) && (!logp)) || (ddr_is_zero(p_or_lnp_ddr) && logp)) {
     return abcd + final_return_incr;
   }
   // If p > 0.5, work with (1-p) and flipped columns.
@@ -1418,8 +1418,8 @@ intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, u
   denom_factorial_args[3] = cur_m21;
   denom_factorial_args[4] = cur_m22;
   denom_factorial_args[5] = cur_m23;
-  dd_real ln_odds_ratio_ddr = ddr_maked(0.0);
-  return CompareFactorialProducts(6, ddr_maked(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_ddr, dbl_ptr);
+  qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
+  return CompareFactorialProducts(6, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
 }
 
 // 'Left' = small m11 and m22.

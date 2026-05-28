@@ -63,25 +63,7 @@ BoolErr ScanmovU64(const char** str_iterp, uint64_t* valp) {
   return ScanmovU64Finish(str_iterp, valp);
 }
 
-// Assumes large > small.
-void EuclideanAlgU64(uint64_t* smallp, uint64_t* largep) {
-  uint64_t small = *smallp;
-  uint64_t large = *largep;
-  while (small > 1) {
-    const uint64_t modulus = large % small;
-    if (modulus == 0) {
-      // small is now the GCD.
-      *smallp /= small;
-      *largep /= small;
-      return;
-    }
-    small = modulus;
-    large = small;
-  }
-  return;
-}
-
-BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
+BoolErr ParseProbStr(const char* fracstr, qd_real* p_qdr_ptr) {
   // Returns error on parse failure, value isn't in (0, 1), or the value can't
   // be represented with in-range denom.
   const char* slash_ptr = strchr(fracstr, '/');
@@ -93,13 +75,7 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
     if (ScanmovU64(&numer_iter, &numer) || ScanmovU64(&denom_iter, &denom) || (numer_iter != slash_ptr) || (denom_iter[0] != '\0') || (numer == 0) || (numer >= denom)) {
       return 1;
     }
-    // Reduce to lowest terms.
-    EuclideanAlgU64(&numer, &denom);
-    if (denom >= (1LLU << 63)) {
-      return 1;
-    }
-    *numerp = numer;
-    *denomp = denom;
+    *p_qdr_ptr = qdr_accurate_div(qdr_makeu64(numer), qdr_makeu64(denom));
     return 0;
   }
   double dxx;
@@ -110,31 +86,7 @@ BoolErr ParseProbFrac(const char* fracstr, int64_t* numerp, int64_t* denomp) {
   if ((dxx <= 0.0) || (!(dxx < 1.0))) {
     return 1;
   }
-  int neg_denom_pow;
-  double value = frexp(dxx, &neg_denom_pow);
-  int64_t numer = S_CAST(int64_t, scalbn(value, 53));
-  // Reduce to lowest terms.
-  // Don't need Euclidean algorithm, since denominator is a power of 2.
-  uint32_t rshift = ctzu64(numer);
-  numer = numer >> rshift;
-  uint32_t denom_pow = 53 - rshift - neg_denom_pow;
-  if (denom_pow > 62) {
-    uint32_t extra_rshift = denom_pow - 62;
-    // tolerate dropping down to float32 accuracy (29 fewer mantissa bits).
-    if (rshift + extra_rshift > 29) {
-      return 1;
-    }
-    numer = numer >> extra_rshift;
-    if (numer == 0) {
-      return 1;
-    }
-    // numer may now be even, reduce to lowest terms.
-    rshift = ctzu64(numer);
-    numer = numer >> rshift;
-    denom_pow = 62 - rshift;
-  }
-  *numerp = numer;
-  *denomp = 1LL << denom_pow;
+  *p_qdr_ptr = qdr_make1(dxx);
   return 0;
 }
 
@@ -169,38 +121,24 @@ int main(int argc, char** argv) {
       }
       double ln_pval;
       if (argc == 4) {
-        int64_t rate_numer;
-        int64_t rate_denom;
-        if (unlikely(ParseProbFrac(argv[3], &rate_numer, &rate_denom))) {
+        qd_real p_qdr;
+        if (unlikely(ParseProbStr(argv[3], &p_qdr))) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
           goto main_ret_INVALID_CMDLINE;
         }
-        ln_pval = BinomTwoSidedP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1);
+        ln_pval = BinomTwoSidedP(succ, obs, p_qdr, midp, 1);
         fputs("Two-sided ", stdout);
       } else {
-        dd_real p_ddr;
-        if (strchr(argv[3], '/')) {
-          int64_t rate_numer;
-          int64_t rate_denom;
-          if (unlikely(ParseProbFrac(argv[3], &rate_numer, &rate_denom))) {
-            fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
-            goto main_ret_INVALID_CMDLINE;
-          }
-          p_ddr = ddr_accurate_div(ddr_makei(rate_numer), ddr_makei(rate_denom));
-        } else {
-          double rate;
-          if (unlikely((sscanf(argv[3], "%lg", &rate) != 1) || (!(rate > 0.0)) || (1 - rate <= 0.0))) {
-            fprintf(stderr, "Error: Invalid expected success rate '%s'.\n", argv[3]);
-            goto main_ret_INVALID_CMDLINE;
-          }
-          p_ddr.x[0] = rate;
-          p_ddr.x[1] = 0.0;
+        qd_real p_qdr;
+        if (unlikely(ParseProbStr(argv[3], &p_qdr))) {
+          fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
+          goto main_ret_INVALID_CMDLINE;
         }
         if (unlikely(argv[4][1] || ((argv[4][0] != '+') && (argv[4][0] != '-')))) {
           fputs("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n", stderr);
           goto main_ret_INVALID_CMDLINE;
         }
-        ln_pval = BinomOneSidedP(succ, obs, p_ddr, (argv[4][0] == '+'), midp, 1);
+        ln_pval = BinomOneSidedP(succ, obs, ddr_make_qd(p_qdr), (argv[4][0] == '+'), midp, 1);
         fputs("One-sided ", stdout);
       }
       if (midp) {
@@ -259,13 +197,12 @@ int main(int argc, char** argv) {
           fprintf(stderr, "Error: Line %" PRIuPTR " of %s has fewer fields than expected.\n", line_idx, argv[1]);
           goto main_ret_MALFORMED_INPUT;
         }
-        int64_t rate_numer;
-        int64_t rate_denom;
-        if (unlikely(ParseProbFrac(ratestr, &rate_numer, &rate_denom))) {
+        qd_real p_qdr;
+        if (unlikely(ParseProbStr(ratestr, &p_qdr))) {
           fprintf(stderr, "Error: Invalid or unsupported rate '%s' on line %" PRIuPTR " of %s.\n", ratestr, line_idx, argv[1]);
           goto main_ret_MALFORMED_INPUT;
         }
-        const double ln_pval = BinomTwoSidedP(succ, obs, rate_numer, rate_denom - rate_numer, midp, 1);
+        const double ln_pval = BinomTwoSidedP(succ, obs, p_qdr, midp, 1);
         fputs("Two-sided ", stdout);
         if (midp) {
           fputs("mid", stdout);

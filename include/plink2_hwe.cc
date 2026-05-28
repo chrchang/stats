@@ -57,8 +57,8 @@ intptr_t HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int
   denom_factorial_args[0] = obs_hets + 2 * hom_decr;
   denom_factorial_args[1] = obs_hom1 - hom_decr;
   denom_factorial_args[2] = obs_hom2 - hom_decr;
-  dd_real ln_odds_ratio_ddr = _ddr_log2;
-  return CompareFactorialProducts(3, ddr_maked(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, &ln_odds_ratio_ddr, dbl_ptr);
+  qd_real ln_odds_ratio_qdr = _qdr_log2;
+  return CompareFactorialProducts(3, qdr_make1(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
 }
 
 // obs_hets + obs_hom1 + obs_hom2 assumed to be <2^31.

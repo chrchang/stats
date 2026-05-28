@@ -30,7 +30,7 @@ double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  if (n < (1LL << 40)) {
+  if (n < (1LL << 39)) {
     return ddr_sub(ddr_lfact(n),
                    ddr_add_lfacts(k, n-k)).x[0];
   }
@@ -138,7 +138,7 @@ double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
 }
 
 
-// - succ_odds_ratio_ddr must be p/(1-p), where p is the expected success rate.
+// - succ_odds_ratio_qdr must be p/(1-p), where p is the expected success rate.
 //
 // - starting_lnprobv_ddr is expected to either be initialized to
 //     log(succ_odds_ratio^obs_succ / (obs_succ! (obs_tot - obs_succ)!)),
@@ -146,12 +146,12 @@ double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
 //   hasn't happened.  In the latter case, it may be set to the former value if
 //   that is needed in the calculation.
 //
-// - ln_odds_ratio_ddr is expected to either be initialized to log(odds_ratio),
+// - ln_odds_ratio_qdr is expected to either be initialized to log(odds_ratio),
 //   or have x[0] initialized to DBL_MAX, etc.
 //
 // - Return value is positive if succ has higher probability than obs_succ, 0
 //   if identical probability, and negative if lower probability.
-intptr_t BinomCompare(int32_t obs_succ, int32_t obs_tot, dd_real succ_odds_ratio_ddr, int32_t succ, dd_real* starting_lnprobv_ddr_ptr, dd_real* ln_odds_ratio_ddr_ptr, double* dbl_ptr) {
+intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio_qdr, int64_t succ, dd_real* starting_lnprobv_ddr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
   // Binomial probability is
   //
   //        n!        k        n-k
@@ -177,25 +177,14 @@ intptr_t BinomCompare(int32_t obs_succ, int32_t obs_tot, dd_real succ_odds_ratio
   uint64_t denom_factorial_args[2];
   denom_factorial_args[0] = succ;
   denom_factorial_args[1] = obs_tot - succ;
-  return CompareFactorialProducts(2, succ_odds_ratio_ddr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, ln_odds_ratio_ddr_ptr, dbl_ptr);
+  return CompareFactorialProducts(2, succ_odds_ratio_qdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, ln_odds_ratio_qdr_ptr, dbl_ptr);
 }
 
 // static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
 // calculated with qd_real library
 // static const dd_real _ddr_960log2 = {{ 6.6542129333754746767e+02, 2.9368276770525480578e-14 }};
 
-// obs_tot assumed to be <2^31.  succ_odds_ratio_numer and
-// succ_odds_ratio_{numer,denom} must be positive, reduced to lowest terms,
-// have sum < 2^63, and represent p/(1-p).
-// Only the main loops are speed-optimized for now.  There is some setup
-// overhead for odds_ratio != 1 which is currently written to avoid
-// proliferation of special cases, but can be easily accelerated if we know
-// e.g. numerator and denominator < 2^31.
-//
-// (...yes, it would of course be reasonable to use qd_reals for near-tie
-// handling instead, giving up perfection for better flexibility, worst-case
-// speed/memory usage, and fewer license restrictions.  Such a switch is likely
-// to happen in the future.)
+// Assumes 0 <= obs_succ <= obs_tot < 2^52 and 2^{-960} < p < 1.
 //
 // Note that this can be written in terms of dbinom() and pbinom():
 // 1. Calculate mode, determine which tail obs_succ is on.  Early-exit if we're
@@ -206,48 +195,41 @@ intptr_t BinomCompare(int32_t obs_succ, int32_t obs_tot, dd_real succ_odds_ratio
 // 4. Add its tail pbinom() value, return.
 // Several other 2-sided exact tests based on unimodal distributions (e.g.
 // Fisher's 2x2) can be performed in the same manner.
-double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio_numer, int64_t succ_odds_ratio_denom, int32_t midp, uint32_t logp) {
+//
+// Probable todo: improve speed, this usually performs more calculations with
+// qd_reals than necessary.
+double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t midp, uint32_t logp) {
   if (!obs_tot) {
     if (midp) {
       return logp? -kLn2 : 0.5;
     }
     return logp? 0.0 : 1.0;
   }
-  double succ = obs_succ;
-  double fail = obs_tot - obs_succ;
+  qd_real q_qdr = qdr_addd(qdr_negate(p_qdr), 1.0);
   // Normalize: succ <= mode.
   // (even if there is rounding error, this is enough to guarantee that succ-1
   // has lower likelihood than succ.)
-  if (succ * S_CAST(double, succ_odds_ratio_denom) > fail * S_CAST(double, succ_odds_ratio_numer)) {
+  uint32_t was_flipped = 0;
+  if (obs_succ > obs_tot * p_qdr.x[0]) {
     obs_succ = obs_tot - obs_succ;
-    swap_f64(&succ, &fail);
-    swap_i64(&succ_odds_ratio_numer, &succ_odds_ratio_denom);
+    swap_qdr(&p_qdr, &q_qdr);
+    was_flipped = 1;
   }
-  dd_real succ_odds_ratio_ddr = ddr_maked(1);
-  if ((succ_odds_ratio_numer != 1) || (succ_odds_ratio_denom != 1)) {
-    // make sure these numbers aren't off by more than 0.5 ULP, even when
-    // numerator and/or denominator > 2^53.
-    const dd_real numer_ddr = ddr_makei(succ_odds_ratio_numer);
-    const dd_real denom_ddr = ddr_makei(succ_odds_ratio_denom);
-    succ_odds_ratio_ddr = ddr_accurate_div(numer_ddr, denom_ddr);
+  qd_real succ_odds_ratio_qdr = qdr_make1(1);
+  if (!qdr_is(p_qdr, 0.5)) {
+    succ_odds_ratio_qdr = qdr_accurate_div(p_qdr, q_qdr);
   }
-  const double succ_odds_ratio = succ_odds_ratio_ddr.x[0];
-  const double first_inward_mult = fail * succ_odds_ratio / (succ + 1);
+  double succ = obs_succ;
+  double fail = obs_tot - obs_succ;
+  const qd_real first_inward_mult_numer_qdr = qdr_muld(succ_odds_ratio_qdr, fail);
   if (!midp) {
     // Might we be at the mode?
-    if (first_inward_mult <= 1 + 2 * k2m52) {
-      if (first_inward_mult <= 1 - 2 * k2m52) {
-        return logp? 0.0 : 1.0;
-      }
-      uint64_t numer_hi;
-      uint64_t numer_lo = multiply64to128(obs_tot - obs_succ, succ_odds_ratio_numer, &numer_hi);
-      uint64_t denom_hi;
-      uint64_t denom_lo = multiply64to128(obs_succ + 1, succ_odds_ratio_denom, &denom_hi);
-      if ((denom_hi > numer_hi) || ((denom_hi == numer_hi) && (denom_lo >= numer_lo))) {
-        return logp? 0.0 : 1.0;
-      }
+    if (qdr_leq(first_inward_mult_numer_qdr, qdr_make2(succ + 1, (succ + 1) / k2p200))) {
+      return logp? 0.0 : 1.0;
     }
   }
+  const double succ_odds_ratio = succ_odds_ratio_qdr.x[0];
+  const double first_inward_mult = first_inward_mult_numer_qdr.x[0] / (succ + 1);
   double lik = 1;
   double tail_sum = 1 - midp * 0.5;
   // Iterate outward to floating-point precision limit.
@@ -267,13 +249,12 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
   // floating-point precision limit, return
   //   log(tail_sum / (tail_sum + center_sum))
   //
-  // Unfortunately, an extremal rate (e.g. (2^63 - 2)/(2^63 - 1), the maximum
-  // possible permitted value) makes center_sum overflow possible much closer
-  // to the mode than is the case for the Fisher/HWE exact tests; 17 steps
-  // could be enough.  So instead of checking whether we're a constant number
-  // of steps from the mode, we compute a lower bound on the number of
-  // non-overflowing inward steps we can take, using the log of the
-  // first-inward-step multiplier (subsequent steps have smaller multipliers).
+  // Unfortunately, an extremal rate makes center_sum overflow possible much
+  // closer to the mode than is the case for the Fisher/HWE exact tests.  So
+  // instead of checking whether we're a constant number of steps from the
+  // mode, we compute a lower bound on the number of non-overflowing inward
+  // steps we can take, using the log of the first-inward-step multiplier
+  // (subsequent steps have smaller multipliers).
   const double smallest_evaluated_succ = succ;
   succ = obs_succ;
   fail = obs_tot - obs_succ;
@@ -283,15 +264,12 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
   }
-  // succ_odds_ratio * (tot - modal_succ) / modal_succ = 1
-  // succ_odds_ratio * (tot - modal_succ) = modal_succ
-  // succ_odds_ratio * tot = modal_succ * (1 + succ_odds_ratio)
   // possible for modal_succ to round up to just obs_tot
   const double obs_totd = obs_tot;
-  const double modal_succ = obs_totd * succ_odds_ratio / (1 + succ_odds_ratio);
+  const double modal_succ = obs_totd * p_qdr.x[0];
   if (succ + overflow_steps_lower_bound > modal_succ) {
     dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-    dd_real ln_odds_ratio_ddr = {{DBL_MAX, 0.0}};
+    qd_real ln_odds_ratio_qdr = qdr_make1(DBL_MAX);
     double one_plus_scaled_eps = 1 + k2m52;
     double center_sum = midp * 0.5;
     lik = 1;
@@ -309,7 +287,7 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
         }
         // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
-        const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_ddr, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &lik);
+        const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_qdr, &lik);
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
           tail_sum += lik;
@@ -336,20 +314,23 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
     const double pval = tail_sum / (tail_sum + center_sum);
     return logp? log(pval) : pval;
   }
-  dd_real ln_odds_ratio_ddr = ddr_log(succ_odds_ratio_ddr);
-  dd_real starting_lnprobv_ddr =
-    ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
-            ddr_add_lfacts(succ, fail));
-  dd_real lnfail_ddr = _ddr_log05;
-  if (!ddr_is_zero(ln_odds_ratio_ddr)) {
+  qd_real ln_odds_ratio_qdr = qdr_log(succ_odds_ratio_qdr);
+  qd_real starting_lnprobv_qdr =
+    qdr_sub(qdr_muld(ln_odds_ratio_qdr, succ),
+            qdr_add(qdr_lfact(succ), qdr_lfact(fail)));
+  qd_real lnfail_qdr = _qdr_log05;
+  if (!qdr_is_zero(ln_odds_ratio_qdr)) {
     // probable todo: this is a bit redundant with earlier initialization
-    const dd_real fail_ddr = ddr_makei(succ_odds_ratio_denom);
-    const dd_real succ_plus_fail_ddr = ddr_makeu64(S_CAST(uint64_t, succ_odds_ratio_numer) + S_CAST(uint64_t, succ_odds_ratio_denom));
-    lnfail_ddr = ddr_log(ddr_accurate_div(fail_ddr, succ_plus_fail_ddr));
+    if (!was_flipped) {
+      // handle tiny p correctly
+      lnfail_qdr = qdr_log1p(qdr_negate(p_qdr));
+    } else {
+      lnfail_qdr = qdr_log(q_qdr);
+    }
   }
-  const dd_real lnprobf_ddr =
-    ddr_add(ddr_lfact(obs_totd), ddr_muld(lnfail_ddr, obs_totd));
-  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  const qd_real lnprobf_qdr =
+    qdr_add(qdr_lfact(obs_totd), qdr_muld(lnfail_qdr, obs_totd));
+  const qd_real starting_lnprob_qdr = qdr_add(lnprobf_qdr, starting_lnprobv_qdr);
 
   // Now we want to jump near the other tail, without evaluating that many
   // contingency table log-likelihoods along the way.
@@ -388,15 +369,15 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
   // L(obs_tot) / L(obs_tot-1) = succ_odds_ratio * 1 / obs_tot
   // If this value is >= 1, obs_tot is a mode.  Separating out that case makes
   // the remaining logic simpler.
-  if (ddr_geqd(succ_odds_ratio_ddr, obs_totd)) {
-    return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+  if (qdr_geq(succ_odds_ratio_qdr, qdr_make2(obs_totd, obs_totd / k2p200))) {
+    return join_log_and_nonlog(ddr_make_qd(starting_lnprob_qdr), tail_sum, logp);
   }
 
   succ = 2 * modal_succ - (succ + smallest_evaluated_succ) * 0.5;
   if (succ > obs_totd) {
     succ = obs_totd;
   }
-  succ = S_CAST(int32_t, succ);
+  succ = S_CAST(int64_t, succ);
 
   // obs_tot is past the mode, and |log(L(obs_tot) / L(obs_tot-1))| is the
   // largest gap between adjacent log-likelihoods on this tail.  Set
@@ -408,15 +389,15 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
 
   while (1) {
     fail = obs_totd - succ;
-    const dd_real lnprobv_ddr =
-      ddr_sub(ddr_muld(ln_odds_ratio_ddr, succ),
-              ddr_add_lfacts(succ, fail));
-    const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
+    const qd_real lnprobv_qdr =
+      qdr_sub(qdr_muld(ln_odds_ratio_qdr, succ),
+              qdr_add(qdr_lfact(succ), qdr_lfact(fail)));
+    const double lnprobv_diff = qdr_sub(lnprobv_qdr, starting_lnprobv_qdr).x[0];
     if (lnprobv_diff >= k2m53) {
       if (fail == 0) {
-        return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+        return join_log_and_nonlog(ddr_make_qd(starting_lnprob_qdr), tail_sum, logp);
       }
-      const double ll_deriv = ln_odds_ratio_ddr.x[0] + log(fail / (succ + 1));
+      const double ll_deriv = ln_odds_ratio_qdr.x[0] + log(fail / (succ + 1));
       // Round up, to guarantee that we make progress.
       // (lnprobv_diff is positive and ll_deriv is negative.)
       // This may overshoot.  But the function is guaranteed to terminate
@@ -430,7 +411,7 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
       lik = exp(lnprobv_diff);
       break;
     } else {
-      const double ll_deriv = ln_odds_ratio_ddr.x[0] + log((fail + 1) / succ);
+      const double ll_deriv = ln_odds_ratio_qdr.x[0] + log((fail + 1) / succ);
       // Round down, to guarantee we don't overshoot.
       // |lnprobv_diff| >= |lnprobv_diff_min| > |ll_deriv| so we're guaranteed
       // to make progress.
@@ -452,7 +433,8 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
     one_minus_scaled_eps -= 2 * k2m52;
   }
   if (lik < 2 - one_minus_scaled_eps) {
-    const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_ddr, S_CAST(int32_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_ddr, &lik);
+    dd_real starting_lnprobv_ddr = ddr_make_qd(starting_lnprobv_qdr);
+    const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_qdr, &lik);
     if (cmp_result <= 0) {
       tail_sum += lik;
       if (midp && (cmp_result == 0)) {
@@ -474,7 +456,7 @@ double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, int64_t succ_odds_ratio
     }
     fail -= 1;
   }
-  return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+  return join_log_and_nonlog(ddr_make_qd(starting_lnprob_qdr), tail_sum, logp);
 }
 
 // ibeta_fraction2_ln_ddr{1,2}() adapted from Boost 1.91.0.  This derived code
@@ -1274,7 +1256,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   if (ddr_is_zero(targetp_or_lnp_ddr) || ddr_is_zero(succp_ddr) || (n == 0)) {
     return 0;
   }
-  if (ddr_is_one(succp_ddr) || ddr_is_one(targetp_or_lnp_ddr)) {
+  if (ddr_is(succp_ddr, 1) || ddr_is(targetp_or_lnp_ddr, 1)) {
     return n;
   }
   // If targetp > 0.5, invert.
