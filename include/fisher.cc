@@ -41,9 +41,9 @@ dd_real fisher22_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t
 // Returns positive value if m22 = obs_m22 + m22_incr has higher probability
 // than m22 = obs_m22, 0 if identical probability, and negative value if lower
 // probability.
-// If neg_numer_ddr has not been computed yet, set its x[0] to DBL_MAX; it will
+// If neg_numer_qdr has not been computed yet, set its x[0] to DBL_MAX; it will
 // be filled in if necessary.
-intptr_t Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, uint32_t obs_m22, int32_t m22_incr, dd_real* neg_numer_ddr_ptr, double* dbl_ptr) {
+intptr_t Fisher22Compare(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, qd_real* neg_numer_qdr_ptr, double* dbl_ptr) {
   // Fisher 2x2 probability is
   //
   //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
@@ -74,7 +74,12 @@ intptr_t Fisher22Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m21, u
   denom_factorial_args[2] = obs_m21 - m22_incr;
   denom_factorial_args[3] = obs_m22 + m22_incr;
   qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
-  return CompareFactorialProducts(4, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
+  return CompareFactorialProducts(4, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_qdr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
+}
+
+static inline intptr_t Fisher22CompareDdr(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, dd_real neg_numer_ddr, double* dbl_ptr) {
+  qd_real neg_numer_qdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX, 0.0}};
+  return Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &neg_numer_qdr, dbl_ptr);
 }
 
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
@@ -151,7 +156,6 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
     m12 = obs_m12;
     m21 = obs_m21;
     m22 = obs_m22;
-    dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     double center_sum = 0.5 * midp;
     while (1) {
       m11 += 1;
@@ -173,7 +177,8 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
         // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
         const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &lik);
+        qd_real starting_lnprobv_qdr = qdr_make1(DBL_MAX);
+        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_qdr, &lik);
         if (cmp_result <= 0) {
           tail_sum += lik;
           if (midp && (cmp_result == 0)) {
@@ -201,6 +206,7 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
     const double pval = tail_sum / (tail_sum + center_sum);
     return logp? log(pval) : pval;
   }
+  // todo: use quad-doubles when total > ~2^42
   dd_real starting_lnprobv_ddr =
     ddr_negate(ddr_sort_and_add_4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
 
@@ -324,7 +330,7 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
   }
   if (lik < 2 - one_minus_scaled_eps) {
     const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-    const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_ddr, &lik);
+    const intptr_t cmp_result = Fisher22CompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr, &lik);
     if (cmp_result <= 0) {
       tail_sum += lik;
       if (midp && (cmp_result == 0)) {
@@ -1096,7 +1102,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
           // Near-tie.  True value of lik can be greater than, equal to, or
           // less than 1.
           const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-          const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr_ptr, &lik);
+          const intptr_t cmp_result = Fisher22CompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, *starting_lnprobv_ddr_ptr, &lik);
           one_plus_scaled_eps = 1 + 3 * k2m52;
           if (cmp_result <= 0) {
             tail_sum += lik;
@@ -1186,7 +1192,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
       }
       if (lik < 2 - one_minus_scaled_eps) {
         const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr_ptr, &lik);
+        const intptr_t cmp_result = Fisher22CompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, *starting_lnprobv_ddr_ptr, &lik);
         one_minus_scaled_eps = 1 - 3 * k2m52;
         if (cmp_result <= 0) {
           tail_sum += lik;
@@ -1264,7 +1270,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
           break;
         }
         const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr_ptr, &lik);
+        const intptr_t cmp_result = Fisher22CompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, *starting_lnprobv_ddr_ptr, &lik);
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
           tail_sum += lik;
@@ -1349,7 +1355,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
     }
     if (lik < 2 - one_minus_scaled_eps) {
       const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-      const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr_ptr, &lik);
+      const intptr_t cmp_result = Fisher22CompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, *starting_lnprobv_ddr_ptr, &lik);
       one_minus_scaled_eps = 1 - 3 * k2m52;
       if (cmp_result <= 0) {
         tail_sum += lik;
@@ -1386,7 +1392,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
   return;
 }
 
-intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t cur_m11, uint32_t cur_m12, dd_real* neg_numer_ddr_ptr, double* dbl_ptr) {
+intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, uint32_t obs_m21, uint32_t obs_m22, uint32_t obs_m23, uint32_t cur_m11, uint32_t cur_m12, dd_real neg_numer_ddr, double* dbl_ptr) {
   // Fisher 2x3 contingency table probability is
   //
   //   (m11+m12+m13)! (m21+m22+m23)! (m11+m21)! (m12+m22)! (m13+m23)!
@@ -1419,7 +1425,8 @@ intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, u
   denom_factorial_args[4] = cur_m22;
   denom_factorial_args[5] = cur_m23;
   qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
-  return CompareFactorialProducts(6, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
+  qd_real neg_numer_qdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX, 0.0}};
+  return CompareFactorialProducts(6, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, &neg_numer_qdr, &ln_odds_ratio_qdr, dbl_ptr);
 }
 
 // 'Left' = small m11 and m22.
@@ -1498,7 +1505,7 @@ void Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint
         if (lik <= 1 - cur_eps) {
           break;
         }
-        const intptr_t cmp_result = Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), &starting_lnprobv_ddr, &lik);
+        const intptr_t cmp_result = Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), starting_lnprobv_ddr, &lik);
         cur_eps = 3 * k2m52;
         if (cmp_result <= 0) {
           *tie_ctp += (cmp_result == 0);
@@ -1524,7 +1531,7 @@ void Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint
         if (lik >= 1 + cur_eps) {
           break;
         }
-        const intptr_t cmp_result = Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), &starting_lnprobv_ddr, &lik);
+        const intptr_t cmp_result = Fisher23Compare(obs_m11, obs_m12, obs_m13, obs_m21, obs_m22, obs_m23, S_CAST(int32_t, m11), S_CAST(int32_t, m12), starting_lnprobv_ddr, &lik);
         cur_eps = 3 * k2m52;
         if (cmp_result > 0) {
           break;

@@ -26,11 +26,8 @@
 namespace plink2 {
 #endif
 
-// - starting_lnprobv_ddr is expected to be initialized to
-//     log(2^obs_hets / (obs_hets! obs_hom1! obs_hom2!))
-//   or have x[0] initialized to DBL_MAX to indicate that the calculation
-//   hasn't happened.  In the latter case, it may be set to the former value
-//   if that is needed in the calculation.
+// - If non-null, *starting_lnprobv_ddr_ptr is expected to be initialized to
+//     log(2^obs_hets / (obs_hets! obs_hom1! obs_hom2!)).
 //
 // - Returns positive value if hets := obs_hets + 2*hom_decr has higher
 //   probability than hets := obs_hets, 0 if identical probability, and
@@ -58,7 +55,13 @@ intptr_t HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int
   denom_factorial_args[1] = obs_hom1 - hom_decr;
   denom_factorial_args[2] = obs_hom2 - hom_decr;
   qd_real ln_odds_ratio_qdr = _qdr_log2;
-  return CompareFactorialProducts(3, qdr_make1(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
+  qd_real starting_lnprobv_qdr;
+  if (starting_lnprobv_ddr_ptr == nullptr) {
+    starting_lnprobv_qdr = qdr_make1(DBL_MAX);
+  } else {
+    starting_lnprobv_qdr = {{starting_lnprobv_ddr_ptr->x[0], starting_lnprobv_ddr_ptr->x[1], DBL_MAX, 0.0}};
+  }
+  return CompareFactorialProducts(3, qdr_make1(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, &starting_lnprobv_qdr, &ln_odds_ratio_qdr, dbl_ptr);
 }
 
 // obs_hets + obs_hom1 + obs_hom2 assumed to be <2^31.
@@ -187,7 +190,6 @@ double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp
       hets = obs_hets;
       homr = obs_homr;
       homc = obs_homc;
-      dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
       double center_sum = midp * 0.5;
       // No need for hets > 1 check, lik checks do what we need.
       while (1) {
@@ -213,7 +215,7 @@ double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp
           // Near-tie.  True value of lik can be greater than, equal to, or
           // less than 1.
           const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-          const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
+          const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &lik);
           if (cmp_result <= 0) {
             tail_sum += lik;
             if (midp && (cmp_result == 0)) {
@@ -415,7 +417,6 @@ double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp
     hets = obs_hets;
     homr = obs_homr;
     homc = obs_homc;
-    dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
     double center_sum = midp * 0.5;
     // No need for hets > 1 check, lik checks do what we need.
     while (1) {
@@ -433,7 +434,7 @@ double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp
         // Near-tie.  True value of lik can be greater than, equal to, or less
         // than 1.
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr);
-        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &lik);
         if (cmp_result <= 0) {
           tail_sum += lik;
           if (midp && (cmp_result == 0)) {
@@ -647,8 +648,7 @@ uint32_t HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double 
         }
         double unshifted_lik = lik2 * (1.0 / kExactTestBias);
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
-        dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &unshifted_lik);
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &unshifted_lik);
         lik2 = unshifted_lik * kExactTestBias;
         if (cmp_result <= 0) {
           tail_sum2 = lik2;
@@ -745,8 +745,7 @@ uint32_t HweThresh(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, double 
       }
       double unshifted_lik = lik2 * (1.0 / kExactTestBias);
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
-      dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &unshifted_lik);
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &unshifted_lik);
       lik2 = unshifted_lik * kExactTestBias;
       if (cmp_result <= 0) {
         tail_sum2 = lik2;
@@ -861,8 +860,7 @@ uint32_t HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, dou
         }
         double lik = lik2 * (1.0 / kExactTestBias);
         const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
-        dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
+        const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &lik);
         lik2 = lik * kExactTestBias;
         if (cmp_result <= 0) {
           if (cmp_result == 0) {
@@ -952,8 +950,7 @@ uint32_t HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, dou
       }
       double lik = lik2 * (1.0 / kExactTestBias);
       const int32_t hom_decr = obs_homr - S_CAST(int32_t, homr_t2);
-      dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, &starting_lnprobv_ddr, &lik);
+      const intptr_t cmp_result = HweCompare(obs_hets, obs_homr, obs_homc, hom_decr, nullptr, &lik);
       lik2 = lik * kExactTestBias;
       if (cmp_result <= 0) {
         if (cmp_result == 0) {

@@ -151,7 +151,7 @@ double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
 //
 // - Return value is positive if succ has higher probability than obs_succ, 0
 //   if identical probability, and negative if lower probability.
-intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio_qdr, int64_t succ, dd_real* starting_lnprobv_ddr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
+intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio_qdr, int64_t succ, qd_real* starting_lnprobv_qdr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
   // Binomial probability is
   //
   //        n!        k        n-k
@@ -177,7 +177,7 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio
   uint64_t denom_factorial_args[2];
   denom_factorial_args[0] = succ;
   denom_factorial_args[1] = obs_tot - succ;
-  return CompareFactorialProducts(2, succ_odds_ratio_qdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_ddr_ptr, ln_odds_ratio_qdr_ptr, dbl_ptr);
+  return CompareFactorialProducts(2, succ_odds_ratio_qdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_qdr_ptr, ln_odds_ratio_qdr_ptr, dbl_ptr);
 }
 
 // static const double k2p960 = k2p800 * k2p100 * (1LL << 60);
@@ -268,8 +268,6 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   const double obs_totd = obs_tot;
   const double modal_succ = obs_totd * p_qdr.x[0];
   if (succ + overflow_steps_lower_bound > modal_succ) {
-    dd_real starting_lnprobv_ddr = {{DBL_MAX, 0.0}};
-    qd_real ln_odds_ratio_qdr = qdr_make1(DBL_MAX);
     double one_plus_scaled_eps = 1 + k2m52;
     double center_sum = midp * 0.5;
     lik = 1;
@@ -287,7 +285,9 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
         }
         // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
-        const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_qdr, &lik);
+        qd_real starting_lnprobv_qdr = qdr_make1(DBL_MAX);
+        qd_real ln_odds_ratio_qdr = qdr_make1(DBL_MAX);
+        const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_qdr, &ln_odds_ratio_qdr, &lik);
         one_plus_scaled_eps = 1 + 3 * k2m52;
         if (cmp_result <= 0) {
           tail_sum += lik;
@@ -433,8 +433,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     one_minus_scaled_eps -= 2 * k2m52;
   }
   if (lik < 2 - one_minus_scaled_eps) {
-    dd_real starting_lnprobv_ddr = ddr_make_qd(starting_lnprobv_qdr);
-    const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_ddr, &ln_odds_ratio_qdr, &lik);
+    const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_qdr, S_CAST(int64_t, succ), &starting_lnprobv_qdr, &ln_odds_ratio_qdr, &lik);
     if (cmp_result <= 0) {
       tail_sum += lik;
       if (midp && (cmp_result == 0)) {

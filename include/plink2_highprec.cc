@@ -1040,26 +1040,27 @@ qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs) {
 //   other with zeroes.)  All entries < 2^52.
 // - odds_ratio^odds_ratio_pow is an exponential term to multiply the quotient
 //   by at the end.
-// - starting_lnprobv_ddr is either initialized to
+// - starting_lnprobv_qdr can either be fully initialized to
 //     log(numer_odds_ratio_pow / (numer_factorial_args[0]! ...
-//                                 numer_factorial_args[ffac_ct-1]!))
-//   or it has x[0] initialized to DBL_MAX to indicate that the calculation
-//   hasn't happened.  In the latter case, it may be set to the former value
-//   if that is needed.
-// - Similarly, ln_odds_ratio_ddr is either initialized to log(odds_ratio), or
-//   it has x[0] initialized to DBL_MAX.
+//                                 numer_factorial_args[ffac_ct-1]!)),
+//   have the first two terms initialized and x[2] set to DBL_MAX (to indicate
+//   that it has only been computed to dd_real precision), or have x[0]
+//   initialized to DBL_MAX to indicate that the calculation has not happened
+//   at all.  In the latter two cases, it may be updated to higher accuracy.
+// - Similarly, ln_odds_ratio_qdr can either be fully initialized to
+//   log(odds_ratio), or it can have x[2] or x[0] initialized to DBL_MAX.
 //
 // Postconditions on success:
 // - Return value is positive if the fraction > 1, negative if the fraction <
 //   1, and zero if it's exactly 1.
 // - *dbl_ptr is the double representation of the fraction, error limited to
-//   1-2 ulps.
+//   1-2 ULPs.
 // - numer_factorial_args[] and denom_factorial_args[] are sorted in
 //   nondecreasing order.
 //
-// This could take a precomputed ddr_lfact table as an additional pair of
+// This could take a precomputed qdr_lfact table as an additional pair of
 // parameters, but I don't think that makes much of a difference.
-intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, dd_real* starting_lnprobv_ddr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
+intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, qd_real* starting_lnprobv_qdr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
   // 1. Sort numer_factorial_args and denom_factorial_args.  (This has the
   //    effect of cancelling out matching terms.)
   // 2. Iterate through numer_factorial_args[] and denom_factorial_args[] to
@@ -1140,23 +1141,25 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
     }
     return ddr_ltd(ratio_ddr, 1.0)? -1 : 1;
   }
-  // Could use repeated squaring (i.e. port ddr_npwr()) instead if
-  // ln_odds_ratio not precomputed.
-  qd_real ln_odds_ratio_qdr = *ln_odds_ratio_qdr_ptr;
-  if (ln_odds_ratio_qdr.x[0] == DBL_MAX) {
-    ln_odds_ratio_qdr = qdr_log(odds_ratio_qdr);
-    *ln_odds_ratio_qdr_ptr = ln_odds_ratio_qdr;
+  dd_real ln_odds_ratio_ddr = ddr_make_qd(*ln_odds_ratio_qdr_ptr);
+  if (ln_odds_ratio_ddr.x[0] == DBL_MAX) {
+    ln_odds_ratio_ddr = ddr_log(ddr_make_qd(odds_ratio_qdr));
+    ln_odds_ratio_qdr_ptr->x[0] = ln_odds_ratio_ddr.x[0];
+    ln_odds_ratio_qdr_ptr->x[1] = ln_odds_ratio_ddr.x[1];
+    ln_odds_ratio_qdr_ptr->x[2] = DBL_MAX;
   }
-  dd_real starting_lnprobv_ddr = *starting_lnprobv_ddr_ptr;
+  dd_real starting_lnprobv_ddr = ddr_make_qd(*starting_lnprobv_qdr_ptr);
   if (starting_lnprobv_ddr.x[0] == DBL_MAX) {
-    starting_lnprobv_ddr = ddr_muld(ddr_make_qd(ln_odds_ratio_qdr), numer_odds_ratio_pow);
+    starting_lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow);
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
       starting_lnprobv_ddr = ddr_sub(starting_lnprobv_ddr, ddr_lfact(u63tod(numer_factorial_args[ffac_idx])));
     }
-    *starting_lnprobv_ddr_ptr = starting_lnprobv_ddr;
+    starting_lnprobv_qdr_ptr->x[0] = starting_lnprobv_ddr.x[0];
+    starting_lnprobv_qdr_ptr->x[1] = starting_lnprobv_ddr.x[1];
+    starting_lnprobv_qdr_ptr->x[2] = DBL_MAX;
   }
-  const qd_real ln_odds_ratio_term_qdr = qdr_muld(ln_odds_ratio_qdr, numer_odds_ratio_pow + odds_ratio_pow);
-  dd_real lnprobv_ddr = ddr_make_qd(ln_odds_ratio_term_qdr);
+
+  dd_real lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow + odds_ratio_pow);
   // ddr_lfact() result has >= 106 bits of precision, AFAICT relative error <
   // 2^{-98} (ignoring denormals).  (probable todo: try to prove this bound.)
   double epsilon_base = lnprobv_ddr.x[0];
@@ -1180,11 +1183,15 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
     return -1;
   }
 
+  if (ln_odds_ratio_qdr_ptr->x[2] == DBL_MAX) {
+    *ln_odds_ratio_qdr_ptr = qdr_log(odds_ratio_qdr);
+  }
+  const qd_real ln_odds_ratio_qdr = *ln_odds_ratio_qdr_ptr;
   qd_real starting_lnprobv_qdr = qdr_muld(ln_odds_ratio_qdr, numer_odds_ratio_pow);
   for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
     starting_lnprobv_qdr = qdr_sub(starting_lnprobv_qdr, qdr_lfact(u63tod(numer_factorial_args[ffac_idx])));
   }
-  qd_real lnprobv_qdr = ln_odds_ratio_term_qdr;
+  qd_real lnprobv_qdr = qdr_muld(ln_odds_ratio_qdr, numer_odds_ratio_pow + odds_ratio_pow);
   epsilon_base = lnprobv_qdr.x[0];
   if (ffac_ct) {
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
