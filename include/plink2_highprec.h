@@ -42,6 +42,7 @@ typedef struct qd_real_struct {
 
 extern const qd_real _qdr_log2;
 extern const qd_real _qdr_log05;
+static const double _qdr_eps = 1.21543267145725e-63; // = 2^-209
 
 typedef struct dd_real_struct {
   double x[2];
@@ -948,6 +949,10 @@ qd_real qdr_log(const qd_real a);
 qd_real qdr_log1p(const qd_real a);
 
 qd_real qdr_lfact(double xx);
+
+HEADER_INLINE qd_real qdr_add_lfacts(const double a, const double b) {
+  return qdr_add(qdr_lfact(a), qdr_lfact(b));
+}
 
 qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 

@@ -38,13 +38,13 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 cdef extern from "../include/binom.h" namespace "plink2":
     double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
 
-    double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, qd_real_struct p_qdr, int32_t midp, uint32_t logp) nogil
-
     double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
 
     double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, uint32_t logp) nogil
 
     int64_t QbinomHalfUlp(dd_real_struct targetp_or_lnp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
+
+    double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, qd_real_struct p_qdr, int32_t midp, uint32_t logp) nogil
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -75,9 +75,8 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
 
 
 # For dbinom() and pbinom(), we want to be able to deliver <1 ULP relative
-# error (at least for n < ~10^10, p >= 2^{-53}) for the calculation the caller
-# actually wants; and similarly, qbinom() should be based on a cmf
-# approximation with at least 53-bit accuracy.
+# error for the calculation the caller actually wants; and similarly, qbinom()
+# should be based on a cmf approximation with at least 53-bit accuracy.
 #
 # Of course, a calculation with e.g. p=1/3 is a reasonable thing to want, yet
 # 1/3 cannot be precisely represented by a float64.  We're poorly positioned to
@@ -100,6 +99,8 @@ cdef dd_real_struct DdrMake(object p):
     p_ddr.x[1] = float(p - fractions.Fraction(p_ddr.x[0]))
     return p_ddr
 
+# For two-sided binom(), we convert p to a qd_real with ~212-bit precision, so
+# we can use a very small epsilon for near-tie resolution.
 cdef qd_real_struct QdrMake(object p):
     cdef qd_real_struct p_qdr
     if isinstance(p, float):

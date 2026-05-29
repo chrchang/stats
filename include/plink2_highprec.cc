@@ -57,8 +57,6 @@ static const qd_real _qdr_lfact_coeffs[13] = {
   {2.1931033333333334667e+03, -1.3339255626002947557e-13, 6.7316130578859678382e-31, -4.3206702650015194122e-47}
 };
 
-const double _qdr_eps = 1.21543267145725e-63; // = 2^-209
-
 // All entries currently used by ddr_expm1().
 CONSTI32(_qdr_n_inv_fact, 15);
 
