@@ -33,19 +33,29 @@ const qd_real _qdr_e = {{2.718281828459045091e+00, 1.445646891729250158e-16, -2.
 const qd_real _qdr_log2 = {{6.931471805599452862e-01, 2.319046813846299558e-17, 5.707708438416212066e-34, -3.582432210601811423e-50}};
 const qd_real _qdr_log05 = {{-6.931471805599452862e-01, -2.319046813846299558e-17, -5.707708438416212066e-34, 3.582432210601811423e-50}};
 static const qd_real _qdr_half_log_2pi = {{9.1893853320467278056e-01, -3.8782941580672414498e-17, -1.3239715968498069736e-33,  5.1508604368716851602e-50}};
-static const qd_real _qdr_12th = {{8.3333333333333328707e-02,  4.6259292692714853283e-18, 2.5679065925163143282e-34,  1.4254745120491709321e-50}};
-static const qd_real _qdr_neg_360th = {{-2.7777777777777778838e-03,  1.0601087908747154118e-19, 3.4773735106991755191e-36,  3.2667124234460167937e-52}};
-static const qd_real _qdr_1260th = {{7.9365079365079365011e-04,  6.8838233173682821147e-22, 5.9707649565576508289e-40,  5.1788130698400988262e-58}};
-static const qd_real _qdr_neg_1680th = {{-5.9523809523809529179e-04,  5.3693821875472602376e-20, -1.8342189946545105017e-36,  1.6545686300570735518e-52}};
-static const qd_real _qdr_1188th = {{8.4175084175084171397e-04,  3.6870174889237693563e-20, -6.8899008953247077636e-37,  3.7684182570744340986e-53}};
-static const qd_real _qdr_neg_691_360360 = {{-1.9175269175269176337e-03,  1.0675702776872474941e-19, 6.5683424954265538256e-37, -2.0311261401341652300e-53}};
-static const qd_real _qdr_156th = {{6.4102564102564100340e-03,  2.2240044563805217184e-19, 1.9753127634740879859e-35,  6.8532428463902446378e-52}};
-static const qd_real _qdr_neg_3617_122400 = {{-2.9550653594771242316e-02,  4.8617609575088553068e-19, 1.3166815175353259220e-35,  2.7181842411133703481e-52}};
-static const qd_real _qdr_43867_244188 = {{1.7964437236883057381e-01, -6.4016004827109457991e-19, 9.7799774396783318508e-36, -1.6459873421448407795e-52}};
-static const qd_real _qdr_neg_174611_125400 = {{-1.3924322169059011323e+00,  1.5837056989230302665e-17, 5.2056012685038854317e-34,  2.8585879305743951122e-50}};
-static const qd_real _qdr_77683_5796 = {{1.3402864044168392610e+01, -6.1541141019939664145e-16, 1.3610436598016076965e-34, -2.6709201519761898547e-51}};
-static const qd_real _qdr_neg_236364091_1506960 = {{-1.5684828462600202670e+02,  9.3918231417153889450e-15, 1.6570392471086158062e-31, -4.3781278167020493350e-48}};
-static const qd_real _qdr_657931_300 = {{2.1931033333333334667e+03, -1.3339255626002947557e-13, 6.7316130578859678382e-31, -4.3206702650015194122e-47}};
+// Euler-Maclaurin log-factorial asymptotic-series coefficients for x^{-1},
+// x^{-3}, x^{-5}, etc.:
+//   +1/12, -1/360, +1/1260, -1/1680, +1/1188, -691/360360, +1/156,
+//   -3617/122400, +43867/244188, -174611/125400, +77683/5796,
+//   -236364091/1506960, +657931/300
+// First omitted term is (-3392780147/93960)x^27.  For x >= 256, this is
+// between 2^{-200} and 2^{-201}, which is... borderline (it would be
+// reasonable to slightly extend the _qdr_ln_fact[] table).
+static const qd_real _qdr_lfact_coeffs[13] = {
+  {8.3333333333333328707e-02,  4.6259292692714853283e-18, 2.5679065925163143282e-34,  1.4254745120491709321e-50},
+  {-2.7777777777777778838e-03,  1.0601087908747154118e-19, 3.4773735106991755191e-36,  3.2667124234460167937e-52},
+  {7.9365079365079365011e-04,  6.8838233173682821147e-22, 5.9707649565576508289e-40,  5.1788130698400988262e-58},
+  {-5.9523809523809529179e-04,  5.3693821875472602376e-20, -1.8342189946545105017e-36,  1.6545686300570735518e-52},
+  {8.4175084175084171397e-04,  3.6870174889237693563e-20, -6.8899008953247077636e-37,  3.7684182570744340986e-53},
+  {-1.9175269175269176337e-03,  1.0675702776872474941e-19, 6.5683424954265538256e-37, -2.0311261401341652300e-53},
+  {6.4102564102564100340e-03,  2.2240044563805217184e-19, 1.9753127634740879859e-35,  6.8532428463902446378e-52},
+  {-2.9550653594771242316e-02,  4.8617609575088553068e-19, 1.3166815175353259220e-35,  2.7181842411133703481e-52},
+  {1.7964437236883057381e-01, -6.4016004827109457991e-19, 9.7799774396783318508e-36, -1.6459873421448407795e-52},
+  {-1.3924322169059011323e+00,  1.5837056989230302665e-17, 5.2056012685038854317e-34,  2.8585879305743951122e-50},
+  {1.3402864044168392610e+01, -6.1541141019939664145e-16, 1.3610436598016076965e-34, -2.6709201519761898547e-51},
+  {-1.5684828462600202670e+02,  9.3918231417153889450e-15, 1.6570392471086158062e-31, -4.3781278167020493350e-48},
+  {2.1931033333333334667e+03, -1.3339255626002947557e-13, 6.7316130578859678382e-31, -4.3206702650015194122e-47}
+};
 
 const double _qdr_eps = 1.21543267145725e-63; // = 2^-209
 
@@ -902,65 +912,27 @@ qd_real qdr_lfact(double xx) {
   // to reduce rounding error.
   const qd_real invn_qdr = qdr_divd(qdr_make1(1.0), xx);
   const qd_real invn2_qdr = qdr_sqr(invn_qdr);
-  // First omitted term is (-3392780147/93960)x^27.  For x >= 256, this is <
-  // 2^{-200}, which is small enough not to matter.
+  // _qdr_log_coeffs[0] corresponds to the x^{-1} coefficient, [1] corresponds
+  // to x^{-3}, [2] corresponds to x^{-5}, etc.  We start from the smallest
+  // term of interest, and sum backwards to minimize rounding error.
   //
-  // Probable todo: replace with for-loop which starts from an appropriate
-  // term.  We only call this when ddr_lfact() isn't good enough; this can mean
-  // x is in the trillions and we don't actually need any terms past x^5 or
-  // even x^3.
-  qd_real sum_qdr =
-    qdr_mul(
-      invn_qdr,
-      qdr_add(
-        _qdr_12th,
-        qdr_mul(
-          invn2_qdr,
-          qdr_add(
-            _qdr_neg_360th,
-            qdr_mul(
-              invn2_qdr,
-              qdr_add(
-                _qdr_1260th,
-                qdr_mul(
-                  invn2_qdr,
-                  qdr_add(
-                    _qdr_neg_1680th,
-                    qdr_mul(
-                      invn2_qdr,
-                      qdr_add(
-                        _qdr_1188th,
-                        qdr_mul(
-                          invn2_qdr,
-                          qdr_add(
-                            _qdr_neg_691_360360,
-                            qdr_mul(
-                              invn2_qdr,
-                              qdr_add(
-                                _qdr_156th,
-                                qdr_mul(
-                                  invn2_qdr,
-                                  qdr_add(
-                                    _qdr_neg_3617_122400,
-                                    qdr_mul(
-                                      invn2_qdr,
-                                      qdr_add(
-                                        _qdr_43867_244188,
-                                        qdr_mul(
-                                          invn2_qdr,
-                                          qdr_add(
-                                            _qdr_neg_174611_125400,
-                                            qdr_mul(
-                                              invn2_qdr,
-                                              qdr_add(
-                                                _qdr_77683_5796,
-                                                qdr_mul(
-                                                  invn2_qdr,
-                                                  qdr_add(
-                                                    _qdr_neg_236364091_1506960,
-                                                    qdr_mul(
-                                                      invn2_qdr,
-                                                      _qdr_657931_300)))))))))))))))))))))))));
+  // If term_idx starts at m, the first omitted term corresponds to x^{-2m-3}.
+  // If x >= 2^k, that term's value is bounded above by 2^{-2mk-3k+16}.
+  // Meanwhile, the final return value is bounded below by 2^{k+2}.
+  // We want the omitted term to be smaller than ~2^{-210} times the final
+  // return value:
+  //   (k+2) + (2mk+3k-16) >= 210
+  //   2mk >= 210 - 4k + 14
+  //   m >= (112 - 2k) / k
+  //   m >= 112/k - 2
+  // Thus floor(111/k) - 1 works.
+  uint32_t term_idx = (111 / bsru64(S_CAST(int64_t, xx))) - 1;
+  qd_real sum_qdr = _qdr_lfact_coeffs[term_idx];
+  do {
+    --term_idx;
+    sum_qdr = qdr_add(_qdr_lfact_coeffs[term_idx], qdr_mul(invn2_qdr, sum_qdr));
+  } while (term_idx);
+  sum_qdr = qdr_mul(invn_qdr, sum_qdr);
   //   n ln n - n + 0.5 ln (2*pi*n)
   // = n ln n - n + 0.5 ln 2*pi + 0.5 ln n
   // = (n + 0.5) ln n - n + 0.5 ln 2*pi

@@ -32,6 +32,10 @@ namespace plink2 {
 // library (https://github.com/BL-highprecision/QD ).  See LICENSE.QD for that
 // library's BSD-3-Clause-LBNL license.
 
+// ddr_lfact() takes ~25x as long as Lfact() in my testing, qdr_lfact() is
+// close to 500x.  So each precision level increase should be carefully
+// considered.
+
 typedef struct qd_real_struct {
   double x[4];
 } qd_real;
