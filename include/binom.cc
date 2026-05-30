@@ -304,35 +304,20 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 // seems more accurate for some very large cases, and this seems like it should
 // be avoidable.
 dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
-  // normalized always true, min(aa, bb) >= 40, max much larger
+  // normalized always true, min(aa, bb) >= 2048, max much larger
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
-  // Sometimes, ibeta_power_terms_d_ln() is both slower and less accurate than
-  // the following.  Can we improve the logic below to the point where we can
-  // delete ibeta_power_terms_d_ln()?
-  /*
-  dd_real ddrs[5];
-  ddrs[0] = ddr_lfact(aa + bb - 1);
-  ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
-  ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  if (p_is_half) {
-    ddrs[3] = ddr_muld(_ddr_log05, aa + bb);
-  } else {
-    ddrs[3] = ddr_muld(ddr_log(p_ddr), aa);
-    ddrs[4] = ddr_muld(ddr_log(q_ddr), bb);
-  }
-  dd_real result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-  */
 
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
   double cc = (aa / (aa + 1.0)) * ay_minus_bx_plus1;
   const double xx = p_ddr.x[0];
   const double two_minus_x = 2 - xx;
-  double ff = cc;
+  // This provides a noticeable accuracy boost at reasonable computational
+  // cost.
+  dd_real ff_ddr = ddr_maked(cc);
   double dd = 0.0;
   double mm = 1.0;
   while (1) {
@@ -340,11 +325,9 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     // if xx is very small, precomputed xx * xx may underflow when actual
     // product here does not
     // (also possible for actual product to underflow)
-    // const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * xx * xx;
     const double shared_middle_term = mm * (bb - mm) * xx / denom;
     const double cur_a = ((aa + mm - 1) / denom) * (aa + bb + mm - 1) * shared_middle_term * xx;
     double cur_b = mm;
-    // cur_b += mm * (bb - mm) * xx / denom;
     cur_b += shared_middle_term;
     cur_b += ((aa + mm) / (aa + 2 * mm + 1)) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1);
     mm += 1.0;
@@ -363,15 +346,15 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     }
     */
     dd = 1.0 / dd;
-    const double delta = cc * dd;
-    if (fabs(delta - 1) <= k2m52) {
-      result_ln_ddr = ddr_addd(result_ln_ddr, -log(ff));
+    const dd_real delta_ddr = ddr_mul2d(cc, dd);
+    if (fabs(delta_ddr.x[0] - 1) <= k2m52) {
+      result_ln_ddr = ddr_addd(result_ln_ddr, -log(ff_ddr.x[0]));
       if (!inv) {
         return result_ln_ddr;
       }
       return ddr_log1p(ddr_negate(ddr_exp(result_ln_ddr)));
     }
-    ff *= delta;
+    ff_ddr = ddr_mul(ff_ddr, delta_ddr);
   }
 }
 
@@ -480,20 +463,20 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 //
 // Benchmark results revealed that Boost 1.91 ibetac(k+1, n-k, p) (which is
 // called by scipy.stats.binom.logcdf()) became faster than this function's
-// initial implementation once obs_tot was ~1000, and its results were
-// acceptably accurate.  So we now use its main algorithm when obs_tot > 2^10
-// and min(k+1, n-k) >= 40.
+// initial implementation once obs_tot was large, and its results were
+// acceptably accurate.  So we now use its main algorithm when obs_tot > 2^15
+// and min(k+1, n-k) >= 2^11.
 //
 // Interestingly, the scipy implementation has much higher overhead, even after
-// initialization, despite relying on nearly identical C++ code.  E.g.
+// initialization, despite relying on very similar C++ code.  E.g.
 //
 //   >>> import exact_tests, scipy, timeit
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.012564708013087511
+//   0.016952459001913667
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.008181249955669045
+//   0.016799583012470976
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.012667750008404255
+//   0.017306749999988824
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
 //   1.005605333019048
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
@@ -508,8 +491,9 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 //   0.27791083394549787
 
 // See Pbinom() below for a higher-accuracy variant of this function; this one
-// is limited by the float64 precision of the continued fraction calculation,
-// and everything else here is tuned to that level of relative error.
+// is limited by the float64 precision of the Lanczos and
+// continued-fraction-coefficient calculations, and everything else here is
+// tuned to that level of relative error.
 double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, int32_t midp, uint32_t logp) {
   if ((obs_k < 0) || (obs_k > n)) {
     if ((obs_k < 0) == complement) {
