@@ -304,7 +304,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 // seems more accurate for some very large cases, and this seems like it should
 // be avoidable.
 dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
-  // normalized always true, min(aa, bb) >= 2048, max much larger
+  // normalized always true, min(aa, bb) >= 40, max much larger
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
@@ -463,9 +463,9 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 //
 // Benchmark results revealed that Boost 1.91 ibetac(k+1, n-k, p) (which is
 // called by scipy.stats.binom.logcdf()) became faster than this function's
-// initial implementation once obs_tot was large, and its results were
-// acceptably accurate.  So we now use its main algorithm when obs_tot > 2^15
-// and min(k+1, n-k) >= 2^11.
+// initial implementation once obs_tot was ~1000, and its results were
+// acceptably accurate.  We now use its main algorithm when obs_tot > 512 and
+// min(k+1, n-k) >= 40.
 //
 // Interestingly, the scipy implementation has much higher overhead, even after
 // initialization, despite relying on very similar C++ code.  E.g.
@@ -501,7 +501,8 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     }
     return logp? NAN : 0.0;
   }
-  if ((n > (1 << 15)) && (MINV(obs_k, n - obs_k) >= 2048)) {
+  if ((n > 512) && (MINV(obs_k, n - obs_k) >= 40)) {
+  // if (((n > (1 << 15)) && (MINV(obs_k, n - obs_k) >= 2048)) || ((MINV(obs_k, n - obs_k) >= 40) && (fabs(S_CAST(double, n) * p_ddr.x[0] - S_CAST(double, obs_k)) > 16))) {
     double aa = obs_k + 1;
     double bb = n - obs_k;
     dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
