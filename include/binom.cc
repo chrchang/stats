@@ -341,6 +341,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
       if (!midp_complement) {
         result_incr = -log(ff_ddr.x[0]);
       } else {
+        // If complement=0, inv=1 (a<->b not flipped):
         //   result_ln
         // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
         // = (k+1) log p + (n-k) log q + log(n!) - log(k!) - log((n-k-1)!)
@@ -356,7 +357,8 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
         // = log(result * (1/ff - 0.5/(p(n-k))))
         // = result_ln + log(1/ff - 0.5/(p(n-k)))
         if (midp_complement == inv + 1) {
-          result_incr = log(1.0 / ff_ddr.x[0] - 0.5 / ((bb + 1) * xx));
+          // aa<->bb, xx<->yy flip was performed earlier.
+          result_incr = log(1.0 / ff_ddr.x[0] - 0.5 / (aa * q_ddr.x[0]));
         } else {
           result_incr = log(1.0 / ff_ddr.x[0] + 0.5 / (bb * xx));
         }
