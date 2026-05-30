@@ -2,8 +2,6 @@
 from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
-import random, scipy
-from libc.math cimport sqrt
 
 __version__ = "0.4.5"
 
@@ -443,47 +441,3 @@ def HWE(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", b
     if logp:
         return ln_result
     return exp_flush(ln_result)
-
-
-def pbinom_approx_accuracy_test(float p, float z, uint32_t min_pow2, uint32_t max_pow2, uint32_t trials_per_pow2, bint logp=0):
-    cdef double pq = p * (1.0 - p)
-    cdef uint32_t pow2
-    cdef uint32_t trial_idx
-    cdef int64_t min_n
-    cdef int64_t max_n
-    cdef int64_t k
-    cdef int64_t n
-    cdef double stdev
-    cdef double got
-    cdef double want
-    cdef double relerr
-    cdef double relerr_ssq
-    cdef double relerr_scipy_ssq
-    cdef double approx_rms
-    cdef double scipy_rms
-    for pow2 in range(min_pow2, max_pow2 + 1):
-        min_n = 1LL << pow2
-        max_n = min_n * 2 - 1
-        relerr_ssq = 0.0
-        relerr_scipy_ssq = 0.0
-        for trial_idx in range(0, trials_per_pow2):
-            n = random.randint(min_n, max_n)
-            stdev = sqrt(float(n) * pq)
-            k = <int64_t>(float(n) * p + z * stdev + 0.5)
-            if k < 0:
-                k = 0
-            elif k > n:
-                k = n
-            want = pbinom(k, n, p, logp=logp)
-            got = pbinom(k, n, p, logp=logp, approx=True)
-            relerr = (got - want) / want
-            relerr_ssq += relerr * relerr
-            if logp:
-                got = scipy.stats.binom.logcdf(k, n, p)
-            else:
-                got = scipy.stats.binom.cdf(k, n, p)
-            relerr = (got - want) / want
-            relerr_scipy_ssq += relerr * relerr
-        approx_rms = sqrt(relerr_ssq / float(trials_per_pow2))
-        scipy_rms = sqrt(relerr_scipy_ssq / float(trials_per_pow2))
-        print("[2^" + str(pow2) + ", 2^" + str(pow2+1) + " - 1): approxRMS=" + str(approx_rms) + "  scipyRMS=" + str(scipy_rms))
