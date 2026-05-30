@@ -251,11 +251,15 @@ double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
 }
 
 dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr) {
-  // returns log((x^a)(y^b) / Beta(a,b))
+  // Returns log((x^a)(y^b) / Beta(a,b))
+  //       = log((x^a)(y^b)(a+b-1)! / ((a-1)!(b-1)!)).
   //
   // normalized always true
   // prefix always 1
   // aa and bb always large
+  //
+  // This actually holds up better than the obvious ddr-based implementation
+  // when aa+bb approaches 2^52.
   double cc = aa + bb;
   const double gh = kLanczosDoubleG - 0.5;
   const dd_real agh_ddr = ddr_add2d(gh, aa);

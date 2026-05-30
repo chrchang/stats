@@ -5,6 +5,7 @@
 /Python/src/exact_tests.*.so
 /Python/src/exact_tests/exact.cpp
 /Python/src/exact_tests/__pycache__/
+/Python/__pycache__/
 /Python/tests/__pycache__/
 binom_demo
 hwe_demo
