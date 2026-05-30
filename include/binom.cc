@@ -293,7 +293,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 // (I still have work to do in understanding the derivation and properties of
 // this continued fraction well enough to take a real shot at improving e.g.
 // the rather similar hypergeometric cdf calculation.)
-dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp, uint32_t complement) {
+dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
   // normalized always true, min(aa, bb) >= 40, max much larger
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
@@ -338,7 +338,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     const dd_real delta_ddr = ddr_mul2d(cc, dd);
     if (fabs(delta_ddr.x[0] - 1) <= k2m52) {
       double result_incr;
-      if (!midp) {
+      if (!midp_complement) {
         result_incr = -log(ff_ddr.x[0]);
       } else {
         //   result_ln
@@ -355,7 +355,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
         // = log(result/ff - result/(2p(n-k)))
         // = log(result * (1/ff - 0.5/(p(n-k))))
         // = result_ln + log(1/ff - 0.5/(p(n-k)))
-        if (complement == inv) {
+        if (midp_complement == inv + 1) {
           result_incr = log(1.0 / ff_ddr.x[0] - 0.5 / ((bb + 1) * xx));
         } else {
           result_incr = log(1.0 / ff_ddr.x[0] + 0.5 / (bb * xx));
@@ -525,7 +525,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     // (took a brief look at Boost's use_asym branch, don't see a reasonable
     // way to use it without sacrificing accuracy, and current code seems fast
     // enough.)
-    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp, complement);
+    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp * (1 + complement));
     if (logp) {
       return result_ln_ddr.x[0];
     }
