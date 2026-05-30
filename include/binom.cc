@@ -265,7 +265,7 @@ double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   return s1;
 }
 
-dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, double* nonlog_ptr) {
+dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr) {
   // returns log((x^a)(y^b) / Beta(a,b))
   //
   // normalized always true
@@ -283,19 +283,18 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   const double denom_b = lanczos_sum_d_expg_scaled_imp(bb, &numer_b);
   double denom_c;
   const double numer_c = lanczos_sum_d_expg_scaled_imp(cc, &denom_c);
-  // Calculate result with ordinary precision; pointless to go further here
-  // unless we widen Lanczos sum calculations.
-  // (With more Lanczos terms, may need (numer_a / denom_a) * etc. to avoid
-  // intermediate overflow.)
-  double result = (numer_a * numer_b * numer_c) / (denom_a * denom_b * denom_c);
-  *nonlog_ptr = result * sqrt(agh_ddr.x[0] * bgh_ddr.x[0] * kRecipE / cgh_ddr.x[0]);
+  // Tried performing some of the following computations with float64s instead
+  // of dd_reals, but that resulted in noticeably higher error than scipy.
+  const dd_real term1_ddr = ddr_sqr(ddr_accurate_div(ddr_muld(ddr_mul2d(numer_a, numer_b), numer_c), ddr_muld(ddr_mul2d(denom_a, denom_b), denom_c)));
+  const dd_real term2_ddr = ddr_accurate_div(ddr_mul(agh_ddr, bgh_ddr), ddr_mul(cgh_ddr, _ddr_e));
+  dd_real result_ddr = ddr_mul_pwr2(ddr_log(ddr_mul(term1_ddr, term2_ddr)), 0.5);
+
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
   // exceed that of ln(nonlog).
   // This removes the need for special cases.
   const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh))), agh_ddr);
   const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh)), bgh_ddr);
-  return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
-                 ddr_muld(ddr_log1p(l2_ddr), bb));
+  return ddr_sort_and_add3(result_ddr, ddr_muld(ddr_log1p(l1_ddr), aa), ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
@@ -320,8 +319,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
-  double ff;
-  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
+  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
   // Sometimes, ibeta_power_terms_d_ln() is both slower and less accurate than
   // the following.  Can we improve the logic below to the point where we can
   // delete ibeta_power_terms_d_ln()?
@@ -338,7 +336,6 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     ddrs[4] = ddr_muld(ddr_log(q_ddr), bb);
   }
   dd_real result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-  ff = 1.0;
   */
 
   // see Boost continued_fraction_b()
@@ -346,7 +343,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   double cc = (aa / (aa + 1.0)) * ay_minus_bx_plus1;
   const double xx = p_ddr.x[0];
   const double two_minus_x = 2 - xx;
-  ff = cc / ff;
+  double ff = cc;
   double dd = 0.0;
   double mm = 1.0;
   while (1) {

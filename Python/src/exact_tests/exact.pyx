@@ -459,7 +459,7 @@ def pbinom_approx_accuracy_test(float p, uint32_t min_pow2, uint32_t max_pow2, u
     cdef double relerr_scipy_ssq
     cdef double approx_rms
     cdef double scipy_rms
-    for pow2 in range(min_pow2, max_pow2 - 1):
+    for pow2 in range(min_pow2, max_pow2 + 1):
         min_n = 1LL << pow2
         max_n = min_n * 2 - 1
         relerr_ssq = 0.0
@@ -479,4 +479,4 @@ def pbinom_approx_accuracy_test(float p, uint32_t min_pow2, uint32_t max_pow2, u
             relerr_scipy_ssq += relerr * relerr
         approx_rms = sqrt(relerr_ssq / float(trials_per_pow2))
         scipy_rms = sqrt(relerr_scipy_ssq / float(trials_per_pow2))
-        print("[2^" + str(pow2) + ", 2^" + str(pow2) + " - 1): approxRMS=" + str(approx_rms) + "  scipyRMS=" + str(scipy_rms))
+        print("[2^" + str(pow2) + ", 2^" + str(pow2+1) + " - 1): approxRMS=" + str(approx_rms) + "  scipyRMS=" + str(scipy_rms))
