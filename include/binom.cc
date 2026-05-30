@@ -238,29 +238,14 @@ static const double kLanczosDoubleSumExpgNumer[13] = {
 static const double kLanczosDoubleG = 6.024680040776729583740234375;
 
 double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
-  double s1;
-  double s2;
   // zz currently guaranteed to be >1.
-  // if (zz <= 1) {
-  //   s1 = kLanczosDoubleSumExpgNumer[12];
-  //   s2 = kLanczosDoubleSumDenom[12];
-  //   for (int32_t ii = 11; ii >= 0; --ii) {
-  //     s1 *= zz;
-  //     s2 *= zz;
-  //     s1 += kLanczosDoubleSumExpgNumer[S_CAST(uint32_t, ii)];
-  //     s2 += kLanczosDoubleSumDenom[S_CAST(uint32_t, ii)];
-  //   }
-  // } else {
   zz = 1 / zz;
-  s1 = kLanczosDoubleSumExpgNumer[0];
-  s2 = kLanczosDoubleSumDenom[0];
+  double s1 = kLanczosDoubleSumExpgNumer[0];
+  double s2 = kLanczosDoubleSumDenom[0];
   for (uint32_t uii = 1; uii != 13; ++uii) {
-    s1 *= zz;
-    s2 *= zz;
-    s1 += kLanczosDoubleSumExpgNumer[uii];
-    s2 += kLanczosDoubleSumDenom[uii];
+    s1 = prefer_fma(s1, zz, kLanczosDoubleSumExpgNumer[uii]);
+    s2 = prefer_fma(s2, zz, kLanczosDoubleSumDenom[uii]);
   }
-  // }
   *s2_ptr = s2;
   return s1;
 }
