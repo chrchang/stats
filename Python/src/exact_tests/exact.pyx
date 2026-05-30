@@ -16,6 +16,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
     dd_real_struct ddr_make_qd(const qd_real_struct a) nogil
 
+    dd_real_struct ddr_negate(const dd_real_struct a) nogil
+
     dd_real_struct ddr_subd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_is_zero(const dd_real_struct a) nogil
@@ -25,6 +27,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     int32_t ddr_ltd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_leqd(const dd_real_struct a, double b) nogil
+
+    qd_real_struct qdr_addd(const qd_real_struct a, double b) nogil
 
     int32_t qdr_is_zero(const qd_real_struct a) nogil
 
@@ -36,11 +40,11 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
 
 cdef extern from "../include/binom.h" namespace "plink2":
-    double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, uint32_t logp) nogil
+    double BinomMass(int64_t k, int64_t n, dd_real_struct p_ddr, dd_real_struct q_ddr, uint32_t logp) nogil
 
-    double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
+    double PbinomApprox(int64_t obs_k, int64_t n, dd_real_struct p_ddr, dd_real_struct q_ddr, uint32_t complement, int32_t midp, uint32_t logp) nogil
 
-    double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, uint32_t complement, uint32_t logp) nogil
+    double Pbinom(int64_t obs_k, int64_t n, dd_real_struct p_ddr, dd_real_struct q_ddr, uint32_t complement, uint32_t logp) nogil
 
     int64_t QbinomHalfUlp(dd_real_struct targetp_or_lnp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
 
@@ -87,6 +91,9 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
 # convert to a dd_real ("double-double") with ~106-bit precision instead of the
 # usual 53.  Then we perform the underlying calculation with >53 bits of
 # precision, unless n is too large for that to be practical.
+#
+# We also return 1-p as a dd_real, since this is occasionally important for p
+# near 1.
 cdef dd_real_struct DdrMake(object p):
     cdef dd_real_struct p_ddr
     if isinstance(p, float):
@@ -97,6 +104,23 @@ cdef dd_real_struct DdrMake(object p):
         p = fractions.Fraction(p)
     p_ddr.x[0] = float(p)
     p_ddr.x[1] = float(p - fractions.Fraction(p_ddr.x[0]))
+    return p_ddr
+
+cdef dd_real_struct DdrMake2(object p, dd_real_struct* q_ddr_ptr):
+    cdef dd_real_struct p_ddr
+    if isinstance(p, float):
+        p_ddr.x[0] = p
+        p_ddr.x[1] = 0.0
+        q_ddr_ptr[0].x[0] = 1.0 - p
+        q_ddr_ptr[0].x[1] = 1.0 - (1.0 - p) - p
+        return p_ddr
+    if not isinstance(p, fractions.Fraction):
+        p = fractions.Fraction(p)
+    p_ddr.x[0] = float(p)
+    p_ddr.x[1] = float(p - fractions.Fraction(p_ddr.x[0]))
+    q = fractions.Fraction(fractions.Fraction(1, 1) - p)
+    q_ddr_ptr[0].x[0] = float(q)
+    q_ddr_ptr[0].x[1] = float(q - fractions.Fraction(q_ddr_ptr[0].x[0]))
     return p_ddr
 
 # For two-sided binom(), we convert p to a qd_real with ~212-bit precision, so
@@ -180,12 +204,10 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
         # solve; but this is straightforward to get right, just need to be
         # careful about underflow.
         raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-    cdef double result
     if alternative == "two-sided":
-        result = BinomTwoSidedP(k, n, p_qdr, midp, logp)
-    else:
-        result = PbinomApprox(k, n, ddr_make_qd(p_qdr), complement, midp, logp)
-    return flush_if_denormal(result)
+        return flush_if_denormal(BinomTwoSidedP(k, n, p_qdr, midp, logp))
+    cdef dd_real_struct q_ddr = ddr_negate(ddr_make_qd(qdr_addd(p_qdr, -1.0)))
+    return flush_if_denormal(PbinomApprox(k, n, ddr_make_qd(p_qdr), q_ddr, complement, midp, logp))
 
 
 # Returns likelihood of exactly k successes.  Relative error should be <0.6 ULP
@@ -193,7 +215,8 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
 def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    cdef dd_real_struct p_ddr = DdrMake(p)
+    cdef dd_real_struct q_ddr
+    cdef dd_real_struct p_ddr = DdrMake2(p, &q_ddr)
     if ddr_ltd(p_ddr, 0.0) or not ddr_leqd(p_ddr, 1.0):
         raise RuntimeError("p must be in [0, 1].")
     if k < 0 or k > n:
@@ -204,7 +227,7 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
         if (ddr_is_zero(p_ddr) and k == 0) or (k == n and not ddr_is_zero(p_ddr)):
             return oneval(logp)
         return zeroval(logp)
-    return flush_if_denormal(BinomMass(k, n, p_ddr, logp))
+    return flush_if_denormal(BinomMass(k, n, p_ddr, q_ddr, logp))
 
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
@@ -216,15 +239,15 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
 def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, bint approx=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    cdef dd_real_struct p_ddr = DdrMake(p)
+    cdef dd_real_struct q_ddr
+    cdef dd_real_struct p_ddr = DdrMake2(p, &q_ddr)
     if not ddr_is_zero(p_ddr) and (ddr_ltd(p_ddr, 0.5**960) or not ddr_leqd(p_ddr, 1.0)):
         raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
-
     if ddr_is_zero(p_ddr) or ddr_is(p_ddr, 1):
         return pbinom_p01(k, n, p_ddr.x[0], complement, 0, logp)
     if approx:
-        return flush_if_denormal(PbinomApprox(k, n, p_ddr, complement, 0, logp))
-    return flush_if_denormal(Pbinom(k, n, p_ddr, complement, logp))
+        return flush_if_denormal(PbinomApprox(k, n, p_ddr, q_ddr, complement, 0, logp))
+    return flush_if_denormal(Pbinom(k, n, p_ddr, q_ddr, complement, logp))
 
 
 # Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is

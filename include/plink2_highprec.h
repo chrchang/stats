@@ -957,6 +957,14 @@ HEADER_INLINE qd_real qdr_add_lfacts(const double a, const double b) {
 qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 
 
+HEADER_INLINE dd_real ddr_log_2arg(const dd_real p, const dd_real q) {
+  if (q.x[0] < 0.03125) {
+    return ddr_log1p(ddr_negate(q));
+  }
+  return ddr_log(p);
+}
+
+
 // Preconditions:
 // - numer_factorial_args[] and denom_factorial_args[] are
 //   not-necessarily-sorted lists of length ffac_ct, describing a quotient of

@@ -30,7 +30,7 @@ double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  if (n < (1LL << 39)) {
+  if (n < (1LL << 43)) {
     return ddr_sub(ddr_lfact(n),
                    ddr_add_lfacts(k, n-k)).x[0];
   }
@@ -38,8 +38,8 @@ double LnBinomCoeff(int64_t n, int64_t k) {
                  qdr_add(qdr_lfact(k), qdr_lfact(n-k))).x[0];
 }
 
-static inline uint32_t binom_lnprob_needs_qdr(int64_t obs_tot, uint32_t p_is_half) {
-  return (obs_tot >= (1LL << 37)) && ((!p_is_half) || (obs_tot >= (1LL << 42)));
+static inline uint32_t binom_lnprob_needs_qdr(int64_t obs_tot) {
+  return (obs_tot >= (1LL << 39));
 }
 
 // Currently assumes k < n.  Should always have <1 ULP error; and
@@ -64,73 +64,75 @@ static inline uint32_t binom_lnprob_needs_qdr(int64_t obs_tot, uint32_t p_is_hal
 //   ddr_muld(ddr_log(p_ddr), k) should have relative error < 2^{-98}, which
 //   corresponds to absolute error
 //     2^{-98} * k * log(p) ~= k * 2^{-88}
-//   which can be much worse than the p=0.5 case.  But the relative error
-//   doesn't wind up being much worse (equivalent at worst to ~doubling n?)
-//   since the final return value has larger magnitude.
-//
-// p intermediate between these two values won't result in behavior much worse
-// than these three limiting cases, so I expect the relative-error goal is met
-// for any n < ~2^40.
+//   which can be much worse than the p=0.5 case... but only when the final
+//   return magnitude has large enough magnitude that this error is fine.
 //
 // Note that when e.g. BinomMass() is called with logp is false, we care about
 // absolute instead of relative error of this function (and stop caring what
 // happens far past DBL_MIN).  That should remain < 2^{-53} for the domain of
-// interest until n > ~2^37.
-dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr) {
-  const uint32_t p_is_half = (p_ddr.x[0] == 0.5) && (p_ddr.x[1] == 0.0);
-  if (!binom_lnprob_needs_qdr(n, p_is_half)) {
-    dd_real ln_q_ddr = _ddr_log05;
-    if (!p_is_half) {
-      ln_q_ddr = ddr_log1p(ddr_negate(p_ddr));
-    }
-    const dd_real nmk_ln_q_ddr = ddr_muld(ln_q_ddr, n-k);
-    if (k == 0) {
-      return nmk_ln_q_ddr;
-    }
-    dd_real ln_p_ddr = _ddr_log05;
-    if (!p_is_half) {
-      ln_p_ddr = ddr_log(p_ddr);
-    }
-    const dd_real k_ln_p_ddr = ddr_muld(ln_p_ddr, k);
-    dd_real ddrs[5];
-    ddrs[0] = k_ln_p_ddr;
-    ddrs[1] = nmk_ln_q_ddr;
-    ddrs[2] = ddr_lfact(n);
-    ddrs[3] = ddr_negate(ddr_lfact(k));
-    ddrs[4] = ddr_negate(ddr_lfact(n-k));
-    return ddr_sort_and_add(5, ddrs);
-  }
-  qd_real ln_q_qdr = _qdr_log05;
+// interest until n > ~2^39.
+dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  // strictly speaking, usually don't need to initialize this at all in
+  // p_is_half case
+  dd_real ln_q_ddr = _ddr_log05;
   if (!p_is_half) {
-    ln_q_qdr = qdr_log1p(qdr_make2(-p_ddr.x[0], -p_ddr.x[1]));
+    ln_q_ddr = ddr_log_2arg(q_ddr, p_ddr);
   }
-  const qd_real nmk_ln_q_qdr = qdr_muld(ln_q_qdr, n-k);
   if (k == 0) {
-    return ddr_make_qd(nmk_ln_q_qdr);
+    return ddr_muld(ln_q_ddr, n-k);
   }
-  qd_real ln_p_qdr = _qdr_log05;
-  if (!p_is_half) {
-    ln_p_qdr = qdr_log(qdr_make_dd(p_ddr));
+  if (!binom_lnprob_needs_qdr(n)) {
+    dd_real ddrs[5];
+    ddrs[0] = ddr_lfact(n);
+    ddrs[1] = ddr_negate(ddr_lfact(k));
+    ddrs[2] = ddr_negate(ddr_lfact(n-k));
+    if (p_is_half) {
+      ddrs[3] = ddr_muld(_ddr_log05, n);
+    } else {
+      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
+      ddrs[4] = ddr_muld(ln_q_ddr, n-k);
+    }
+    return ddr_sort_and_add(5 - p_is_half, ddrs);
   }
-  const qd_real k_ln_p_qdr = qdr_muld(ln_p_qdr, k);
   qd_real qdrs[5];
-  qdrs[0] = k_ln_p_qdr;
-  qdrs[1] = nmk_ln_q_qdr;
-  qdrs[2] = qdr_lfact(n);
-  qdrs[3] = qdr_negate(qdr_lfact(k));
-  qdrs[4] = qdr_negate(qdr_lfact(n-k));
-  return ddr_make_qd(qdr_sort_and_add(5, qdrs));
+  qdrs[0] = qdr_lfact(n);
+  qdrs[1] = qdr_negate(qdr_lfact(k));
+  qdrs[2] = qdr_negate(qdr_lfact(n-k));
+  if (p_is_half) {
+    qdrs[3] = qdr_muld(_qdr_log05, n);
+  } else {
+    // I think this consistently squeezes out enough accuracy, even for n near
+    // 2^52, so no need for this function to take p_qdr?
+    //   d/dp[k ln p + (n-k) ln (1-p)]
+    // = k(1/p) + (n-k)(-1/(1-p))
+    // = k/p - (n-k)/(1-p)
+    // so if k/p ~= (n-k)/(1-p) (i.e. we're near the mode, and log-probability
+    // magnitude isn't huge), a relative error of 2^{-106} in representing p
+    // translates to sufficiently-low absolute error; and if we aren't near the
+    // mode, the final magnitude will be large (so higher absolute error is
+    // fine).
+    if (ddr_ltd(p_ddr, 0.5)) {
+      qdrs[3] = qdr_muld(qdr_log(qdr_make_dd(p_ddr)), k);
+      qdrs[4] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(p_ddr))), n-k);
+    } else {
+      qdrs[3] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(q_ddr))), k);
+      qdrs[4] = qdr_muld(qdr_log(qdr_make_dd(q_ddr)), n-k);
+    }
+  }
+  return ddr_make_qd(qdr_sort_and_add(5 - p_is_half, qdrs));
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
+// When p very close to 1, a dd_real
 // If p is too close to 1 to be well-represented by a dd_real, pass in (n-k, n,
 // 1-p) instead.
-double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp) {
+double BinomMass(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t logp) {
   if (k == n) {
     k = 0;
-    p_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
+    swap_ddr(&p_ddr, &q_ddr);
   }
-  const dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr);
+  const dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
   if (logp) {
     return ln_prob_ddr.x[0];
   }
@@ -214,6 +216,7 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio
 
 // static const double kLentzFpmin = DBL_MIN * 16;
 
+/*
 static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
 static const double kLanczosDoubleSumExpgNumer[13] = {
   56906521.91347156388090791033559122686859,
@@ -239,18 +242,16 @@ double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   double s1;
   double s2;
   // zz currently guaranteed to be >1.
-  /*
-  if (zz <= 1) {
-    s1 = kLanczosDoubleSumExpgNumer[12];
-    s2 = kLanczosDoubleSumDenom[12];
-    for (int32_t ii = 11; ii >= 0; --ii) {
-      s1 *= zz;
-      s2 *= zz;
-      s1 += kLanczosDoubleSumExpgNumer[S_CAST(uint32_t, ii)];
-      s2 += kLanczosDoubleSumDenom[S_CAST(uint32_t, ii)];
-    }
-  } else {
-  */
+  // if (zz <= 1) {
+  //   s1 = kLanczosDoubleSumExpgNumer[12];
+  //   s2 = kLanczosDoubleSumDenom[12];
+  //   for (int32_t ii = 11; ii >= 0; --ii) {
+  //     s1 *= zz;
+  //     s2 *= zz;
+  //     s1 += kLanczosDoubleSumExpgNumer[S_CAST(uint32_t, ii)];
+  //     s2 += kLanczosDoubleSumDenom[S_CAST(uint32_t, ii)];
+  //   }
+  // } else {
   zz = 1 / zz;
   s1 = kLanczosDoubleSumExpgNumer[0];
   s2 = kLanczosDoubleSumDenom[0];
@@ -297,6 +298,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
                  ddr_muld(ddr_log1p(l2_ddr), bb));
 }
+*/
 
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
 // continued fraction introduced in
@@ -321,32 +323,27 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
   double ff;
-  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
+  // dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
   // Sometimes, ibeta_power_terms_d_ln() is both slower and less accurate than
   // the following.  Can we improve the logic below to the point where we can
   // delete ibeta_power_terms_d_ln()?
-  /*
   dd_real ddrs[5];
-  dd_real logp_ddr = _ddr_log05;
-  dd_real logq_ddr = _ddr_log05;
-  if ((p_ddr.x[0] != 0.5) || (p_ddr.x[1] != 0.0)) {
-    logp_ddr = ddr_log(p_ddr);
+  ddrs[0] = ddr_lfact(aa + bb - 1);
+  ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
+  ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  if (p_is_half) {
+    ddrs[3] = ddr_muld(_ddr_log05, aa + bb);
+  } else {
+    ddrs[3] = ddr_muld(ddr_log(p_ddr), aa);
+    ddrs[4] = ddr_muld(ddr_log(q_ddr), bb);
   }
-  if ((q_ddr.x[0] != 0.5) || (q_ddr.x[1] != 0.0)) {
-    logq_ddr = ddr_log(q_ddr);
-  }
-  ddrs[0] = ddr_muld(logp_ddr, aa);
-  ddrs[1] = ddr_muld(logq_ddr, bb);
-  ddrs[2] = ddr_lfact(aa + bb - 1);
-  ddrs[3] = ddr_negate(ddr_lfact(aa - 1));
-  ddrs[4] = ddr_negate(ddr_lfact(bb - 1));
-  dd_real result_ln_ddr = ddr_sort_and_add(5, ddrs);
+  dd_real result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
   ff = 1.0;
-  */
 
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
-  double cc = (aa * ay_minus_bx_plus1) / (aa + 1.0);
+  double cc = (aa / (aa + 1.0)) * ay_minus_bx_plus1;
   const double xx = p_ddr.x[0];
   const double two_minus_x = 2 - xx;
   ff = cc / ff;
@@ -357,10 +354,13 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     // if xx is very small, precomputed xx * xx may underflow when actual
     // product here does not
     // (also possible for actual product to underflow)
-    const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * xx * xx;
+    // const double cur_a = (mm * (aa + mm - 1) / denom) * ((aa + bb + mm - 1) / denom) * (bb - mm) * xx * xx;
+    const double shared_middle_term = mm * (bb - mm) * xx / denom;
+    const double cur_a = ((aa + mm - 1) / denom) * (aa + bb + mm - 1) * shared_middle_term * xx;
     double cur_b = mm;
-    cur_b += (mm * (bb - mm) * xx) / denom;
-    cur_b += ((aa + mm) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1)) / (aa + 2 * mm + 1);
+    // cur_b += mm * (bb - mm) * xx / denom;
+    cur_b += shared_middle_term;
+    cur_b += ((aa + mm) / (aa + 2 * mm + 1)) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1);
     mm += 1.0;
     dd = prefer_fma(cur_a, dd, cur_b);
     // Algorithm should terminate when cur_a decreases to 0 due to bb == mm or
@@ -389,20 +389,48 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   }
 }
 
-dd_real ibeta_fraction2_ln_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
+double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t logp) {
   // (x is a synonym for p, y is a synonym for q)
   // log((x^a)(y^b) / Beta(a,b))
   // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
-  // When qd_reals are added to plink2_highprec, we should use them here for
-  // a+b > ~2^39.
-  dd_real ddrs[5];
-  ddrs[0] = ddr_muld(ddr_log(p_ddr), aa);
-  ddrs[1] = ddr_muld(ddr_log(q_ddr), bb);
-  ddrs[2] = ddr_lfact(aa + bb - 1);
-  ddrs[3] = ddr_negate(ddr_lfact(aa - 1));
-  ddrs[4] = ddr_negate(ddr_lfact(bb - 1));
-  dd_real result_ln_ddr = ddr_sort_and_add(5, ddrs);
-
+  const double a_plus_b = aa + bb;
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  dd_real result_ln_ddr;
+  if (!binom_lnprob_needs_qdr(S_CAST(int64_t, a_plus_b))) {
+    dd_real ddrs[5];
+    ddrs[0] = ddr_lfact(a_plus_b - 1);
+    ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
+    ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
+    if (p_is_half) {
+      ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
+    } else {
+      ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
+    }
+    result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
+  } else {
+    qd_real qdrs[5];
+    qdrs[0] = qdr_lfact(a_plus_b - 1);
+    qdrs[1] = qdr_negate(qdr_lfact(aa - 1));
+    qdrs[2] = qdr_negate(qdr_lfact(bb - 1));
+    if (p_is_half) {
+      qdrs[3] = qdr_muld(_qdr_log05, a_plus_b);
+    } else {
+      if (ddr_ltd(p_ddr, 0.5)) {
+        qdrs[3] = qdr_muld(qdr_log(qdr_make_dd(p_ddr)), aa);
+        qdrs[4] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(p_ddr))), bb);
+      } else {
+        qdrs[3] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(q_ddr))), aa);
+        qdrs[4] = qdr_muld(qdr_log(qdr_make_dd(q_ddr)), bb);
+      }
+    }
+    result_ln_ddr = ddr_make_qd(qdr_sort_and_add(5 - p_is_half, qdrs));
+  }
+  if ((!logp) && (result_ln_ddr.x[0] < -1418.0)) {
+    // Could tighten this bound.
+    return 0.0;
+  }
+  const double cf_eps = logp? (k2m54 * 0.5) : k2m64;
   const dd_real ay_minus_bx_plus1_ddr = ddr_addd(ay_minus_bx_ddr, 1);
   dd_real cc_ddr = ddr_divd(ddr_muld(ay_minus_bx_plus1_ddr, aa), aa + 1);
   const dd_real two_minus_x_ddr = ddr_addd(q_ddr, 1);
@@ -411,12 +439,13 @@ dd_real ibeta_fraction2_ln_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_d
   double mm = 1.0;
   while (1) {
     const double denom = aa + 2 * mm - 1;
+    const dd_real shared_middle_term_ddr = ddr_divd(ddr_mul(ddr_mul2d(mm, bb - mm), p_ddr), denom);
     // if p_ddr is very small, precomputed p_ddr * p_ddr may underflow when
     // actual product here does not
     // (also possible for actual product to underflow)
-    const dd_real cur_a_ddr = ddr_mul(ddr_mul(ddr_accurate_div(ddr_muld(ddr_mul2d(mm, aa + mm - 1), aa + bb + mm - 1), ddr_mul2d(denom, denom)), ddr_muld(p_ddr, bb - mm)), p_ddr);
-    dd_real cur_b_ddr = ddr_maked(mm);
-    cur_b_ddr = ddr_add(cur_b_ddr, ddr_divd(ddr_mul(ddr_mul2d(mm, bb - mm), p_ddr), denom));
+    // (we probably just want to handle tiny p in its own function?)
+    const dd_real cur_a_ddr = ddr_divd(ddr_mul(ddr_mul(ddr_mul2d(aa + mm - 1, aa + bb + mm - 1), shared_middle_term_ddr), p_ddr), denom);
+    dd_real cur_b_ddr = ddr_addd(shared_middle_term_ddr, mm);
     cur_b_ddr = ddr_add(cur_b_ddr, ddr_divd(ddr_muld(ddr_add(ddr_muld(two_minus_x_ddr, mm), ay_minus_bx_plus1_ddr), aa + mm), aa + 2 * mm + 1));
     mm += 1.0;
     dd_ddr = ddr_add(ddr_mul(cur_a_ddr, dd_ddr), cur_b_ddr);
@@ -437,18 +466,19 @@ dd_real ibeta_fraction2_ln_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_d
     const dd_real delta_ddr = ddr_mul(cc_ddr, dd_ddr);
     // If I correctly understand what's going on here, (delta - 1) has
     // alternating sign and decreasing magnitude, so this should ensure less
-    // than 2^{-64} relative error is coming from incomplete evaluation of the
+    // than cf_eps relative error is coming from incomplete evaluation of the
     // continued fraction.  (Recall that we actually need to limit the
-    // logarithm's relative error to < ~2^{-63} to achieve the desired level of
+    // logarithm's absolute error to < ~2^{-63} to achieve the desired level of
     // accuracy when DBL_MIN < p < e^{-512} and logp=False.)
     //
     // Worst case, this takes around a million iterations.
-    if (fabs(ddr_subd(delta_ddr, 1.0).x[0]) <= k2m64) {
+    if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= cf_eps)) {
       result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
       if (!inv) {
-        return result_ln_ddr;
+        return logp? result_ln_ddr.x[0] : ddr_exp(result_ln_ddr).x[0];
       }
-      return ddr_log1p(ddr_negate(ddr_exp(result_ln_ddr)));
+      const dd_real neg_result_ddr = ddr_negate(ddr_exp(result_ln_ddr));
+      return logp? ddr_log1p(neg_result_ddr).x[0] : ddr_addd(neg_result_ddr, 1.0).x[0];
     }
     ff_ddr = ddr_mul(ff_ddr, delta_ddr);
   }
@@ -494,14 +524,13 @@ dd_real ibeta_fraction2_ln_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_d
 // See Pbinom() below for a higher-accuracy variant of this function; this one
 // is limited by the float64 precision of the continued fraction calculation,
 // and everything else here is tuned to that level of relative error.
-double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, int32_t midp, uint32_t logp) {
+double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, int32_t midp, uint32_t logp) {
   if ((obs_k < 0) || (obs_k > n)) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? NAN : 0.0;
   }
-  dd_real q_ddr = ddr_negate(ddr_addd(p_ddr, -1.0));
   if ((n > 1024) && (MINV(obs_k, n - obs_k) >= 40)) {
     double aa = obs_k + 1;
     double bb = n - obs_k;
@@ -534,7 +563,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
     dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
     if (midp) {
       // Subtract 0.5 * pmf(k, n, p).
-      const dd_real ln_half_pmf_ddr = ddr_add(binom_ln_prob_internal(obs_k, n, p_ddr), _ddr_log05);
+      const dd_real ln_half_pmf_ddr = ddr_add(binom_ln_prob_internal(obs_k, n, p_ddr, q_ddr), _ddr_log05);
       const dd_real ln_ratio_ddr = ddr_sub(ln_half_pmf_ddr, result_ln_ddr);
       result_ln_ddr = ddr_add(result_ln_ddr, ddr_log(ddr_negate(ddr_expm1(ln_ratio_ddr))));
     }
@@ -698,20 +727,21 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement
 }
 
 // Assumes 0 <= n < 2^52, 2^{-960} <= p < 1.
-// Should achieve <0.6 ULP relative error except when n is well over 2^31.
+// Should consistently achieve <1 ULP relative error; and practically always
+// <0.6 ULP except when n is close to 2^52.
 //
 // See PbinomApprox() above for the faster variant of this function which
 // doesn't try to get the last few bits right.
-double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint32_t logp) {
+double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t logp) {
   if ((obs_k < 0) || (obs_k > n - S_CAST(int64_t, complement))) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? NAN : 0.0;
   }
-  // possible for this to round up to 1, so we must avoid computing 1-p or 1-q
-  // later in the function
-  dd_real q_ddr = ddr_negate(ddr_subd(p_ddr, 1.0));
+  // We can lose half of our precision here when p is very close to 1, so best
+  // to avoid computing 1-p or 1-q later in this function.
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   // Benchmarked various values of both thresholds, this seems good on my Mac
   if ((n > 1048576) && (MINV(obs_k, n - obs_k) >= 4096)) {
     double aa = obs_k + 1;
@@ -724,11 +754,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr2(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
-    if (logp) {
-      return result_ln_ddr.x[0];
-    }
-    return ddr_exp(result_ln_ddr).x[0];
+    return ibeta_fraction2_ddr2(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, logp);
   }
   if (complement) {
     obs_k = n - obs_k - 1;
@@ -924,7 +950,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint
     }
     return ddr_log(prob_ddr).x[0];
   }
-  dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr);
+  dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
   dd_real lik_ddr = ddr_maked(1.0);
   dd_real left_sum_ddr = lik_ddr;
   if (k > 0) {
@@ -1338,7 +1364,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     const double pval = tail_sum / (tail_sum + center_sum);
     return logp? log(pval) : pval;
   }
-  const uint32_t qdr_lnprobv_needed = binom_lnprob_needs_qdr(obs_tot, p_is_half);
+  const uint32_t qdr_lnprobv_needed = binom_lnprob_needs_qdr(obs_tot);
   qd_real ln_odds_ratio_qdr;
   qd_real starting_lnprobv_qdr;
   dd_real starting_lnprob_ddr;

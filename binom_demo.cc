@@ -138,7 +138,8 @@ int main(int argc, char** argv) {
           fputs("Error: Invalid alternative hypothesis ('+' = more successes, '-' = fewer)\n", stderr);
           goto main_ret_INVALID_CMDLINE;
         }
-        ln_pval = BinomOneSidedP(succ, obs, ddr_make_qd(p_qdr), (argv[4][0] == '+'), midp, 1);
+        const dd_real q_ddr = ddr_negate(ddr_make_qd(qdr_addd(p_qdr, -1.0)));
+        ln_pval = BinomOneSidedP(succ, obs, ddr_make_qd(p_qdr), q_ddr, (argv[4][0] == '+'), midp, 1);
         fputs("One-sided ", stdout);
       }
       if (midp) {

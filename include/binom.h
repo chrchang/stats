@@ -46,19 +46,19 @@ namespace plink2 {
 
 double LnBinomCoeff(int64_t n, int64_t k);
 
-double BinomMass(int64_t k, int64_t n, dd_real p_ddr, uint32_t logp);
+double BinomMass(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t logp);
 
-double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, int32_t midp, uint32_t logp);
+double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, int32_t midp, uint32_t logp);
 
-HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
+HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
   const int64_t k_decr = succ_is_greater_alt && (!midp);
   if (k_decr && (obs_k == 0)) {
     return logp? 0.0 : 1.0;
   }
-  return PbinomApprox(obs_k - k_decr, n, p_ddr, succ_is_greater_alt, midp, logp);
+  return PbinomApprox(obs_k - k_decr, n, p_ddr, q_ddr, succ_is_greater_alt, midp, logp);
 }
 
-double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, uint32_t complement, uint32_t logp);
+double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t logp);
 
 int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target);
 
