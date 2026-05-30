@@ -281,7 +281,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   return ddr_sort_and_add3(result_ddr, ddr_muld(ddr_log1p(l1_ddr), aa), ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
-double ibeta_fraction2_d_ln(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
+double ibeta_fraction2_d(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
   double cc = (aa / (aa + 1.0)) * ay_minus_bx_plus1;
@@ -318,36 +318,41 @@ double ibeta_fraction2_d_ln(double aa, double bb, double xx, double yy, dd_real 
     dd = 1.0 / dd;
     const dd_real delta_ddr = ddr_mul2d(cc, dd);
     if (fabs(delta_ddr.x[0] - 1) <= k2m52) {
-      if (!midp_complement) {
-        return -log(ff_ddr.x[0]);
+      double inv_ff = 1.0 / ff_ddr.x[0];
+      if (midp_complement) {
+        // If complement=0, inv=1 (a<->b not flipped):
+        //   result_ln
+        // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
+        // = (k+1) log p + (n-k) log q + log(n!) - log(k!) - log((n-k-1)!)
+        //
+        //   log(0.5 * pmf(k))
+        // = log 0.5 + k log p + (n-k) log q + log(n!) - log(k!) - log((n-k)!)
+        // = log 0.5 - log p - log(n-k) + result_ln
+        // = -log (2 * p * (n-k))) + result_ln
+        //
+        //   log(exp(result_ln - log(ff)) - 0.5 * pmf(k))
+        // = log(exp(result_ln)/ff - exp(result_ln - log(2p(n-k))))
+        // = log(result/ff - result/(2p(n-k)))
+        // = log(result * (1/ff - 0.5/(p(n-k))))
+        // = result_ln + log(1/ff - 0.5/(p(n-k)))
+        double denom;
+        if (midp_complement == inv + 1) {
+          // aa<->bb, xx<->yy flip was performed earlier.
+          denom = -aa * yy;
+        } else {
+          denom = bb * xx;
+        }
+        inv_ff += 0.5 / denom;
       }
-      // If complement=0, inv=1 (a<->b not flipped):
-      //   result_ln
-      // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
-      // = (k+1) log p + (n-k) log q + log(n!) - log(k!) - log((n-k-1)!)
-      //
-      //   log(0.5 * pmf(k))
-      // = log 0.5 + k log p + (n-k) log q + log(n!) - log(k!) - log((n-k)!)
-      // = log 0.5 - log p - log(n-k) + result_ln
-      // = -log (2 * p * (n-k))) + result_ln
-      //
-      //   log(exp(result_ln - log(ff)) - 0.5 * pmf(k))
-      // = log(exp(result_ln)/ff - exp(result_ln - log(2p(n-k))))
-      // = log(result/ff - result/(2p(n-k)))
-      // = log(result * (1/ff - 0.5/(p(n-k))))
-      // = result_ln + log(1/ff - 0.5/(p(n-k)))
-      double denom;
-      if (midp_complement == inv + 1) {
-        // aa<->bb, xx<->yy flip was performed earlier.
-        denom = -aa * yy;
-      } else {
-        denom = bb * xx;
-      }
-      return log(1.0 / ff_ddr.x[0] + 0.5 / denom);
+      return inv_ff;
     }
     ff_ddr = ddr_mul(ff_ddr, delta_ddr);
   }
 }
+
+// Useful identities:
+// 1. ibeta_power_terms_d_ln() - log p(n-k) = log-probability for succ=k
+// 2. ibeta_fraction2_d() * p(n-k) = tail-prob / succ=k
 
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
 // continued fraction introduced in
@@ -367,8 +372,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
-  // double ibeta_fraction2_d_ln(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
-  const double result_incr = ibeta_fraction2_d_ln(aa, bb, p_ddr.x[0], q_ddr.x[0], ay_minus_bx_ddr, inv, midp_complement);
+  const double result_incr = log(ibeta_fraction2_d(aa, bb, p_ddr.x[0], q_ddr.x[0], ay_minus_bx_ddr, inv, midp_complement));
   result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
   if (!inv) {
     return result_ln_ddr;
@@ -1244,19 +1248,24 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
       }
     }
   }
-  // TODO: use BFRAC when appropriate
   const double succ_odds_ratio = succ_odds_ratio_qdr.x[0];
-  double lik = 1;
-  double tail_sum = 1 - midp * 0.5;
-  // Iterate outward to floating-point precision limit.
-  while (1) {
-    fail += 1;
-    lik *= succ / (succ_odds_ratio * fail);
-    succ -= 1;
-    const double preadd = tail_sum;
-    tail_sum += lik;
-    if (tail_sum == preadd) {
-      break;
+  double tail_sum;
+  if ((obs_tot > 512) && (MINV(obs_succ + 1, obs_tot - obs_succ) >= 40)) {
+    // double ibeta_fraction2_d_ln(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
+    ;;;
+  } else {
+    double lik = 1;
+    tail_sum = 1 - midp * 0.5;
+    // Iterate outward to floating-point precision limit.
+    while (1) {
+      fail += 1;
+      lik *= succ / (succ_odds_ratio * fail);
+      succ -= 1;
+      const double preadd = tail_sum;
+      tail_sum += lik;
+      if (tail_sum == preadd) {
+        break;
+      }
     }
   }
   // In the common case, where we're close enough to the mode that float64
@@ -1286,7 +1295,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   if (succ + overflow_steps_lower_bound > modal_succ) {
     double one_plus_scaled_eps = 1 + k2m52;
     double center_sum = midp * 0.5;
-    lik = 1;
+    double lik = 1;
     while (1) {
       succ += 1;
       lik *= succ_odds_ratio * fail / succ;
@@ -1434,6 +1443,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     lnprobv_diff_min = -53 * kLn2;
   }
 
+  double lik;
   while (1) {
     fail = obs_totd - succ;
     double lnprobv_diff;
