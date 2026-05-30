@@ -286,18 +286,13 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 //   Aroian LA (1941) Continued fractions for the incomplete beta function.
 //   Annals of Mathematical Statistics, 12.
 // For most larger cases, this continued fraction converges more quickly than
-// binomial partial sums.  The _ddr1 function makes limited use of dd_real
+// binomial partial sums.  The _ln_ddr1 function makes limited use of dd_real
 // precision to address the worst precision bottlenecks, while the _ddr2
 // function trades off speed for higher precision.
 //
 // (I still have work to do in understanding the derivation and properties of
 // this continued fraction well enough to take a real shot at improving e.g.
 // the rather similar hypergeometric cdf calculation.)
-//
-// Todo, after _ddr2 function made ~fully reliable with qd_reals: compare _ddr1
-// function's errors to those from scipy, plug any leaks that are found.  scipy
-// seems more accurate for some very large cases, and this seems like it should
-// be avoidable.
 dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
   // normalized always true, min(aa, bb) >= 40, max much larger
   // (this should still yield correct results for smaller min(aa, bb), but it
@@ -322,9 +317,8 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     // (also possible for actual product to underflow)
     const double shared_middle_term = mm * (bb - mm) * xx / denom;
     const double cur_a = ((aa + mm - 1) / denom) * (aa + bb + mm - 1) * shared_middle_term * xx;
-    double cur_b = mm;
-    cur_b += shared_middle_term;
-    cur_b += ((aa + mm) / (aa + 2 * mm + 1)) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1);
+    double cur_b = prefer_fma((aa + mm) / (aa + 2 * mm + 1), prefer_fma(mm, two_minus_x, ay_minus_bx_plus1), mm + shared_middle_term);
+    // cur_b += ((aa + mm) / (aa + 2 * mm + 1)) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1);
     mm += 1.0;
     dd = prefer_fma(cur_a, dd, cur_b);
     // Algorithm should terminate when cur_a decreases to 0 due to bb == mm or
@@ -354,13 +348,14 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
 }
 
 double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t logp) {
-  // (x is a synonym for p, y is a synonym for q)
-  // log((x^a)(y^b) / Beta(a,b))
+  // (a is a synonym for k+1, b is a synonym for n-k, x is a synonym for p, y
+  // is a synonym for q)
+  //   log((x^a)(y^b) / Beta(a,b))
   // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
   const double a_plus_b = aa + bb;
   const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   dd_real result_ln_ddr;
-  if (!binom_lnprob_needs_qdr(S_CAST(int64_t, a_plus_b))) {
+  if (!binom_lnprob_needs_qdr(S_CAST(int64_t, a_plus_b - 1))) {
     dd_real ddrs[5];
     ddrs[0] = ddr_lfact(a_plus_b - 1);
     ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
