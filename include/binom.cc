@@ -517,7 +517,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     }
     return logp? NAN : 0.0;
   }
-  if ((n > 1024) && (MINV(obs_k, n - obs_k) >= 40)) {
+  if ((n > (1 << 15)) && (MINV(obs_k, n - obs_k) >= 2048)) {
     double aa = obs_k + 1;
     double bb = n - obs_k;
     dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));

@@ -28,7 +28,7 @@ def pbinom_benchmark(p: float, z: float, min_pow2: int, max_pow2: int, num_trial
                 secs = timeit.timeit(lambda: scipy.stats.binom.cdf(k, n, p), number=num_trials_per_pow2)
             else:
                 secs = timeit.timeit(lambda: scipy.stats.binom.logcdf(k, n, p), number=num_trials_per_pow2)
-        print("2^" + str(pow2) + ": " + str(secs))
+        print("n=(2^" + str(pow2) + ")-1: " + str(secs))
 
 
 
@@ -39,11 +39,11 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
                              help="Success-count z-score to test.")
-    optionalarg.add_argument('-f', '--from-pow2', type=int, default=10,
+    optionalarg.add_argument('-f', '--from-pow2', type=int, default=15,
                              help="Start testing at n=2**<this value> - 1.")
     optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
                              help="Continue testing up to n=2**(<this value>+1) - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=50,
+    optionalarg.add_argument('-n', '--number', type=int, default=25,
                              help="Number of trials per power-of-2 tier.")
     optionalarg.add_argument('-a', '--approx', action="store_true",
                              help="Test approx=True.")

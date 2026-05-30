@@ -46,7 +46,7 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
                              help="Success-count z-score to test.")
-    optionalarg.add_argument('-f', '--from-pow2', type=int, default=9,
+    optionalarg.add_argument('-f', '--from-pow2', type=int, default=14,
                              help="Start testing at n=2**<this value>.")
     optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
                              help="Continue testing up to n=2**(<this value>+1) - 1.")
