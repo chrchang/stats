@@ -216,7 +216,6 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, qd_real succ_odds_ratio
 
 // static const double kLentzFpmin = DBL_MIN * 16;
 
-/*
 static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
 static const double kLanczosDoubleSumExpgNumer[13] = {
   56906521.91347156388090791033559122686859,
@@ -298,7 +297,6 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   return ddr_add(ddr_muld(ddr_log1p(l1_ddr), aa),
                  ddr_muld(ddr_log1p(l2_ddr), bb));
 }
-*/
 
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
 // continued fraction introduced in
@@ -323,10 +321,11 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
   double ff;
-  // dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
+  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, &ff);
   // Sometimes, ibeta_power_terms_d_ln() is both slower and less accurate than
   // the following.  Can we improve the logic below to the point where we can
   // delete ibeta_power_terms_d_ln()?
+  /*
   dd_real ddrs[5];
   ddrs[0] = ddr_lfact(aa + bb - 1);
   ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
@@ -340,6 +339,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   }
   dd_real result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
   ff = 1.0;
+  */
 
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
