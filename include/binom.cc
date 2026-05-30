@@ -43,34 +43,29 @@ static inline uint32_t binom_lnprob_needs_qdr(int64_t obs_tot) {
 }
 
 // Currently assumes k < n.  Should always have <1 ULP error; and
-// ddr_exp(result) also has <1 ULP error when it isn't < DBL_MIN.
+// ddr_exp(result) also has <1 ULP error when it isn't < DBL_MIN.  Error
+// analysis:
 //
-// For p=0.5, dd_real calculation doesn't reach relative error > 2^{-53} until
-// n > ~2^42.  (ddr_lfact(2^42) ~= 2^42 * log(2^42) ~= 2^42 * 40 * 0.693 ~=
-// 2^47.  Reviewing the operations required by ddr_lfact() (dominated by a
-// ddr_log() call, which is in turn dominated by a ddr_exp() call), I'm pretty
-// sure ddr_lfact()'s relative error < 2^{-98} for our domain (while I would be
-// surprised if it was always < 2^{-101}).  We need to add one number near
-// ddr_lfact(n) (or two numbers near ddr_lfact(n/2)) and subtract ddr_lfact(n);
-// that translates to absolute error ~2^{-50}.  The return value is always <
-// -14 in that region, so absolute error < 2^{-50} translates into relative
-// error < 2^{-53}.)
+// * For p=0.5, dd_real calculation doesn't reach absolute error > 2^{-53}
+//   until n > ~2^39.
+//     ddr_lfact(2^39) ~= 2^39 * log(2^39)
+//                     ~= 2^39 * 39 * 0.693
+//                     ~= 2^44.
+//   Reviewing the operations required by ddr_lfact() (dominated by a ddr_log()
+//   call, which is in turn dominated by a ddr_exp() call), I'm pretty sure
+//   ddr_lfact()'s relative error < 2^{-98} for our domain (while I would be
+//   surprised if it was always < 2^{-101}).  We need to add one number near
+//   ddr_lfact(n) (or two numbers near ddr_lfact(n/2)) and subtract
+//   ddr_lfact(n); that translates to absolute error ~2^{-53}.
 //
-// The p~=DBL_MIN case can be broken into two subcases, k=0 and k>0.
-// - If k=0, no log-factorials are computed, ddr_log1p() should have relative
-//   error < 2^{-98} w.r.t. p, and the only operation after that is the
-//   high-accuracy ddr_muld().
-// - If k>>0 and n is huge, the k_ln_p_ddr term may be dominant.  When it is,
-//   ddr_muld(ddr_log(p_ddr), k) should have relative error < 2^{-98}, which
-//   corresponds to absolute error
-//     2^{-98} * k * log(p) ~= k * 2^{-88}
-//   which can be much worse than the p=0.5 case... but only when the final
-//   return magnitude has large enough magnitude that this error is fine.
+// * For other p, if (k ln p) + ((n-k) ln q) doesn't have significantly larger
+//   magnitude than the p=0.5 case, the p=0.5 error analysis applies.  If it
+//   does have significantly larger magnitude, absolute error can be larger but
+//   that's fine because we no longer have heavy subtractive cancellation.
 //
-// Note that when e.g. BinomMass() is called with logp is false, we care about
-// absolute instead of relative error of this function (and stop caring what
-// happens far past DBL_MIN).  That should remain < 2^{-53} for the domain of
-// interest until n > ~2^39.
+// This implementation is a bit slow, but it's relatively simple and reliable.
+// (ibeta_power_terms_d_ln() trades off a tiny bit of accuracy for a
+// significant speed improvement.)
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
   const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   // strictly speaking, usually don't need to initialize this at all in
@@ -457,10 +452,6 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 // (Sometimes works for 0 < p <= 2^{-960}, but let's leave that out of the
 // function contract until the holes in that region are plugged in.)
 //
-// Larger obs_succ and obs_tot are allowed than for the 2-sided test because
-// there's no risk of needing to expand gigantic ratios of factorials to handle
-// likelihood near-ties correctly.
-//
 // Benchmark results revealed that Boost 1.91 ibetac(k+1, n-k, p) (which is
 // called by scipy.stats.binom.logcdf()) became faster than this function's
 // initial implementation once obs_tot was ~1000, and its results were
@@ -502,7 +493,6 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     return logp? NAN : 0.0;
   }
   if ((n > 512) && (MINV(obs_k, n - obs_k) >= 40)) {
-  // if (((n > (1 << 15)) && (MINV(obs_k, n - obs_k) >= 2048)) || ((MINV(obs_k, n - obs_k) >= 40) && (fabs(S_CAST(double, n) * p_ddr.x[0] - S_CAST(double, obs_k)) > 16))) {
     double aa = obs_k + 1;
     double bb = n - obs_k;
     dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
@@ -513,24 +503,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    // possible todo: use_asym branch for gigantic cases
-    /*
-    uint32_t use_asym = 0;
-    const double ma = MAXV(aa, bb);
-    const double xa = (ma == aa)? xx : yy;
-    const double saddle = ma / (aa + bb);
-    if ((ma > (0.00001 / k2m53)) && (ma / MINV(aa, bb) < ((xa < saddle)? 2 : 15))) {
-      if (aa == bb) {
-        use_asym = 1;
-      } else {
-        double powers = exp(log(xx / (aa / (aa + bb))) * aa + log(yy / (bb / (aa + bb))) * bb);
-        if (powers < k2m53) {
-          use_asym = 1;
-        }
-      }
-    }
-    */
-
+    // (took a brief look at Boost's use_asym branch, don't see a reasonable
+    // way to use it without sacrificing accuracy, and current code seems fast
+    // enough.)
     dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
     if (midp) {
       // Subtract 0.5 * pmf(k, n, p).
@@ -922,6 +897,10 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     return ddr_log(prob_ddr).x[0];
   }
   dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+  if ((!logp) && (ln_prob_ddr.x[0] < -745.044)) {
+    // log(2^52) = 36.043...; could tighten this bound.
+    return 0.0;
+  }
   dd_real lik_ddr = ddr_maked(1.0);
   dd_real left_sum_ddr = lik_ddr;
   if (k > 0) {
