@@ -445,13 +445,15 @@ def HWE(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", b
     return exp_flush(ln_result)
 
 
-def pbinom_approx_accuracy_test(float p, uint32_t min_pow2, uint32_t max_pow2, uint32_t trials_per_pow2, bint logp=0):
+def pbinom_approx_accuracy_test(float p, float z, uint32_t min_pow2, uint32_t max_pow2, uint32_t trials_per_pow2, bint logp=0):
+    cdef double pq = p * (1.0 - p)
     cdef uint32_t pow2
     cdef uint32_t trial_idx
     cdef int64_t min_n
     cdef int64_t max_n
     cdef int64_t k
     cdef int64_t n
+    cdef double stdev
     cdef double got
     cdef double want
     cdef double relerr
@@ -466,9 +468,14 @@ def pbinom_approx_accuracy_test(float p, uint32_t min_pow2, uint32_t max_pow2, u
         relerr_scipy_ssq = 0.0
         for trial_idx in range(0, trials_per_pow2):
             n = random.randint(min_n, max_n)
-            k = <int64_t>(float(n) * p)
-            want = pbinom(k, n, p, logp)
-            got = pbinom(k, n, p, logp, approx=True)
+            stdev = sqrt(float(n) * pq)
+            k = <int64_t>(float(n) * p + z * stdev + 0.5)
+            if k < 0:
+                k = 0
+            elif k > n:
+                k = n
+            want = pbinom(k, n, p, logp=logp)
+            got = pbinom(k, n, p, logp=logp, approx=True)
             relerr = (got - want) / want
             relerr_ssq += relerr * relerr
             if logp:
