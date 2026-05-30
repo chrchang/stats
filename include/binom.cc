@@ -293,7 +293,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 // (I still have work to do in understanding the derivation and properties of
 // this continued fraction well enough to take a real shot at improving e.g.
 // the rather similar hypergeometric cdf calculation.)
-dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv) {
+dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp, uint32_t complement) {
   // normalized always true, min(aa, bb) >= 40, max much larger
   // (this should still yield correct results for smaller min(aa, bb), but it
   // looks relatively inefficient in that case.  todo: benchmark.)
@@ -337,7 +337,31 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
     dd = 1.0 / dd;
     const dd_real delta_ddr = ddr_mul2d(cc, dd);
     if (fabs(delta_ddr.x[0] - 1) <= k2m52) {
-      result_ln_ddr = ddr_addd(result_ln_ddr, -log(ff_ddr.x[0]));
+      double result_incr;
+      if (!midp) {
+        result_incr = -log(ff_ddr.x[0]);
+      } else {
+        //   result_ln
+        // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
+        // = (k+1) log p + (n-k) log q + log(n!) - log(k!) - log((n-k-1)!)
+        //
+        //   log(0.5 * pmf(k))
+        // = log 0.5 + k log p + (n-k) log q + log(n!) - log(k!) - log((n-k)!)
+        // = log 0.5 - log p - log(n-k) + result_ln
+        // = -log (2 * p * (n-k))) + result_ln
+        //
+        //   log(exp(result_ln - log(ff)) - 0.5 * pmf(k))
+        // = log(exp(result_ln)/ff - exp(result_ln - log(2p(n-k))))
+        // = log(result/ff - result/(2p(n-k)))
+        // = log(result * (1/ff - 0.5/(p(n-k))))
+        // = result_ln + log(1/ff - 0.5/(p(n-k)))
+        if (complement == inv) {
+          result_incr = log(1.0 / ff_ddr.x[0] - 0.5 / ((bb + 1) * xx));
+        } else {
+          result_incr = log(1.0 / ff_ddr.x[0] + 0.5 / (bb * xx));
+        }
+      }
+      result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
       if (!inv) {
         return result_ln_ddr;
       }
@@ -501,13 +525,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     // (took a brief look at Boost's use_asym branch, don't see a reasonable
     // way to use it without sacrificing accuracy, and current code seems fast
     // enough.)
-    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv);
-    if (midp) {
-      // Subtract 0.5 * pmf(k, n, p).
-      const dd_real ln_half_pmf_ddr = ddr_add(binom_ln_prob_internal(obs_k, n, p_ddr, q_ddr), _ddr_log05);
-      const dd_real ln_ratio_ddr = ddr_sub(ln_half_pmf_ddr, result_ln_ddr);
-      result_ln_ddr = ddr_add(result_ln_ddr, ddr_log(ddr_negate(ddr_expm1(ln_ratio_ddr))));
-    }
+    dd_real result_ln_ddr = ibeta_fraction2_ln_ddr1(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp, complement);
     if (logp) {
       return result_ln_ddr.x[0];
     }
@@ -892,8 +910,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     return ddr_log(prob_ddr).x[0];
   }
   dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
-  if ((!logp) && (ln_prob_ddr.x[0] < -745.044)) {
-    // log(2^52) = 36.043...; could tighten this bound.
+  if ((!logp) && (ln_prob_ddr.x[0] < -1074 * kLn2)) {
     return 0.0;
   }
   dd_real lik_ddr = ddr_maked(1.0);

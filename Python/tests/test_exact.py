@@ -196,6 +196,13 @@ def test_binom():
         pval = exact_tests.binom(test_case[0], test_case[1], test_case[2], alternative=test_case[3])
         assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN), str(test_case)
     # possible todo: port test_binomtest2, test_binomtest3
+
+    assert exact_tests.binom(4999, 10000, alternative="less", midp=True) == pytest.approx(0.49202215156569074, rel=1e-13, abs=0)
+    assert exact_tests.binom(5000, 10000, alternative="less", midp=True) == pytest.approx(0.5, rel=1e-13, abs=0)
+    assert exact_tests.binom(5001, 10000, alternative="less", midp=True) == pytest.approx(0.5079778484343093, rel=1e-13, abs=0)
+    assert exact_tests.binom(4999, 10000, alternative="greater", midp=True) == pytest.approx(0.5079778484343093, rel=1e-13, abs=0)
+    assert exact_tests.binom(5000, 10000, alternative="greater", midp=True) == pytest.approx(0.5, rel=1e-13, abs=0)
+    assert exact_tests.binom(5001, 10000, alternative="greater", midp=True) == pytest.approx(0.49202215156569074, rel=1e-13, abs=0)
     assert exact_tests.binom(0, 8, midp=True) == pytest.approx(1/256, rel=1e-13, abs=0)
     assert exact_tests.binom(0, 0) == 1.0
     assert exact_tests.binom(0, 0, midp=True) == 0.5
