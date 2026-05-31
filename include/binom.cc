@@ -335,24 +335,20 @@ double ibeta_fraction2_d(double aa, double bb, double xx, double yy, dd_real ay_
         // = log(result/ff - result/(2p(n-k)))
         // = log(result * (1/ff - 0.5/(p(n-k))))
         // = result_ln + log(1/ff - 0.5/(p(n-k)))
-        double denom;
+        double signed_p_nmk;
         if (midp_complement == inv + 1) {
           // aa<->bb, xx<->yy flip was performed earlier.
-          denom = -aa * yy;
+          signed_p_nmk = -aa * yy;
         } else {
-          denom = bb * xx;
+          signed_p_nmk = bb * xx;
         }
-        inv_ff += 0.5 / denom;
+        inv_ff += 0.5 / signed_p_nmk;
       }
       return inv_ff;
     }
     ff_ddr = ddr_mul(ff_ddr, delta_ddr);
   }
 }
-
-// Useful identities:
-// 1. ibeta_power_terms_d_ln() - log p(n-k) = log-probability for succ=k
-// 2. ibeta_fraction2_d() * p(n-k) = tail-prob / succ=k
 
 // Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
 // continued fraction introduced in
@@ -361,7 +357,7 @@ double ibeta_fraction2_d(double aa, double bb, double xx, double yy, dd_real ay_
 // For most larger cases, this continued fraction converges more quickly than
 // binomial partial sums.  The _ln_ddr1 function makes limited use of dd_real
 // precision to address the worst precision bottlenecks, while the _ddr2
-// function trades off speed for higher precision.
+// function trades off speed for provably great precision.
 //
 // (I still have work to do in understanding the derivation and properties of
 // this continued fraction well enough to take a real shot at improving e.g.
@@ -1154,6 +1150,61 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }
 
+// Useful identities:
+// 1. ibeta_power_terms_d_ln() - log p(n-k) = log-probability for succ=k
+// 2. ibeta_fraction2_d() * p(n-k) = tail-prob / succ=k
+/*
+dd_real binom_ln_prob_approx(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, double* nonlog_denom_ptr) {
+  if (!((n > 512) && (MINV(k+1, n-k) >= 40))) {
+    *nonlog_denom_ptr = 1;
+    return binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+  }
+  double aa = k + 1;
+  double bb = n - k;
+  *nonlog_denom_ptr = bb * p_ddr.x[0];
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  if (ay_minus_bx_ddr.x[0] < 0.0) {
+    swap_f64(&aa, &bb);
+    swap_ddr(&p_ddr, &q_ddr);
+    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
+  }
+  return ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
+}
+
+double binom_tail_lik_bfrac(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t midp) {
+  double aa = obs_k + 1;
+  double bb = n - obs_k;
+  double xx = p_ddr.x[0];
+  double yy = q_ddr.x[0];
+  const double p_nmk = bb * xx;
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  uint32_t inv = !complement;
+  if (ay_minus_bx_ddr.x[0] < 0.0) {
+    swap_f64(&aa, &bb);
+    swap_f64(&xx, &yy);
+    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
+    inv = !inv;
+  }
+  return p_nmk * ibeta_fraction2_d(aa, bb, xx, yy, ay_minus_bx_ddr, inv, midp * (1 + complement));
+}
+*/
+
+double binom_ltail_lik_simple(double succ, double fail, double succ_odds_ratio, uint32_t midp) {
+  double lik = 1;
+  double tail_sum = 1 - midp * 0.5;
+  // Iterate outward to floating-point precision limit.
+  while (1) {
+    fail += 1;
+    lik *= succ / (succ_odds_ratio * fail);
+    succ -= 1;
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
+      return tail_sum;
+    }
+  }
+}
+
 void materialize_oddsratio_p_q_qdr(uint32_t succ_flipped, qd_real* p_qdr_ptr, qd_real* q_qdr_ptr, qd_real* succ_odds_ratio_qdr_ptr) {
   // Currently safe to assume that either succ_odds_ratio_qdr is fully
   // evaluated, or both succ_odds_ratio_qdr and one of {p_qdr, q_qdr} needs to
@@ -1208,6 +1259,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   double first_inward_mult;
   if (p_is_half) {
     if ((!midp) && (fail <= succ + 1)) {
+      // could use binom_ln_prob_approx() to accelerate midp subcase
       return logp? 0.0 : 1.0;
     }
     q_qdr = p_qdr;
@@ -1249,30 +1301,23 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     }
   }
   const double succ_odds_ratio = succ_odds_ratio_qdr.x[0];
+  // todo: benchmark different thresholds
+  // const uint32_t use_bfrac = (obs_tot > 512) && (MINV(obs_succ + 1, obs_tot - obs_succ) >= 40);
+  double tail_sum = binom_ltail_lik_simple(succ, fail, succ_odds_ratio, midp);
+  /*
   double tail_sum;
-  if ((obs_tot > 512) && (MINV(obs_succ + 1, obs_tot - obs_succ) >= 40)) {
-    // double ibeta_fraction2_d_ln(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
-    ;;;
+  if (use_bfrac) {
+    tail_sum = binom_tail_lik_bfrac(obs_succ, obs_tot, ddr_make_qd(p_qdr), ddr_make_qd(q_qdr), 0, midp);
   } else {
-    double lik = 1;
-    tail_sum = 1 - midp * 0.5;
-    // Iterate outward to floating-point precision limit.
-    while (1) {
-      fail += 1;
-      lik *= succ / (succ_odds_ratio * fail);
-      succ -= 1;
-      const double preadd = tail_sum;
-      tail_sum += lik;
-      if (tail_sum == preadd) {
-        break;
-      }
-    }
+    tail_sum = binom_ltail_lik_simple(succ, fail, succ_odds_ratio, midp);
   }
+  */
   // In the common case, where we're close enough to the mode that float64
   // underflow/overflow isn't an issue, use the original algorithm: sum all
   // center relative-likelihoods, sum far-tail relative-likelihoods to
   // floating-point precision limit, return
-  //   log(tail_sum / (tail_sum + center_sum))
+  //   tail_sum / (tail_sum + center_sum)
+  // or its log.
   //
   // Unfortunately, an extremal rate makes center_sum overflow possible much
   // closer to the mode than is the case for the Fisher/HWE exact tests.  So
@@ -1280,12 +1325,12 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   // mode, we compute a lower bound on the number of non-overflowing inward
   // steps we can take, using the log of the first-inward-step multiplier
   // (subsequent steps have smaller multipliers).
-  const double smallest_evaluated_succ = succ;
   succ = obs_succ;
   fail = obs_tot - obs_succ;
   const double ln_mult = log(first_inward_mult);
   double overflow_steps_lower_bound = 0x7fffffff;
   // log(DBL_MAX / (2^31 - 1)) = 688.295...
+  // probably want a different rule in use_bfrac case
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
   }
@@ -1399,14 +1444,13 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   // complexity cost so I'll wait until I see a scenario where this branch
   // executes frequently...)
   //
-  // The current heuristic starts by reflecting (smallest_evaluated_succ +
-  // succ) * 0.5 across the (continuous) mode, performing a full log-likelihood
-  // check at the nearest valid point.  Hopefully we find that we're in
-  // (starting_lnprob - tolerance, starting_lnprob], so we're at or near a
-  // table that contributes non-negligibly to the tail-sum; unlike the Fisher's
-  // and HWE cases, we can't fix the tolerance at 62 * kLn2, but we can compute
-  // a value >= 53 * kLn2 large enough to guarantee at least one point falls
-  // inside.
+  // The current heuristic starts by reflecting (succ - 1) across the
+  // (continuous) mode, performing a full log-likelihood check at the nearest
+  // valid point.  Hopefully we find that we're in (starting_lnprob -
+  // tolerance, starting_lnprob], so we're at or near a table that contributes
+  // non-negligibly to the tail-sum; unlike the Fisher's and HWE cases, we
+  // can't fix the tolerance at 62 * kLn2, but we can compute a value >= 53 *
+  // kLn2 large enough to guarantee at least one point falls inside.
   //
   // If not, we jump again, using Newton's method.
   // If succ is too low (i.e. current log-likelihood is too high), when we
@@ -1429,7 +1473,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
   }
 
-  succ = 2 * modal_succ - (succ + smallest_evaluated_succ) * 0.5;
+  succ = 2 * modal_succ - (succ - 1);
   if (succ > obs_totd) {
     succ = obs_totd;
   }
@@ -1439,6 +1483,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
   // largest gap between adjacent log-likelihoods on this tail.  Set
   // |lnprobv_diff_min| >= this value.
   double lnprobv_diff_min = log(succ_odds_ratio / obs_totd) * (1 + kSmallEpsilon);
+  // if (use_bfrac && (lnprobv_diff_min > -53 * kLn2)) {
   if (lnprobv_diff_min > -53 * kLn2) {
     lnprobv_diff_min = -53 * kLn2;
   }
@@ -1481,6 +1526,8 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
       // |lnprobv_diff| >= |lnprobv_diff_min| > |ll_deriv| so we're guaranteed
       // to make progress.
       succ -= S_CAST(int64_t, lnprobv_diff / ll_deriv);
+      // todo: if use_bfrac, tighten lnprobv_diff_min since we are searching
+      // for the exact crossover point.
     }
   }
   // Sum toward center, until lik >= 1.
