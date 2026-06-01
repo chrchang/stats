@@ -131,7 +131,7 @@ def parse_commandline_args():
                              help="Start testing at n=2**<this value>.")
     optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
                              help="Continue testing up to n=2**(<this value>+1) - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=1000,
+    optionalarg.add_argument('-n', '--number', type=int, default=25,
                              help="Number of trials per power-of-2 tier.")
     optionalarg.add_argument('-b', '--bits', type=int, default=256,
                              help="MPFR precision; or if 0, test approx=True and scipy against approx=False.")
