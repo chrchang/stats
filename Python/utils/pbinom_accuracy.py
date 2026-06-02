@@ -5,6 +5,7 @@ import gmpy2
 import math
 import random
 import scipy
+import sys
 """
 Primary mode checks exact_tests.pbinom(approx=False) and
 scipy.stats.binom.cdf()'s accuracy against a simple MPFR-based implementation
@@ -81,7 +82,26 @@ def pbinom_mpfr(k: int, n: int, p: float, bits: int, logp: bool):
     return float(gmpy2.log1p(-product))
 
 
+def flush_if_denormal(x: float):
+    if abs(x) < sys.float_info.min:
+        return 0.0
+    return x
+
+
+def compute_relerr(got: float, want: float):
+    if want == 0.0:
+        if got == 0.0:
+            return 0.0
+        return math.inf
+    elif math.isnan(want):
+        if math.isnan(got):
+            return 0.0
+        return math.inf
+    return (got - want) / want
+
+
 def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_trials_per_pow2: int, bits: int, logp: bool):
+    n = 0
     pq = p * (1.0 - p)
     want = 0.0
     got = 0.0
@@ -93,8 +113,15 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
         max_n = min_n * 2 - 1
         relerr_ssq = 0.0
         relerr_scipy_ssq = 0.0
-        for trial_idx in range(0, num_trials_per_pow2):
-            n = random.randint(min_n, max_n)
+        num_trials = num_trials_per_pow2
+        exhaustive = (num_trials_per_pow2 >= max_n - min_n + 1)
+        if exhaustive:
+            num_trials = max_n - min_n + 1
+        for trial_idx in range(0, num_trials):
+            if exhaustive:
+                n = min_n + trial_idx
+            else:
+                n = random.randint(min_n, max_n)
             stdev = math.sqrt(n * pq)
             k = round(n * p + z * stdev + 0.5)
             if k < 0:
@@ -102,22 +129,24 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
             elif k > n:
                 k = n
             if bits == 0:
-                want = exact_tests.pbinom(k, n, p, logp=logp)
-                got = exact_tests.pbinom(k, n, p, approx=True, logp=logp)
+                want = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
+                got = flush_if_denormal(exact_tests.pbinom(k, n, p, approx=True, logp=logp))
             else:
-                want = pbinom_mpfr(k, n, p, bits=bits, logp=logp)
-                got = exact_tests.pbinom(k, n, p, logp=logp)
-            relerr = (got - want) / want
+                want = flush_if_denormal(pbinom_mpfr(k, n, p, bits=bits, logp=logp))
+                got = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
+                if want != got:
+                    print("  difference: k=" + str(k) + ", n=" + str(n) + ", want=" + str(want) + ", got=" + str(got))
+            relerr = compute_relerr(got, want)
             relerr_ssq += relerr * relerr
             if logp:
                 got = scipy.stats.binom.logcdf(k, n, p)
             else:
                 got = scipy.stats.binom.cdf(k, n, p)
-            relerr = (got - want) / want
+            relerr = compute_relerr(got, want)
             relerr_scipy_ssq += relerr * relerr
-        test_rms = math.sqrt(relerr_ssq / num_trials_per_pow2)
-        scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials_per_pow2)
-        print("[2^" + str(pow2) + ", 2^" + str(pow2+1) + " - 1): " + test_str + str(test_rms) + "  scipyRMS=" + str(scipy_rms))
+        test_rms = math.sqrt(relerr_ssq / num_trials)
+        scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
+        print("n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): " + test_str + str(test_rms) + "  scipyRMS=" + str(scipy_rms))
 
 
 def parse_commandline_args():
@@ -127,7 +156,7 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
                              help="Success-count z-score to test.")
-    optionalarg.add_argument('-f', '--from-pow2', type=int, default=8,
+    optionalarg.add_argument('-f', '--from-pow2', type=int, default=0,
                              help="Start testing at n=2**<this value>.")
     optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
                              help="Continue testing up to n=2**(<this value>+1) - 1.")
