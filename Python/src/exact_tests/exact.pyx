@@ -6,15 +6,15 @@ import fractions
 __version__ = "0.4.5"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
-    cdef struct qd_real_struct:
-        double x[4]
+    cdef struct td_real_struct:
+        double x[3]
 
     cdef struct dd_real_struct:
         double x[2]
 
     dd_real_struct ddr_maked(const double a) nogil
 
-    dd_real_struct ddr_make_qd(const qd_real_struct a) nogil
+    dd_real_struct ddr_make_td(const td_real_struct a) nogil
 
     dd_real_struct ddr_negate(const dd_real_struct a) nogil
 
@@ -28,15 +28,15 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
     int32_t ddr_leqd(const dd_real_struct a, double b) nogil
 
-    qd_real_struct qdr_addd(const qd_real_struct a, double b) nogil
+    td_real_struct tdr_addd(const td_real_struct a, double b) nogil
 
-    int32_t qdr_is_zero(const qd_real_struct a) nogil
+    int32_t tdr_is_zero(const td_real_struct a) nogil
 
-    int32_t qdr_is(const qd_real_struct a, double b) nogil
+    int32_t tdr_is(const td_real_struct a, double b) nogil
 
-    int32_t qdr_ltd(const qd_real_struct a, double b) nogil
+    int32_t tdr_ltd(const td_real_struct a, double b) nogil
 
-    int32_t qdr_leqd(const qd_real_struct a, double b) nogil
+    int32_t tdr_leqd(const td_real_struct a, double b) nogil
 
 
 cdef extern from "../include/binom.h" namespace "plink2":
@@ -48,7 +48,7 @@ cdef extern from "../include/binom.h" namespace "plink2":
 
     int64_t QbinomHalfUlp(dd_real_struct targetp_or_lnp_ddr, int64_t n, dd_real_struct distp_ddr, uint32_t log_targetp) nogil
 
-    double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, qd_real_struct p_qdr, int32_t midp, uint32_t logp) nogil
+    double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, td_real_struct p_tdr, int32_t midp, uint32_t logp) nogil
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
@@ -123,25 +123,22 @@ cdef dd_real_struct DdrMake2(object p, dd_real_struct* q_ddr_ptr):
     q_ddr_ptr[0].x[1] = float(q - fractions.Fraction(q_ddr_ptr[0].x[0]))
     return p_ddr
 
-# For two-sided binom(), we convert p to a qd_real with ~212-bit precision, so
+# For two-sided binom(), we convert p to a td_real with ~159-bit precision, so
 # we can use a very small epsilon for near-tie resolution.
-cdef qd_real_struct QdrMake(object p):
-    cdef qd_real_struct p_qdr
+cdef td_real_struct TdrMake(object p):
+    cdef td_real_struct p_tdr
     if isinstance(p, float):
-        p_qdr.x[0] = p
-        p_qdr.x[1] = 0.0
-        p_qdr.x[2] = 0.0
-        p_qdr.x[3] = 0.0
-        return p_qdr
+        p_tdr.x[0] = p
+        p_tdr.x[1] = 0.0
+        p_tdr.x[2] = 0.0
+        return p_tdr
     if not isinstance(p, fractions.Fraction):
         p = fractions.Fraction(p)
-    p_qdr.x[0] = float(p)
-    rem1 = p - fractions.Fraction(p_qdr.x[0])
-    p_qdr.x[1] = float(rem1)
-    rem2 = rem1 - fractions.Fraction(p_qdr.x[1])
-    p_qdr.x[2] = float(rem2)
-    p_qdr.x[3] = float(rem2 - fractions.Fraction(p_qdr.x[2]))
-    return p_qdr
+    p_tdr.x[0] = float(p)
+    rem1 = p - fractions.Fraction(p_tdr.x[0])
+    p_tdr.x[1] = float(rem1)
+    p_tdr.x[2] = float(rem1 - fractions.Fraction(p_tdr.x[1]))
+    return p_tdr
 
 cdef double zeroval(bint logp):
     if logp:
@@ -178,7 +175,7 @@ cdef double pbinom_p01(int64_t k, int64_t n, double p, bint complement, bint mid
 
 # n must be in [0, 2^52), k must be in [0, n], p must be in [0, 1].
 #
-# If p is a fractions.Fraction(), it's expanded to a "quad-double" with ~212
+# If p is a fractions.Fraction(), it's expanded to a "triple-double" with ~159
 # bit accuracy.  This enables very accurate handling of near-ties.
 def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
@@ -190,24 +187,24 @@ def binom(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint 
         raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
     if complement and (not midp):
         k -= 1
-    cdef qd_real_struct p_qdr = QdrMake(p)
-    if qdr_is_zero(p_qdr) or qdr_is(p_qdr, 1):
+    cdef td_real_struct p_tdr = TdrMake(p)
+    if tdr_is_zero(p_tdr) or tdr_is(p_tdr, 1):
         # Degenerate cases.
         if alternative == "two-sided":
-            if (p_qdr.x[0] == 0 and k == 0) or (p_qdr.x[0] == 1 and k == n):
+            if (p_tdr.x[0] == 0 and k == 0) or (p_tdr.x[0] == 1 and k == n):
                 return half_or_oneval(midp, logp)
             return zeroval(logp)
-        return pbinom_p01(k, n, p_qdr.x[0], complement, midp, logp)
-    if (qdr_ltd(p_qdr, 0.5**960) or not qdr_leqd(p_qdr, 1.0)):
+        return pbinom_p01(k, n, p_tdr.x[0], complement, midp, logp)
+    if (tdr_ltd(p_tdr, 0.5**960) or not tdr_leqd(p_tdr, 1.0)):
         # TODO: these functions should allow p in (0, 2^{-960}).  Deferred
         # since, as of this writing, there are much higher-priority problems to
         # solve; but this is straightforward to get right, just need to be
         # careful about underflow.
         raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
     if alternative == "two-sided":
-        return flush_if_denormal(BinomTwoSidedP(k, n, p_qdr, midp, logp))
-    cdef dd_real_struct q_ddr = ddr_negate(ddr_make_qd(qdr_addd(p_qdr, -1.0)))
-    return flush_if_denormal(PbinomApprox(k, n, ddr_make_qd(p_qdr), q_ddr, complement, midp, logp))
+        return flush_if_denormal(BinomTwoSidedP(k, n, p_tdr, midp, logp))
+    cdef dd_real_struct q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)))
+    return flush_if_denormal(PbinomApprox(k, n, ddr_make_td(p_tdr), q_ddr, complement, midp, logp))
 
 
 # Returns likelihood of exactly k successes.  Relative error should be <0.6 ULP

@@ -70,7 +70,7 @@ HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_or_lnp_ddr, int64_t n, dd_re
   return Qbinom(targetp_or_lnp_ddr, n, succp_ddr, log_target);
 }
 
-double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t midp, uint32_t logp);
+double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t midp, uint32_t logp);
 
 #ifdef __cplusplus
 }

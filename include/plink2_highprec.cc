@@ -1665,14 +1665,14 @@ qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs) {
 //   other with zeroes.)  All entries < 2^52.
 // - odds_ratio^odds_ratio_pow is an exponential term to multiply the quotient
 //   by at the end.
-// - starting_lnprobv_qdr can either be fully initialized to
+// - starting_lnprobv_tdr can either be fully initialized to
 //     log(numer_odds_ratio_pow / (numer_factorial_args[0]! ...
 //                                 numer_factorial_args[ffac_ct-1]!)),
 //   have the first two terms initialized and x[2] set to DBL_MAX (to indicate
 //   that it has only been computed to dd_real precision), or have x[0]
 //   initialized to DBL_MAX to indicate that the calculation has not happened
 //   at all.  In the latter two cases, it may be updated to higher accuracy.
-// - Similarly, ln_odds_ratio_qdr can either be fully initialized to
+// - Similarly, ln_odds_ratio_tdr can either be fully initialized to
 //   log(odds_ratio), or it can have x[2] or x[0] initialized to DBL_MAX.
 //
 // Postconditions on success:
@@ -1683,9 +1683,9 @@ qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs) {
 // - numer_factorial_args[] and denom_factorial_args[] are sorted in
 //   nondecreasing order.
 //
-// This could take a precomputed qdr_lfact table as an additional pair of
+// This could take a precomputed tdr_lfact table as an additional pair of
 // parameters, but I don't think that makes much of a difference.
-intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, qd_real* starting_lnprobv_qdr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr) {
+intptr_t CompareFactorialProducts(uint32_t ffac_ct, td_real odds_ratio_tdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, td_real* starting_lnprobv_tdr_ptr, td_real* ln_odds_ratio_tdr_ptr, double* dbl_ptr) {
   // 1. Sort numer_factorial_args and denom_factorial_args.  (This has the
   //    effect of cancelling out matching terms.)
   // 2. Iterate through numer_factorial_args[] and denom_factorial_args[] to
@@ -1712,7 +1712,7 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
     denom_factorial_args[ffac_idx] = 1;
   }
   // Normalize odds-ratio powers to 0 if odds-ratio is 1.
-  if (qdr_is(odds_ratio_qdr, 1)) {
+  if (tdr_is(odds_ratio_tdr, 1)) {
     odds_ratio_pow = 0;
     numer_odds_ratio_pow = 0;
   }
@@ -1730,7 +1730,7 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
       denom_bit_bound += CeilLog2U64(denom_factorial_arg) * ffac_size;
     }
   }
-  if (((odds_ratio_pow == 0) || (qdr_is(odds_ratio_qdr, 2) && (abs_i64(odds_ratio_pow < 64)))) && (numer_bit_bound < 64) && (denom_bit_bound < 64)) {
+  if (((odds_ratio_pow == 0) || (tdr_is(odds_ratio_tdr, 2) && (abs_i64(odds_ratio_pow < 64)))) && (numer_bit_bound < 64) && (denom_bit_bound < 64)) {
     uint64_t numer = 1;
     uint64_t denom = 1;
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
@@ -1766,22 +1766,22 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
     }
     return ddr_ltd(ratio_ddr, 1.0)? -1 : 1;
   }
-  dd_real ln_odds_ratio_ddr = ddr_make_qd(*ln_odds_ratio_qdr_ptr);
+  dd_real ln_odds_ratio_ddr = ddr_make_td(*ln_odds_ratio_tdr_ptr);
   if (ln_odds_ratio_ddr.x[0] == DBL_MAX) {
-    ln_odds_ratio_ddr = ddr_log(ddr_make_qd(odds_ratio_qdr));
-    ln_odds_ratio_qdr_ptr->x[0] = ln_odds_ratio_ddr.x[0];
-    ln_odds_ratio_qdr_ptr->x[1] = ln_odds_ratio_ddr.x[1];
-    ln_odds_ratio_qdr_ptr->x[2] = DBL_MAX;
+    ln_odds_ratio_ddr = ddr_log(ddr_make_td(odds_ratio_tdr));
+    ln_odds_ratio_tdr_ptr->x[0] = ln_odds_ratio_ddr.x[0];
+    ln_odds_ratio_tdr_ptr->x[1] = ln_odds_ratio_ddr.x[1];
+    ln_odds_ratio_tdr_ptr->x[2] = DBL_MAX;
   }
-  dd_real starting_lnprobv_ddr = ddr_make_qd(*starting_lnprobv_qdr_ptr);
+  dd_real starting_lnprobv_ddr = ddr_make_td(*starting_lnprobv_tdr_ptr);
   if (starting_lnprobv_ddr.x[0] == DBL_MAX) {
     starting_lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow);
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
       starting_lnprobv_ddr = ddr_sub(starting_lnprobv_ddr, ddr_lfact(u63tod(numer_factorial_args[ffac_idx])));
     }
-    starting_lnprobv_qdr_ptr->x[0] = starting_lnprobv_ddr.x[0];
-    starting_lnprobv_qdr_ptr->x[1] = starting_lnprobv_ddr.x[1];
-    starting_lnprobv_qdr_ptr->x[2] = DBL_MAX;
+    starting_lnprobv_tdr_ptr->x[0] = starting_lnprobv_ddr.x[0];
+    starting_lnprobv_tdr_ptr->x[1] = starting_lnprobv_ddr.x[1];
+    starting_lnprobv_tdr_ptr->x[2] = DBL_MAX;
   }
 
   dd_real lnprobv_ddr = ddr_muld(ln_odds_ratio_ddr, numer_odds_ratio_pow + odds_ratio_pow);
@@ -1808,25 +1808,25 @@ intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int6
     return -1;
   }
 
-  if (ln_odds_ratio_qdr_ptr->x[2] == DBL_MAX) {
-    *ln_odds_ratio_qdr_ptr = qdr_log(odds_ratio_qdr);
+  if (ln_odds_ratio_tdr_ptr->x[2] == DBL_MAX) {
+    *ln_odds_ratio_tdr_ptr = tdr_log(odds_ratio_tdr);
   }
-  const qd_real ln_odds_ratio_qdr = *ln_odds_ratio_qdr_ptr;
-  qd_real starting_lnprobv_qdr = qdr_muld(ln_odds_ratio_qdr, numer_odds_ratio_pow);
+  const td_real ln_odds_ratio_tdr = *ln_odds_ratio_tdr_ptr;
+  td_real starting_lnprobv_tdr = tdr_muld(ln_odds_ratio_tdr, numer_odds_ratio_pow);
   for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
-    starting_lnprobv_qdr = qdr_sub(starting_lnprobv_qdr, qdr_lfact(u63tod(numer_factorial_args[ffac_idx])));
+    starting_lnprobv_tdr = tdr_sub(starting_lnprobv_tdr, tdr_lfact(u63tod(numer_factorial_args[ffac_idx])));
   }
-  qd_real lnprobv_qdr = qdr_muld(ln_odds_ratio_qdr, numer_odds_ratio_pow + odds_ratio_pow);
-  epsilon_base = lnprobv_qdr.x[0];
+  td_real lnprobv_tdr = tdr_muld(ln_odds_ratio_tdr, numer_odds_ratio_pow + odds_ratio_pow);
+  epsilon_base = lnprobv_tdr.x[0];
   if (ffac_ct) {
     for (uint32_t ffac_idx = 0; ffac_idx != ffac_ct; ++ffac_idx) {
-      const qd_real cur_lfact_qdr = qdr_lfact(u63tod(denom_factorial_args[ffac_idx]));
-      lnprobv_qdr = qdr_sub(lnprobv_qdr, cur_lfact_qdr);
-      epsilon_base += cur_lfact_qdr.x[0];
+      const td_real cur_lfact_tdr = tdr_lfact(u63tod(denom_factorial_args[ffac_idx]));
+      lnprobv_tdr = tdr_sub(lnprobv_tdr, cur_lfact_tdr);
+      epsilon_base += cur_lfact_tdr.x[0];
     }
   }
-  lnprobv_diff = qdr_sub(lnprobv_qdr, starting_lnprobv_qdr).x[0];
-  epsilon = (1024.0 / k2p200) * epsilon_base;
+  lnprobv_diff = tdr_sub(lnprobv_tdr, starting_lnprobv_tdr).x[0];
+  epsilon = (128.0 / (k2p100 * k2p50)) * epsilon_base;
   *dbl_ptr = exp(lnprobv_diff);
   if (lnprobv_diff < -epsilon) {
     return -1;

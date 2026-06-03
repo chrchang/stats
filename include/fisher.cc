@@ -41,9 +41,9 @@ dd_real fisher22_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t
 // Returns positive value if m22 = obs_m22 + m22_incr has higher probability
 // than m22 = obs_m22, 0 if identical probability, and negative value if lower
 // probability.
-// If neg_numer_qdr has not been computed yet, set its x[0] to DBL_MAX; it will
+// If neg_numer_tdr has not been computed yet, set its x[0] to DBL_MAX; it will
 // be filled in if necessary.
-intptr_t Fisher22Compare(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, qd_real* neg_numer_qdr_ptr, double* dbl_ptr) {
+intptr_t Fisher22Compare(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, td_real* neg_numer_tdr_ptr, double* dbl_ptr) {
   // Fisher 2x2 probability is
   //
   //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
@@ -73,13 +73,13 @@ intptr_t Fisher22Compare(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, u
   denom_factorial_args[1] = obs_m12 - m22_incr;
   denom_factorial_args[2] = obs_m21 - m22_incr;
   denom_factorial_args[3] = obs_m22 + m22_incr;
-  qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
-  return CompareFactorialProducts(4, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_qdr_ptr, &ln_odds_ratio_qdr, dbl_ptr);
+  td_real ln_odds_ratio_tdr = tdr_make1(0.0);
+  return CompareFactorialProducts(4, tdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, neg_numer_tdr_ptr, &ln_odds_ratio_tdr, dbl_ptr);
 }
 
 static inline intptr_t Fisher22CompareDdr(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, dd_real neg_numer_ddr, double* dbl_ptr) {
-  qd_real neg_numer_qdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX, 0.0}};
-  return Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &neg_numer_qdr, dbl_ptr);
+  td_real neg_numer_tdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX}};
+  return Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &neg_numer_tdr, dbl_ptr);
 }
 
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
@@ -91,7 +91,7 @@ static inline intptr_t Fisher22CompareDdr(uint64_t obs_m11, uint64_t obs_m12, ui
 //
 // Not difficult to extend this to obs_m11 + obs_m12 + obs_m21 + obs_m22 <
 // 2^52, if the rational-arithmetic backstop in CompareFactorialProducts() is
-// revised to use qd_reals.
+// revised to use td_reals.
 //
 // (Note that the odds-ratio and odds-ratio-confidence-interval reported by R
 // fisher.test can also be calculated efficiently, using e.g. the approach in
@@ -177,8 +177,8 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
         // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
         const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-        qd_real starting_lnprobv_qdr = qdr_make1(DBL_MAX);
-        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_qdr, &lik);
+        td_real starting_lnprobv_tdr = tdr_make1(DBL_MAX);
+        const intptr_t cmp_result = Fisher22Compare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_tdr, &lik);
         if (cmp_result <= 0) {
           tail_sum += lik;
           if (midp && (cmp_result == 0)) {
@@ -656,7 +656,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
   // and then only for huge n), and accumulate the tail-sum from there.
   // (todo: opportunistically use the _lfact() path when that's within the
   // error budget and rates to be faster than the left_sum / (left_sum +
-  // right_sum) approach.  Reasonable to wait until qd_real functions are added
+  // right_sum) approach.  Reasonable to wait until td_real functions are added
   // to this library, though.)
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
@@ -1424,9 +1424,9 @@ intptr_t Fisher23Compare(uint32_t obs_m11, uint32_t obs_m12, uint32_t obs_m13, u
   denom_factorial_args[3] = cur_m21;
   denom_factorial_args[4] = cur_m22;
   denom_factorial_args[5] = cur_m23;
-  qd_real ln_odds_ratio_qdr = qdr_make1(0.0);
-  qd_real neg_numer_qdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX, 0.0}};
-  return CompareFactorialProducts(6, qdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, &neg_numer_qdr, &ln_odds_ratio_qdr, dbl_ptr);
+  td_real ln_odds_ratio_tdr = tdr_make1(0.0);
+  td_real neg_numer_tdr = {{neg_numer_ddr.x[0], neg_numer_ddr.x[1], DBL_MAX}};
+  return CompareFactorialProducts(6, tdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, &neg_numer_tdr, &ln_odds_ratio_tdr, dbl_ptr);
 }
 
 // 'Left' = small m11 and m22.

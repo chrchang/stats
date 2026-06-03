@@ -54,14 +54,14 @@ intptr_t HweCompare(uint32_t obs_hets, uint32_t obs_hom1, uint32_t obs_hom2, int
   denom_factorial_args[0] = obs_hets + 2 * hom_decr;
   denom_factorial_args[1] = obs_hom1 - hom_decr;
   denom_factorial_args[2] = obs_hom2 - hom_decr;
-  qd_real ln_odds_ratio_qdr = _qdr_log2;
-  qd_real starting_lnprobv_qdr;
+  td_real ln_odds_ratio_tdr = _tdr_log2;
+  td_real starting_lnprobv_tdr;
   if (starting_lnprobv_ddr_ptr == nullptr) {
-    starting_lnprobv_qdr = qdr_make1(DBL_MAX);
+    starting_lnprobv_tdr = tdr_make1(DBL_MAX);
   } else {
-    starting_lnprobv_qdr = {{starting_lnprobv_ddr_ptr->x[0], starting_lnprobv_ddr_ptr->x[1], DBL_MAX, 0.0}};
+    starting_lnprobv_tdr = tdr_make(starting_lnprobv_ddr_ptr->x[0], starting_lnprobv_ddr_ptr->x[1], DBL_MAX);
   }
-  return CompareFactorialProducts(3, qdr_make1(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, &starting_lnprobv_qdr, &ln_odds_ratio_qdr, dbl_ptr);
+  return CompareFactorialProducts(3, tdr_make1(2.0), hom_decr * 2LL, obs_hets, numer_factorial_args, denom_factorial_args, &starting_lnprobv_tdr, &ln_odds_ratio_tdr, dbl_ptr);
 }
 
 // obs_hets + obs_hom1 + obs_hom2 assumed to be <2^31.

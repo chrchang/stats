@@ -1299,14 +1299,14 @@ HEADER_INLINE dd_real ddr_log_2arg(const dd_real p, const dd_real q) {
 //   other with zeroes.)  All entries < 2^52.
 // - odds_ratio^odds_ratio_pow is an exponential term to multiply the quotient
 //   by at the end.
-// - starting_lnprobv_qdr can either be fully initialized to
+// - starting_lnprobv_tdr can either be fully initialized to
 //     log(numer_odds_ratio_pow / (numer_factorial_args[0]! ...
 //                                 numer_factorial_args[ffac_ct-1]!)),
 //   have the first two terms initialized and x[2] set to DBL_MAX (to indicate
 //   that it has only been computed to dd_real precision), or have x[0]
 //   initialized to DBL_MAX to indicate that the calculation has not happened
 //   at all.  In the latter two cases, it may be updated to higher accuracy.
-// - Similarly, ln_odds_ratio_qdr can either be fully initialized to
+// - Similarly, ln_odds_ratio_tdr can either be fully initialized to
 //   log(odds_ratio), or it can have x[2] or x[0] initialized to DBL_MAX.
 //
 // Postconditions on success:
@@ -1317,9 +1317,9 @@ HEADER_INLINE dd_real ddr_log_2arg(const dd_real p, const dd_real q) {
 // - numer_factorial_args[] and denom_factorial_args[] are sorted in
 //   nondecreasing order.
 //
-// This could take a precomputed qdr_lfact table as an additional pair of
+// This could take a precomputed tdr_lfact table as an additional pair of
 // parameters, but I don't think that makes much of a difference.
-intptr_t CompareFactorialProducts(uint32_t ffac_ct, qd_real odds_ratio_qdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, qd_real* starting_lnprobv_qdr_ptr, qd_real* ln_odds_ratio_qdr_ptr, double* dbl_ptr);
+intptr_t CompareFactorialProducts(uint32_t ffac_ct, td_real odds_ratio_tdr, int64_t odds_ratio_pow, int64_t numer_odds_ratio_pow, uint64_t* numer_factorial_args, uint64_t* denom_factorial_args, td_real* starting_lnprobv_tdr_ptr, td_real* ln_odds_ratio_tdr_ptr, double* dbl_ptr);
 
 #ifdef __cplusplus
 }
