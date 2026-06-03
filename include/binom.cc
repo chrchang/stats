@@ -873,7 +873,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
       // cdf value is exactly on the boundary between two float64s.
       // It may be reasonable to handle cases like that (where n and p are such
       // that all cdf values are multiples of 2^{-64}) with uint64 arithmetic.
-      const double min_incr_right = (1.0 / (1 << 19)) / (nmk * nmk);
+      const double min_incr_right = (1.0 / (1 << 21)) / (nmk * nmk);
       do {
         k += 1;
         lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));

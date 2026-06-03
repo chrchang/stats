@@ -20,7 +20,7 @@ CLEAN = *.o \
         include/*.o \
         mini-gmp/*.o
 
-BASEFLAGS=-ffp-contract=off -g
+BASEFLAGS=-ffp-contract=off
 CFLAGS=-O2 -std=gnu99 ${BASEFLAGS}
 CXXFLAGS=-O2 -std=c++17 ${BASEFLAGS}
 LINKFLAGS=

@@ -49,26 +49,12 @@ extern const td_real _tdr_log2;
 extern const td_real _tdr_log05;
 static const double _tdr_eps = 1.0947644252537633e-47; // = 2^-156
 
-typedef struct qd_real_struct {
-  double x[4];
-} qd_real;
-
-extern const qd_real _qdr_log2;
-extern const qd_real _qdr_log05;
-static const double _qdr_eps = 1.21543267145725e-63; // = 2^-209
-
 typedef struct dd_real_struct {
   double x[2];
 } dd_real;
 
 HEADER_INLINE void swap_tdr(td_real* ap, td_real* bp) {
   const td_real swaptmp = *ap;
-  *ap = *bp;
-  *bp = swaptmp;
-}
-
-HEADER_INLINE void swap_qdr(qd_real* ap, qd_real* bp) {
-  const qd_real swaptmp = *ap;
   *ap = *bp;
   *bp = swaptmp;
 }
@@ -86,9 +72,6 @@ extern const dd_real _ddr_64log2;
 
 CONSTI32(_tdr_n_ln_fact, 256);
 extern const td_real _tdr_ln_fact[_tdr_n_ln_fact];
-
-CONSTI32(_qdr_n_ln_fact, 256);
-extern const qd_real _qdr_ln_fact[_qdr_n_ln_fact];
 
 // Fast float64-accuracy version.
 // Assumes xx is a nonnegative integer.
@@ -196,11 +179,6 @@ HEADER_CINLINE dd_real ddr_makeu64(const uint64_t a) {
 }
 
 HEADER_CINLINE dd_real ddr_make_td(const td_real a) {
-  const dd_real retval = {{a.x[0], a.x[1]}};
-  return retval;
-}
-
-HEADER_CINLINE dd_real ddr_make_qd(const qd_real a) {
   const dd_real retval = {{a.x[0], a.x[1]}};
   return retval;
 }
@@ -593,111 +571,8 @@ HEADER_INLINE void qd_renorm4_next(double* c0p, double* c1p, double* c2p, double
   *c2p = s2;
 }
 
-// only for qd_reals
-HEADER_INLINE void qd_renorm4(double* c0p, double* c1p, double* c2p, double* c3p) {
-  if ((*c0p == INFINITY_D) || (*c0p == -INFINITY_D)) {
-    return;
-  }
-
-  double s2 = 0.0;
-  double s3 = 0.0;
-
-  double s0 = qd_quick_two_sum(*c2p, *c3p, c3p);
-  s0 = qd_quick_two_sum(*c1p, s0, c2p);
-  *c0p = qd_quick_two_sum(*c0p, s0, c1p);
-
-  s0 = *c0p;
-  double s1 = *c1p;
-  if (s1 != 0.0) {
-    s1 = qd_quick_two_sum(s1, *c2p, &s2);
-    if (s2 != 0.0) {
-      s2 = qd_quick_two_sum(s2, *c3p, &s3);
-    } else {
-      s1 = qd_quick_two_sum(s1, *c3p, &s2);
-    }
-  } else {
-    s0 = qd_quick_two_sum(s0, *c2p, &s1);
-    if (s1 != 0.0) {
-      s1 = qd_quick_two_sum(s1, *c3p, &s2);
-    } else {
-      s0 = qd_quick_two_sum(s0, *c3p, &s1);
-    }
-  }
-
-  *c0p = s0;
-  *c1p = s1;
-  *c2p = s2;
-  *c3p = s3;
-}
-
-HEADER_INLINE void qd_renorm5(double* c0p, double* c1p, double* c2p, double* c3p, double* c4p) {
-  if ((*c0p == INFINITY_D) || (*c0p == -INFINITY_D)) {
-    return;
-  }
-
-  double s2 = 0.0;
-  double s3 = 0.0;
-
-  double s0 = qd_quick_two_sum(*c3p, *c4p, c4p);
-  s0 = qd_quick_two_sum(*c2p, s0, c3p);
-  s0 = qd_quick_two_sum(*c1p, s0, c2p);
-  *c0p = qd_quick_two_sum(*c0p, s0, c1p);
-
-  s0 = *c0p;
-  double s1 = *c1p;
-
-  if (s1 != 0.0) {
-    s1 = qd_quick_two_sum(s1, *c2p, &s2);
-    if (s2 != 0.0) {
-      s2 = qd_quick_two_sum(s2, *c3p, &s3);
-      if (s3 != 0.0) {
-        s3 += *c4p;
-      } else {
-        s2 = qd_quick_two_sum(s2, *c4p, &s3);
-      }
-    } else {
-      s1 = qd_quick_two_sum(s1, *c3p, &s2);
-      if (s2 != 0.0) {
-        s2 = qd_quick_two_sum(s2, *c4p, &s3);
-      } else {
-        s1 = qd_quick_two_sum(s1, *c4p, &s2);
-      }
-    }
-  } else {
-    s0 = qd_quick_two_sum(s0, *c2p, &s1);
-    if (s1 != 0.0) {
-      s1 = qd_quick_two_sum(s1, *c3p, &s2);
-      if (s2 != 0.0) {
-        s2 = qd_quick_two_sum(s2, *c4p, &s3);
-      } else {
-        s1 = qd_quick_two_sum(s1, *c4p, &s2);
-      }
-    } else {
-      s0 = qd_quick_two_sum(s0, *c3p, &s1);
-      if (s1 != 0.0) {
-        s1 = qd_quick_two_sum(s1, *c4p, &s2);
-      } else {
-        s0 = qd_quick_two_sum(s0, *c4p, &s1);
-      }
-    }
-  }
-
-  *c0p = s0;
-  *c1p = s1;
-  *c2p = s2;
-  *c3p = s3;
-}
-
 HEADER_INLINE void tdr_renorm(td_real* xp) {
   qd_renorm3(&(xp->x[0]), &(xp->x[1]), &(xp->x[2]));
-}
-
-HEADER_INLINE void qdr_renorm(qd_real* xp) {
-  qd_renorm4(&(xp->x[0]), &(xp->x[1]), &(xp->x[2]), &(xp->x[3]));
-}
-
-HEADER_INLINE void qdr_renormd(qd_real* xp, double* ep) {
-  qd_renorm5(&(xp->x[0]), &(xp->x[1]), &(xp->x[2]), &(xp->x[3]), ep);
 }
 
 HEADER_INLINE void qd_three_sum(double* ap, double* bp, double* cp) {
@@ -742,32 +617,6 @@ HEADER_CINLINE td_real tdr_make(double a, double b, double c) {
   return retval;
 }
 
-HEADER_CINLINE qd_real qdr_make1(const double a) {
-  const qd_real retval = {{a, 0.0, 0.0, 0.0}};
-  return retval;
-}
-
-HEADER_CINLINE qd_real qdr_makeu64(const uint64_t a) {
-  const double hi = S_CAST(double, a);
-  const qd_real retval = {{hi, S_CAST(double, S_CAST(int64_t, a - S_CAST(uint64_t, hi))), 0.0, 0.0}};
-  return retval;
-}
-
-HEADER_CINLINE qd_real qdr_make2(const double a, const double b) {
-  const qd_real retval = {{a, b, 0.0, 0.0}};
-  return retval;
-}
-
-HEADER_CINLINE qd_real qdr_make_dd(const dd_real a) {
-  const qd_real retval = {{a.x[0], a.x[1], 0.0, 0.0}};
-  return retval;
-}
-
-HEADER_CINLINE qd_real qdr_make(double a, double b, double c, double d) {
-  const qd_real retval = {{a, b, c, d}};
-  return retval;
-}
-
 HEADER_INLINE td_real tdr_addd(const td_real a, double b) {
   double e;
   double c0 = qd_two_sum(a.x[0], b, &e);
@@ -777,18 +626,6 @@ HEADER_INLINE td_real tdr_addd(const td_real a, double b) {
   qd_renorm4_next(&c0, &c1, &c2, &e);
 
   return tdr_make(c0, c1, c2);
-}
-
-HEADER_INLINE qd_real qdr_addd(const qd_real a, double b) {
-  double e;
-  double c0 = qd_two_sum(a.x[0], b, &e);
-  double c1 = qd_two_sum(a.x[1], e, &e);
-  double c2 = qd_two_sum(a.x[2], e, &e);
-  double c3 = qd_two_sum(a.x[3], e, &e);
-
-  qd_renorm5(&c0, &c1, &c2, &c3, &e);
-
-  return qdr_make(c0, c1, c2, c3);
 }
 
 HEADER_INLINE td_real tdr_add_dd(const td_real a, const dd_real b) {
@@ -805,25 +642,6 @@ HEADER_INLINE td_real tdr_add_dd(const td_real a, const dd_real b) {
 
   qd_renorm4_next(&s0, &s1, &s2, &t0);
   return tdr_make(s0, s1, s2);
-}
-
-HEADER_INLINE qd_real qdr_add_dd(const qd_real a, const dd_real b) {
-  double t0;
-  double t1;
-
-  double s0 = qd_two_sum(a.x[0], b.x[0], &t0);
-  double s1 = qd_two_sum(a.x[1], b.x[1], &t1);
-
-  s1 = qd_two_sum(s1, t0, &t0);
-
-  double s2 = a.x[2];
-  qd_three_sum(&s2, &t0, &t1);
-
-  double s3 = qd_two_sum(t0, a.x[3], &t0);
-  t0 += t1;
-
-  qd_renorm5(&s0, &s1, &s2, &s3, &t0);
-  return qdr_make(s0, s1, s2, s3);
 }
 
 // s = qd_quick_three_accum(a, b, c) adds c to the dd-pair (a, b).
@@ -916,71 +734,7 @@ HEADER_INLINE td_real tdr_ieee_add(const td_real a, const td_real b) {
   return tdr_make(x[0], x[1], x[2]);
 }
 
-HEADER_INLINE qd_real qdr_ieee_add(const qd_real a, const qd_real b) {
-  int32_t i = 0;
-  int32_t j = 0;
-  int32_t k = 0;
-  // (u,v) = double-length accumulator
-  double u;
-  double v;
-  if (fabs(a.x[i]) > fabs(b.x[j])) {
-    u = a.x[i++];
-  } else {
-    u = b.x[j++];
-  }
-  if (fabs(a.x[i]) > fabs(b.x[j])) {
-    v = a.x[i++];
-  } else {
-    v = b.x[j++];
-  }
-
-  u = qd_quick_two_sum(u, v, &v);
-
-  double x[4];
-  x[0] = 0.0;
-  x[1] = 0.0;
-  x[2] = 0.0;
-  x[3] = 0.0;
-  do {
-    if ((i >= 4) && (j >= 4)) {
-      x[k] = u;
-      if (k < 3) {
-        x[++k] = v;
-      }
-      break;
-    }
-
-    double t;
-    if (i >= 4) {
-      t = b.x[j++];
-    } else if (j >= 4) {
-      t = a.x[i++];
-    } else if (fabs(a.x[i]) > fabs(b.x[j])) {
-      t = a.x[i++];
-    } else {
-      t = b.x[j++];
-    }
-
-    const double s = qd_quick_three_accum(&u, &v, t);
-
-    if (s != 0.0) {
-      x[k++] = s;
-    }
-  } while (k < 4);
-
-  // add the rest.
-  for (k = i; k < 4; k++) {
-    x[3] += a.x[k];
-  }
-  for (k = j; k < 4; k++) {
-    x[3] += b.x[k];
-  }
-
-  qd_renorm4(&(x[0]), &(x[1]), &(x[2]), &(x[3]));
-  return qdr_make(x[0], x[1], x[2], x[3]);
-}
-
-// qdr_sloppy_add() deliberately omitted
+// tdr_sloppy_add() deliberately omitted for now
 
 HEADER_CINLINE td_real tdr_negate(const td_real a) {
   return tdr_make(-a.x[0], -a.x[1], -a.x[2]);
@@ -1000,26 +754,6 @@ HEADER_INLINE td_real tdr_ldexp(const td_real a, int32_t expi) {
 
 HEADER_CINLINE td_real tdr_mul_pwr2(const td_real a, double b) {
   return tdr_make(a.x[0] * b, a.x[1] * b, a.x[2] * b);
-}
-
-HEADER_CINLINE qd_real qdr_negate(const qd_real a) {
-  return qdr_make(-a.x[0], -a.x[1], -a.x[2], -a.x[3]);
-}
-
-HEADER_INLINE qd_real qdr_subd(const qd_real a, double b) {
-  return qdr_addd(a, -b);
-}
-
-HEADER_INLINE qd_real qdr_sub_dd(const qd_real a, const dd_real b) {
-  return qdr_add_dd(a, ddr_negate(b));
-}
-
-HEADER_INLINE qd_real qdr_ldexp(const qd_real a, int32_t expi) {
-  return qdr_make(ldexp(a.x[0], expi), ldexp(a.x[1], expi), ldexp(a.x[2], expi), ldexp(a.x[3], expi));
-}
-
-HEADER_CINLINE qd_real qdr_mul_pwr2(const qd_real a, double b) {
-  return qdr_make(a.x[0] * b, a.x[1] * b, a.x[2] * b, a.x[3] * b);
 }
 
 HEADER_INLINE td_real tdr_muld(const td_real a, double b) {
@@ -1045,48 +779,15 @@ HEADER_INLINE td_real tdr_muld(const td_real a, double b) {
   return tdr_make(s0, s1, s2);
 }
 
-HEADER_INLINE qd_real qdr_muld(const qd_real a, double b) {
-  double q0;
-  double q1;
-  double q2;
-  double s2;
-  const double p0 = qd_two_prod(a.x[0], b, &q0);
-  const double p1 = qd_two_prod(a.x[1], b, &q1);
-  double p2 = qd_two_prod(a.x[2], b, &q2);
-  const double p3 = a.x[3] * b;
-
-  double s0 = p0;
-
-  double s1 = qd_two_sum(q0, p1, &s2);
-
-  qd_three_sum(&s2, &q1, &p2);
-
-  qd_three_sum2(&q1, &q2, p3);
-  double s3 = q1;
-
-  double s4 = q2 + p2;
-
-  qd_renorm5(&s0, &s1, &s2, &s3, &s4);
-  return qdr_make(s0, s1, s2, s3);
-}
-
 // todo: check if sloppy-mul is good enough for all our use cases
 
 td_real tdr_accurate_mul(const td_real a, const td_real b);
 
-qd_real qdr_accurate_mul(const qd_real a, const qd_real b);
-
 td_real tdr_divd(const td_real a, double b);
-
-qd_real qdr_divd(const qd_real a, double b);
 
 td_real tdr_accurate_div(const td_real a, const td_real b);
 
-qd_real qdr_accurate_div(const qd_real a, const qd_real b);
-
 td_real tdr_sqr(const td_real a);
-
-qd_real qdr_sqr(const qd_real a);
 
 HEADER_CINLINE int32_t tdr_is_zero(const td_real a) {
   return (a.x[0] == 0.0);
@@ -1153,83 +854,6 @@ HEADER_CINLINE int32_t tdr_gt(const td_real a, const td_real b) {
   return (a.x[2] > b.x[2]);
 }
 
-HEADER_CINLINE int32_t qdr_is_zero(const qd_real a) {
-  return (a.x[0] == 0.0);
-}
-
-HEADER_CINLINE int32_t qdr_is(const qd_real a, double b) {
-  // a.x[1] == 0 should guarantee a.x[2] == a.x[3] == 0.0.
-  return (a.x[0] == b) && (a.x[1] == 0.0);
-}
-
-HEADER_CINLINE int32_t qdr_ltd(const qd_real a, const double b) {
-  return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] < 0));
-}
-
-HEADER_CINLINE int32_t qdr_lt(const qd_real a, const qd_real b) {
-  if (a.x[0] != b.x[0]) {
-    return (a.x[0] < b.x[0]);
-  }
-  if (a.x[1] != b.x[1]) {
-    return (a.x[1] < b.x[1]);
-  }
-  if (a.x[2] != b.x[2]) {
-    return (a.x[2] < b.x[2]);
-  }
-  return (a.x[3] < b.x[3]);
-}
-
-HEADER_CINLINE int32_t qdr_leqd(const qd_real a, const double b) {
-  return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] <= 0));
-}
-
-HEADER_CINLINE int32_t qdr_leq(const qd_real a, const qd_real b) {
-  if (a.x[0] != b.x[0]) {
-    return (a.x[0] < b.x[0]);
-  }
-  if (a.x[1] != b.x[1]) {
-    return (a.x[1] < b.x[1]);
-  }
-  if (a.x[2] != b.x[2]) {
-    return (a.x[2] < b.x[2]);
-  }
-  return (a.x[3] <= b.x[3]);
-}
-
-HEADER_CINLINE int32_t qdr_geqd(const qd_real a, const double b) {
-  return (a.x[0] > b) || ((a.x[0] == b) && (a.x[1] >= 0));
-}
-
-HEADER_CINLINE int32_t qdr_geq(const qd_real a, const qd_real b) {
-  if (a.x[0] != b.x[0]) {
-    return (a.x[0] > b.x[0]);
-  }
-  if (a.x[1] != b.x[1]) {
-    return (a.x[1] > b.x[1]);
-  }
-  if (a.x[2] != b.x[2]) {
-    return (a.x[2] > b.x[2]);
-  }
-  return (a.x[3] >= b.x[3]);
-}
-
-HEADER_CINLINE int32_t qdr_gtd(const qd_real a, const double b) {
-  return (a.x[0] > b) || ((a.x[0] == b) && (a.x[1] > 0));
-}
-
-HEADER_CINLINE int32_t qdr_gt(const qd_real a, const qd_real b) {
-  if (a.x[0] != b.x[0]) {
-    return (a.x[0] > b.x[0]);
-  }
-  if (a.x[1] != b.x[1]) {
-    return (a.x[1] > b.x[1]);
-  }
-  if (a.x[2] != b.x[2]) {
-    return (a.x[2] > b.x[2]);
-  }
-  return (a.x[3] > b.x[3]);
-}
-
 
 HEADER_INLINE td_real tdr_add(const td_real a, const td_real b) {
   return tdr_ieee_add(a, b);
@@ -1243,45 +867,19 @@ HEADER_INLINE td_real tdr_mul(const td_real a, const td_real b) {
   return tdr_accurate_mul(a, b);
 }
 
-HEADER_INLINE qd_real qdr_add(const qd_real a, const qd_real b) {
-  return qdr_ieee_add(a, b);
-}
-
-HEADER_INLINE qd_real qdr_sub(const qd_real a, const qd_real b) {
-  return qdr_add(a, qdr_negate(b));
-}
-
-HEADER_INLINE qd_real qdr_mul(const qd_real a, const qd_real b) {
-  return qdr_accurate_mul(a, b);
-}
-
 td_real tdr_exp(const td_real a);
-
-qd_real qdr_exp(const qd_real a);
 
 td_real tdr_log(const td_real a);
 
-qd_real qdr_log(const qd_real a);
-
 td_real tdr_log1p(const td_real a);
 
-qd_real qdr_log1p(const qd_real a);
-
 td_real tdr_lfact(double xx);
-
-qd_real qdr_lfact(double xx);
 
 HEADER_INLINE td_real tdr_add_lfacts(const double a, const double b) {
   return tdr_add(tdr_lfact(a), tdr_lfact(b));
 }
 
 td_real tdr_sort_and_add(uint32_t ct, td_real* tdrs);
-
-HEADER_INLINE qd_real qdr_add_lfacts(const double a, const double b) {
-  return qdr_add(qdr_lfact(a), qdr_lfact(b));
-}
-
-qd_real qdr_sort_and_add(uint32_t ct, qd_real* qdrs);
 
 
 HEADER_INLINE dd_real ddr_log_2arg(const dd_real p, const dd_real q) {
