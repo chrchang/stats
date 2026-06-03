@@ -7,7 +7,7 @@ __version__ = "0.4.5"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct qd_real_struct:
-        double x[2]
+        double x[4]
 
     cdef struct dd_real_struct:
         double x[2]

@@ -30,18 +30,18 @@ double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  if (n < (1LL << 43)) {
+  if (n < (1LL << 34)) {
     return ddr_sub(ddr_lfact(n),
                    ddr_add_lfacts(k, n-k)).x[0];
   }
-  return qdr_sub(qdr_lfact(n),
-                 qdr_add(qdr_lfact(k), qdr_lfact(n-k))).x[0];
+  return tdr_sub(tdr_lfact(n),
+                 tdr_add(tdr_lfact(k), tdr_lfact(n-k))).x[0];
 }
 
 // Ok to draw this line anywhere <= 2^39 (see error analysis below).
 // I've set this to 2^33 since that's roughly where I could no longer easily
 // find 1 ULP deviations from MPFR.
-static inline uint32_t use_qdr_for_binom_lnprob(int64_t obs_tot) {
+static inline uint32_t use_tdr_for_binom_lnprob(int64_t obs_tot) {
   return (obs_tot >= (1LL << 33));
 }
 
@@ -80,7 +80,7 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
   if (k == 0) {
     return ddr_muld(ln_q_ddr, n-k);
   }
-  if (!use_qdr_for_binom_lnprob(n)) {
+  if (!use_tdr_for_binom_lnprob(n)) {
     dd_real ddrs[5];
     ddrs[0] = ddr_lfact(n);
     ddrs[1] = ddr_negate(ddr_lfact(k));
@@ -93,15 +93,15 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
     }
     return ddr_sort_and_add(5 - p_is_half, ddrs);
   }
-  qd_real qdrs[5];
-  qdrs[0] = qdr_lfact(n);
-  qdrs[1] = qdr_negate(qdr_lfact(k));
-  qdrs[2] = qdr_negate(qdr_lfact(n-k));
+  td_real tdrs[5];
+  tdrs[0] = tdr_lfact(n);
+  tdrs[1] = tdr_negate(tdr_lfact(k));
+  tdrs[2] = tdr_negate(tdr_lfact(n-k));
   if (p_is_half) {
-    qdrs[3] = qdr_muld(_qdr_log05, n);
+    tdrs[3] = tdr_muld(_tdr_log05, n);
   } else {
     // I think this consistently squeezes out enough accuracy, even for n near
-    // 2^52, so no need for this function to take p_qdr?
+    // 2^52, so no need for this function to take p_tdr?
     //   d/dp[k ln p + (n-k) ln (1-p)]
     // = k(1/p) + (n-k)(-1/(1-p))
     // = k/p - (n-k)/(1-p)
@@ -111,14 +111,14 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
     // mode, the final magnitude will be large (so higher absolute error is
     // fine).
     if (ddr_ltd(p_ddr, 0.5)) {
-      qdrs[3] = qdr_muld(qdr_log(qdr_make_dd(p_ddr)), k);
-      qdrs[4] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(p_ddr))), n-k);
+      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
+      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
     } else {
-      qdrs[3] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(q_ddr))), k);
-      qdrs[4] = qdr_muld(qdr_log(qdr_make_dd(q_ddr)), n-k);
+      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
+      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
     }
   }
-  return ddr_make_qd(qdr_sort_and_add(5 - p_is_half, qdrs));
+  return ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
@@ -387,7 +387,7 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   const double a_plus_b = aa + bb;
   const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   dd_real result_ln_ddr;
-  if (!use_qdr_for_binom_lnprob(S_CAST(int64_t, a_plus_b - 1))) {
+  if (!use_tdr_for_binom_lnprob(S_CAST(int64_t, a_plus_b - 1))) {
     dd_real ddrs[5];
     ddrs[0] = ddr_lfact(a_plus_b - 1);
     ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
@@ -400,22 +400,22 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
     }
     result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
   } else {
-    qd_real qdrs[5];
-    qdrs[0] = qdr_lfact(a_plus_b - 1);
-    qdrs[1] = qdr_negate(qdr_lfact(aa - 1));
-    qdrs[2] = qdr_negate(qdr_lfact(bb - 1));
+    td_real tdrs[5];
+    tdrs[0] = tdr_lfact(a_plus_b - 1);
+    tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
+    tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
     if (p_is_half) {
-      qdrs[3] = qdr_muld(_qdr_log05, a_plus_b);
+      tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
     } else {
       if (ddr_ltd(p_ddr, 0.5)) {
-        qdrs[3] = qdr_muld(qdr_log(qdr_make_dd(p_ddr)), aa);
-        qdrs[4] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(p_ddr))), bb);
+        tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
+        tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
       } else {
-        qdrs[3] = qdr_muld(qdr_log1p(qdr_make_dd(ddr_negate(q_ddr))), aa);
-        qdrs[4] = qdr_muld(qdr_log(qdr_make_dd(q_ddr)), bb);
+        tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
+        tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
       }
     }
-    result_ln_ddr = ddr_make_qd(qdr_sort_and_add(5 - p_is_half, qdrs));
+    result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
   }
   if ((!logp) && (result_ln_ddr.x[0] < -1418.0)) {
     // Could tighten this bound.
@@ -470,7 +470,7 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
     // for a still-much-faster-than-MPFR function that can be treated as
     // baseline truth for most other purposes.
     //
-    // The use_qdr_for_binom_lnprob() threshold should also be lowered if we
+    // The use_tdr_for_binom_lnprob() threshold should also be lowered if we
     // want to push cf_eps below 2^{-70}.
     if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= cf_eps)) {
       result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
@@ -1398,7 +1398,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, qd_real p_qdr, int32_t 
     const double pval = tail_sum / (tail_sum + center_sum);
     return logp? log(pval) : pval;
   }
-  const uint32_t qdr_lnprobv_needed = use_qdr_for_binom_lnprob(obs_tot);
+  const uint32_t qdr_lnprobv_needed = use_tdr_for_binom_lnprob(obs_tot);
   qd_real ln_odds_ratio_qdr;
   qd_real starting_lnprobv_qdr;
   dd_real starting_lnprob_ddr;
