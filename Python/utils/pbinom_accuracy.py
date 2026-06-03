@@ -128,7 +128,6 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
                 k = 0
             elif k > n:
                 k = n
-            print("  n=" + str(n) + "  k=" + str(k))
             if bits == 0:
                 want = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
                 got = flush_if_denormal(exact_tests.pbinom(k, n, p, approx=True, logp=logp))
