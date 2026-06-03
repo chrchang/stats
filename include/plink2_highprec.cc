@@ -1509,10 +1509,10 @@ td_real tdr_lfact(double xx) {
   // Thus floor(79/k) - 1 works.
   uint32_t term_idx = (79 / bsru64(S_CAST(int64_t, xx))) - 1;
   td_real sum_tdr = _tdr_lfact_coeffs[term_idx];
-  do {
+  while (term_idx) {
     --term_idx;
     sum_tdr = tdr_add(_tdr_lfact_coeffs[term_idx], tdr_mul(invn2_tdr, sum_tdr));
-  } while (term_idx);
+  }
   sum_tdr = tdr_mul(invn_tdr, sum_tdr);
   //   n ln n - n + 0.5 ln (2*pi*n)
   // = n ln n - n + 0.5 ln 2*pi + 0.5 ln n
