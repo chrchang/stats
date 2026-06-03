@@ -30,7 +30,7 @@ double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  if (n < (1LL << 34)) {
+  if (n < (1LL << 31)) {
     return ddr_sub(ddr_lfact(n),
                    ddr_add_lfacts(k, n-k)).x[0];
   }
@@ -499,11 +499,11 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 //
 //   >>> import exact_tests, scipy, timeit
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.016952459001913667
+//   0.01796633400954306
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.016799583012470976
+//   0.0219896660419181
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.017306749999988824
+//   0.017003458982799202
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
 //   1.005605333019048
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
@@ -1269,7 +1269,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   double fail = obs_tot - obs_succ;
   // When p != 0.5, succ_odds_ratio_tdr and one of {p_tdr, q_tdr} will usually
   // only be evaluated with dd_real arithmetic (since td_real arithmetic is
-  // ~?x as expensive).  [2] is set to DBL_MAX in this case, and
+  // ~5-6x as expensive).  [2] is set to DBL_MAX in this case, and
   // materialize_oddsratio_p_q_tdr() is called later as necessary.
   const uint32_t p_is_half = tdr_is(p_tdr, 0.5);
   td_real q_tdr;
