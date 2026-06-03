@@ -39,10 +39,10 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 }
 
 // Ok to draw this line anywhere <= 2^39 (see error analysis below).
-// I've set this to 2^33 since that's roughly where I could no longer easily
+// I've set this to 2^32 since that's roughly where I could no longer easily
 // find 1 ULP deviations from MPFR.
 static inline uint32_t use_tdr_for_binom_lnprob(int64_t obs_tot) {
-  return (obs_tot >= (1LL << 33));
+  return (obs_tot >= (1LL << 32));
 }
 
 // Currently assumes k < n.  Should always have <1 ULP error; and
@@ -464,14 +464,14 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
     //
     // Worst case, this takes around a million iterations.
     //
-    // Update (1 Jun 2026): cf_eps tightened to 2^{-70} after comparing against
+    // Update (3 Jun 2026): cf_eps tightened to 2^{-71} after comparing against
     // MPFR.  We want 1 ULP errors to require a non-negligible amount of work
     // to find.  The resulting ~10-30% speed hit is an acceptable price to pay
     // for a still-much-faster-than-MPFR function that can be treated as
     // baseline truth for most other purposes.
     //
     // The use_tdr_for_binom_lnprob() threshold should also be lowered if we
-    // want to push cf_eps below 2^{-70}.
+    // want to push cf_eps below 2^{-71}.
     if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= cf_eps)) {
       result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
       if (!inv) {
@@ -756,7 +756,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     // when we'd want to early-exit and return 1; this saves us a comparison in
     // the loop.
     const double start_lik = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
-    // We want to compute left_sum_ddr to at most 2^{-70} relative error (see
+    // We want to compute left_sum_ddr to at most 2^{-71} relative error (see
     // cf_eps discussion in ibeta_fraction_ddr2()), but we also want to drop
     // down from this slow dd_real-based loop to the much faster float64-based
     // loop as soon as we can prove that won't make us miss the accuracy
@@ -770,8 +770,8 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     // (todo: actually, we can bound with 2.01, 3.51, 5.01, 6.51, 8.01, ..., so
     // we should be able to throw a ~3/4 multiplier in front?)
     //
-    // 2^{-70} corresponds to at least 2^{52-70} ULPs.
-    const double min_incr_left = (1.0 / (1 << 18)) / (k * k);
+    // 2^{-71} corresponds to at least 2^{52-71} ULPs.
+    const double min_incr_left = (1.0 / (1 << 19)) / (k * k);
     dd_real lik_ddr = ddr_maked(start_lik);
     dd_real left_sum_ddr = lik_ddr;
     do {
@@ -806,13 +806,13 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
       }
     }
 
-    // Now compute the right-sum to at most 2^{-57} relative error.
+    // Now compute the right-sum.
     dd_real right_sum_ddr = ddr_muld(first_right_mult_ddr, start_lik);
     k = obs_k + 1;
     nmk = n - obs_k - 1;
     lik_ddr = right_sum_ddr;
     if (nmk > 0) {
-      const double min_incr_right = (1.0 / (1 << 18)) / (nmk * nmk);
+      const double min_incr_right = (1.0 / (1 << 19)) / (nmk * nmk);
       do {
         k += 1;
         lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
@@ -868,7 +868,12 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     dd_real lik_ddr = ddr_maked(1.0);
     dd_real right_sum_ddr = ddr_maked(0.0);
     if (nmk > 0) {
-      const double min_incr_right = (1.0 / (1 << 18)) / (nmk * nmk);
+      // Note that the k=28, n=56, p=0.5, logp=False case can ~randomly
+      // mismatch MPFR by 1 ULP when this value is perturbed, because the true
+      // cdf value is exactly on the boundary between two float64s.
+      // It may be reasonable to handle cases like that (where n and p are such
+      // that all cdf values are multiples of 2^{-64}) with uint64 arithmetic.
+      const double min_incr_right = (1.0 / (1 << 19)) / (nmk * nmk);
       do {
         k += 1;
         lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
@@ -897,7 +902,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     lik_ddr = ddr_maked(1.0);
     dd_real left_sum_ddr = lik_ddr;
     if (k > 0) {
-      const double min_incr_left = (1.0 / (1 << 18)) / (k * k);
+      const double min_incr_left = (1.0 / (1 << 19)) / (k * k);
       do {
         nmk += 1;
         lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
@@ -934,7 +939,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
   dd_real lik_ddr = ddr_maked(1.0);
   dd_real left_sum_ddr = lik_ddr;
   if (k > 0) {
-    const double min_incr_left = (1.0 / (1 << 18)) / (k * k);
+    const double min_incr_left = (1.0 / (1 << 19)) / (k * k);
     do {
       nmk += 1;
       lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
