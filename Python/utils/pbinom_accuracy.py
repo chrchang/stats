@@ -105,23 +105,20 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
     pq = p * (1.0 - p)
     want = 0.0
     got = 0.0
+    ns = []
     test_str = "RMS="
     if bits == 0:
         test_str = "approxRMS="
     for pow2 in range(min_pow2, max_pow2 + 1):
         min_n = 2 ** pow2
-        max_n = min_n * 2 - 1
+        n_limit = min_n * 2
         relerr_ssq = 0.0
         relerr_scipy_ssq = 0.0
-        num_trials = num_trials_per_pow2
-        exhaustive = (num_trials_per_pow2 >= max_n - min_n + 1)
-        if exhaustive:
-            num_trials = max_n - min_n + 1
-        for trial_idx in range(0, num_trials):
-            if exhaustive:
-                n = min_n + trial_idx
-            else:
-                n = random.randint(min_n, max_n)
+        if num_trials_per_pow2 >= n_limit - min_n:
+            ns = range(min_n, n_limit)
+        else:
+            ns = random.sample(range(min_n, n_limit), k=num_trials_per_pow2)
+        for n in ns:
             stdev = math.sqrt(n * pq)
             k = round(n * p + z * stdev + 0.5)
             if k < 0:
@@ -144,6 +141,7 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
                 got = scipy.stats.binom.cdf(k, n, p)
             relerr = compute_relerr(got, want)
             relerr_scipy_ssq += relerr * relerr
+        num_trials = len(ns)
         test_rms = math.sqrt(relerr_ssq / num_trials)
         scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
         print("n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): " + test_str + str(test_rms) + "  scipyRMS=" + str(scipy_rms))
