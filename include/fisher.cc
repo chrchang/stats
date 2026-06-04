@@ -806,7 +806,7 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
     return final_return_incr;
   }
   if ((ddr_is(p_or_lnp_ddr, 1) && (!logp)) || (ddr_is_zero(p_or_lnp_ddr) && logp)) {
-    return abcd + final_return_incr;
+    return max_d + final_return_incr;
   }
   // If p > 0.5, work with (1-p) and flipped columns.
   const uint32_t inv = ((!logp) && (p_or_lnp_ddr.x[0] > 0.5)) || (logp && (p_or_lnp_ddr.x[0] > _ddr_log05.x[0]));
