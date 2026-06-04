@@ -523,7 +523,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
-    return logp? NAN : 0.0;
+    return logp? (0.0 / 0.0) : 0.0;
   }
   if ((n > 512) && (MINV(obs_k + 1, n - obs_k) >= 40)) {
     double aa = obs_k + 1;
@@ -548,7 +548,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
   if (complement) {
     obs_k = n - obs_k - (!midp);
     if (obs_k < 0) {
-      return logp? NAN : 0.0;
+      return logp? (0.0 / 0.0) : 0.0;
     }
     swap_ddr(&p_ddr, &q_ddr);
   }
@@ -587,7 +587,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
         break;
       }
     }
-    if (left_sum == INFINITY) {
+    if (left_sum == INFINITY_D) {
       return logp? 0 : 1;
     }
     // Now compute the right-sum to the precision limit.
@@ -710,7 +710,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
-    return logp? NAN : 0.0;
+    return logp? (0.0 / 0.0) : 0.0;
   }
   // Benchmarked various values of both thresholds, this seems good on my Mac
   if ((n > 131072) && (MINV(obs_k, n - obs_k) >= 2048)) {
@@ -776,7 +776,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
       // This overflows to nan rather than INFINITY in my testing; I'll write
       // this to be agnostic to that detail.
     } while (lik_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
-    if (!(left_sum_ddr.x[0] < INFINITY)) {
+    if (!(left_sum_ddr.x[0] < INFINITY_D)) {
       return logp? 0.0 : 1.0;
     }
     if (k > 0) {
@@ -795,7 +795,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
         }
       }
       left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
-      if (!(left_sum_ddr.x[0] < INFINITY)) {
+      if (!(left_sum_ddr.x[0] < INFINITY_D)) {
         return logp? 0.0 : 1.0;
       }
     }
@@ -832,7 +832,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
       }
     }
     const dd_real denom_ddr = ddr_add(left_sum_ddr, right_sum_ddr);
-    if (!(denom_ddr.x[0] < INFINITY)) {
+    if (!(denom_ddr.x[0] < INFINITY_D)) {
       return logp? 0.0 : 1.0;
     }
     const dd_real one_minus_prob_ddr = ddr_accurate_div(right_sum_ddr, denom_ddr);
@@ -933,7 +933,7 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     }
     return ddr_log(prob_ddr).x[0];
   }
-  dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+  dd_real ln_prob_ddr = binom_ln_prob_internal(obs_k, n, p_ddr, q_ddr);
   if ((!logp) && (ln_prob_ddr.x[0] < -1074 * kLn2)) {
     return 0.0;
   }

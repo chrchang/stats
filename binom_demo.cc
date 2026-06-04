@@ -210,19 +210,15 @@ int main(int argc, char** argv) {
         }
         fputs("p-value for ", stdout);
         fputs(name, stdout);
-        char buf[80];
-        char* write_iter = memcpya_k2(buf, ": ");
+        char buf2[80];
+        char* write_iter = memcpya_k2(buf2, ": ");
         write_iter = lntoa_g(ln_pval, write_iter);
         memcpy_k2(write_iter, "\n");
-        fputs(buf, stdout);
+        fputs(buf2, stdout);
       }
     }
   }
   while (0) {
-  main_ret_NOMEM:
-    fputs("Error: Out of memory.\n", stderr);
-    reterr = kPglRetNomem;
-    break;
   main_ret_OPEN_FAIL:
     reterr = kPglRetOpenFail;
     break;

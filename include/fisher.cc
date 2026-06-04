@@ -420,7 +420,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
         break;
       }
     }
-    if (left_sum == INFINITY) {
+    if (left_sum == INFINITY_D) {
       return logp? 0 : 1;
     }
 
@@ -575,7 +575,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
       m22 -= 1;
       left_sum_ddr = ddr_add(left_sum_ddr, lik_ddr);
     } while (lik_ddr.x[0] > left_sum_ddr.x[0] * min_incr_left);
-    if (!(left_sum_ddr.x[0] < INFINITY)) {
+    if (!(left_sum_ddr.x[0] < INFINITY_D)) {
       return logp? 0.0 : 1.0;
     }
     if (m22 > 0) {
@@ -595,7 +595,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
         }
       }
       left_sum_ddr = ddr_addd(left_sum_ddr, left_tail_sum);
-      if (left_sum_ddr.x[0] == INFINITY) {
+      if (left_sum_ddr.x[0] == INFINITY_D) {
         return logp? 0.0 : 1.0;
       }
     }
@@ -637,7 +637,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
       }
     }
     const dd_real denom_ddr = ddr_add(left_sum_ddr, right_sum_ddr);
-    if (!(denom_ddr.x[0] < INFINITY)) {
+    if (!(denom_ddr.x[0] < INFINITY_D)) {
       return logp? 0.0 : 1.0;
     }
     const dd_real one_minus_prob_ddr = ddr_accurate_div(right_sum_ddr, denom_ddr);
@@ -1751,7 +1751,7 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
         m23 += 1;
         // Need to be careful to not move l{11,12,21,22} to the right of the
         // mode, or r{11,12,21,22} to the left of it.
-        if (l22) {
+        if (l22 != 0) {
           l12 += 1;
           lik_mult = m13 * l22 / (m23 * l12);
           l22 -= 1;
@@ -1763,7 +1763,7 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
         m13 -= 1;
       } else {
         m13 += 1;
-        if (l11) {
+        if (l11 != 0) {
           l21 += 1;
           lik_mult = m23 * l11 / (m13 * l21);
           l11 -= 1;
@@ -1827,7 +1827,7 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
       outer_sum += tail_incr1;
       if (m13_decreasing) {
         const double prev_m13 = m13 + 1;
-        if (r21) {
+        if (r21 != 0) {
           r11 += 1;
           lik_mult = prev_m13 * r21 / (m23 * r11);
           r21 -= 1;
@@ -1838,7 +1838,7 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
         }
       } else {
         const double prev_m23 = m23 + 1;
-        if (r12) {
+        if (r12 != 0) {
           r22 += 1;
           lik_mult = prev_m23 * r12 / (m13 * r22);
           r12 -= 1;

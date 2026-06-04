@@ -147,13 +147,13 @@ int32_t main(int argc, char** argv) {
         } else {
           ln_pval = Fisher23LnP(m11, m21, m31, m12, m22, m32, midp);
         }
-        char buf[80];
+        char buf2[80];
         fputs("P-value for ", stdout);
         fputs(idstr, stdout);
-        char* write_iter = strcpya(buf, ": ");
+        char* write_iter = strcpya(buf2, ": ");
         write_iter = lntoa_g(ln_pval, write_iter);
         memcpy_k2(write_iter, "\n");
-        fputs(buf, stdout);
+        fputs(buf2, stdout);
       }
       if (!feof(test_file)) {
         fputs("Error: File read failure.\n", stderr);
@@ -162,10 +162,6 @@ int32_t main(int argc, char** argv) {
     }
   }
   while (0) {
-  main_ret_NOMEM:
-    fputs("Error: Out of memory.\n", stderr);
-    reterr = kPglRetNomem;
-    break;
   main_ret_OPEN_FAIL:
     reterr = kPglRetOpenFail;
     break;

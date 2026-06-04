@@ -21,13 +21,13 @@ CLEAN = *.o \
         mini-gmp/*.o
 
 BASEFLAGS=-ffp-contract=off
-CFLAGS=-O2 -std=gnu99 ${BASEFLAGS}
-CXXFLAGS=-O2 -std=c++17 ${BASEFLAGS}
+CFLAGS=-O2 -std=gnu99 ${BASEFLAGS} ${CWARN}
+CXXFLAGS=-O2 -std=c++17 ${BASEFLAGS} ${CXXWARN}
 LINKFLAGS=
 
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
-  CXXFLAGS=-O2 -std=c++17 -stdlib=libc++ ${BASEFLAGS}
+  CXXFLAGS+=-stdlib=libc++
 endif
 
 %.o: %.c
