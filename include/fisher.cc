@@ -847,7 +847,7 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
     // p < cdf(0) -> p < 1 / (1 + lik)
     //               p * (1 + lik) < 1
     const dd_real p_ddr = logp? ddr_exp(p_or_lnp_ddr) : p_or_lnp_ddr;
-    const int64_t d = ddr_geqd(ddr_mul(p_or_lnp_ddr, ddr_addd(lik_ddr, 1.0)), 1.0);
+    const int64_t d = ddr_geqd(ddr_mul(p_ddr, ddr_addd(lik_ddr, 1.0)), 1.0);
     return final_return_incr + (inv? (1 - d) : d);
   }
   // We make an initial guess, use Newton's method to refine it (in the same

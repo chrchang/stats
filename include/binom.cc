@@ -712,9 +712,6 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     }
     return logp? NAN : 0.0;
   }
-  // We can lose half of our precision here when p is very close to 1, so best
-  // to avoid computing 1-p or 1-q later in this function.
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   // Benchmarked various values of both thresholds, this seems good on my Mac
   if ((n > 131072) && (MINV(obs_k, n - obs_k) >= 2048)) {
     double aa = obs_k + 1;
