@@ -668,7 +668,7 @@ td_real tdr_accurate_mul(const td_real a, const td_real b) {
   // O(eps^4) terms -- Nine-One-Sum
   // t1 += a.x[1] * b.x[3] + a.x[2] * b.x[2] + a.x[3] * b.x[1] + q6 + q7 + q8 + q9 + s2;
 
-  qd_renorm4_next(&p0, &p1, &s0, &t0);
+  qd_renorm4(&p0, &p1, &s0, &t0);
   return tdr_make(p0, p1, s0);
 }
 
@@ -708,7 +708,7 @@ td_real tdr_accurate_div(const td_real a, const td_real b) {
 
   double q3 = r.x[0] / b.x[0];
 
-  qd_renorm4_next(&q0, &q1, &q2, &q3);
+  qd_renorm4(&q0, &q1, &q2, &q3);
 
   return tdr_make(q0, q1, q2);
 }
@@ -749,7 +749,7 @@ td_real tdr_sqr(const td_real a) {
 
   p3 += t0;
 
-  qd_renorm4_next(&p0, &p1, &p2, &p3);
+  qd_renorm4(&p0, &p1, &p2, &p3);
   return tdr_make(p0, p1, p2);
 }
 

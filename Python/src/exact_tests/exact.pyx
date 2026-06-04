@@ -254,8 +254,8 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
 # guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
 # qbinom(pbinom(k, n, succP) * (1 + 0.5**52), n, succP) > k in non-degenerate
 # cases.  However, it is designed to make these outcomes very likely:
-# - Qbinom() is designed for <0.6 ULP relative error (except when n is huge),
-#   and achieves <0.5 ULP the vast majority of the time.
+# - Qbinom() is designed for <0.6 ULP relative error and achieves <0.5 ULP the
+#   vast majority of the time.
 # - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
 def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):

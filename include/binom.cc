@@ -122,9 +122,6 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
-// When p very close to 1, a dd_real
-// If p is too close to 1 to be well-represented by a dd_real, pass in (n-k, n,
-// 1-p) instead.
 double BinomMass(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t logp) {
   if (k == n) {
     k = 0;
@@ -183,8 +180,8 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio
   return CompareFactorialProducts(2, succ_odds_ratio_tdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_tdr_ptr, ln_odds_ratio_tdr_ptr, dbl_ptr);
 }
 
-// ibeta_fraction2_ln_ddr{1,2}() adapted from Boost 1.91.0.  This derived code
-// is subject to the following license:
+// ibeta_fraction2_...() adapted from Boost 1.91.0.  This derived code is
+// subject to the following license:
 //
 // *****
 // Boost Software License - Version 1.0 - August 17th, 2003
@@ -870,9 +867,16 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
     if (nmk > 0) {
       // Note that the k=28, n=56, p=0.5, logp=False case can ~randomly
       // mismatch MPFR by 1 ULP when this value is perturbed, because the true
-      // cdf value is exactly on the boundary between two float64s.
-      // It may be reasonable to handle cases like that (where n and p are such
-      // that all cdf values are multiples of 2^{-64}) with uint64 arithmetic.
+      // cdf value is exactly on the boundary between two float64s.  (And on
+      // such a mismatch, it's possible that it's the MPFR implementation
+      // that isn't rounding toward even, we're lucky that it rounds correctly
+      // in this case.)
+      //
+      // If others start treating this function as a source of ground truth, it
+      // may be reasonable to use uint64 arithmetic to handle cases where n and
+      // p are such that all cdf values are multiples of 2^{-64}.  That should
+      // nail most exactly-on-the-boundary cases which naturally arise in
+      // practice.
       const double min_incr_right = (1.0 / (1 << 21)) / (nmk * nmk);
       do {
         k += 1;
@@ -972,9 +976,8 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
 }
 
 // Returns smallest nonnegative k for which cdf(k) >= targetp.
-// Assumes 0 <= n < 2^52, and should achieve targetp relative error < 2^{-54}
-// unless n is well over 2^31.  The goal is to support a higher-level qbinom()
-// function where e.g.
+// Assumes 0 <= n < 2^52, and should achieve targetp relative error < 2^{-54}.
+// The goal is to support a higher-level qbinom() function where e.g.
 //   qbinom(fractions.Fraction(1, 9), 2, fractions.Fraction(2, 3))
 // can be trusted to be 0, and
 //   qbinom(fractions.Fraction(2**53, (2**53 - 1) * 9), 2, fractions.Fraction(2, 3))
@@ -1035,14 +1038,24 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   // expect the R approach to be better on this front.
   int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
   mode = mode + (mode == 0) - (mode == n);
-  const dd_real n_lfact_ddr = ddr_lfact(n);
+  const uint32_t use_tdr = (n >= (1LL << 39));
+  td_real n_lfact_tdr;
+  td_real logp_tdr;
+  td_real logq_tdr;
+  if (!use_tdr) {
+    n_lfact_tdr = tdr_make_dd(ddr_lfact(n));
+    logp_tdr = tdr_make_dd(ddr_log(succp_ddr));
+    logq_tdr = tdr_make_dd(ddr_log(failp_ddr));
+  } else {
+    n_lfact_tdr = tdr_lfact(n);
+    logp_tdr = tdr_log(tdr_make_dd(succp_ddr));
+    logq_tdr = tdr_log(tdr_make_dd(failp_ddr));
+  }
   const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
   const dd_real qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
-  const dd_real logp_ddr = ddr_log(succp_ddr);
-  const dd_real logq_ddr = ddr_log(failp_ddr);
   // This is usually overkill, but if n is huge we need to compute these to
   // high precision to make a decent initial guess.
-  const dd_real mode_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, mode), ddr_muld(logq_ddr, n - mode), n_lfact_ddr),
+  const dd_real mode_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_make_td(logp_tdr), mode), ddr_muld(ddr_make_td(logq_tdr), n - mode), ddr_make_td(n_lfact_tdr)),
                                           ddr_add_lfacts(mode, n - mode));
   const dd_real modem1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
   const dd_real modep1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
@@ -1104,9 +1117,15 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   while (1) {
     nmk = n - k;
     // Evaluate pmf(k) to high precision.
-    cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(logp_ddr, k), ddr_muld(logq_ddr, nmk), n_lfact_ddr),
-                             ddr_add_lfacts(k, nmk));
-    const double lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
+    double lnprob_diff;
+    if (!use_tdr) {
+      cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_make_td(logp_tdr), k), ddr_muld(ddr_make_td(logq_tdr), nmk), ddr_make_td(n_lfact_tdr)),
+                               ddr_add_lfacts(k, nmk));
+    } else {
+      cur_lnprob_ddr = ddr_make_td(tdr_sub(tdr_sort_and_add3(tdr_muld(logp_tdr, k), tdr_muld(logq_tdr, nmk), n_lfact_tdr),
+                                           tdr_add_lfacts(k, nmk)));
+    }
+    lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
     if (lnprob_diff > 0) {
       if (k == 0) {
         break;
@@ -1132,6 +1151,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   if (k > 0) {
     // Could use geometric-series upper bound on tailsum to raise this
     // threshold.
+    // Should use bfrac for larger cases.
     const double min_incr_left = 0.125 / (k * k);
     do {
       nmk += 1;
