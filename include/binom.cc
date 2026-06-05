@@ -281,7 +281,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   return ddr_sort_and_add3(result_ddr, ddr_muld(ddr_log1p(l1_ddr), aa), ddr_muld(ddr_log1p(l2_ddr), bb));
 }
 
-double ibeta_fraction2_d(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
+double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
   // see Boost continued_fraction_b()
   const double ay_minus_bx_plus1 = ay_minus_bx_ddr.x[0] + 1.0;
   double cc = (aa / (aa + 1.0)) * ay_minus_bx_plus1;
@@ -368,7 +368,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   // looks relatively inefficient in that case.  todo: benchmark.)
   // caller responsible for guaranteeing ay - bx >= 0
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
-  const double result_incr = log(ibeta_fraction2_d(aa, bb, p_ddr.x[0], q_ddr.x[0], ay_minus_bx_ddr, inv, midp_complement));
+  const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], ay_minus_bx_ddr, inv, midp_complement));
   result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
   if (!inv) {
     return result_ln_ddr;
@@ -376,48 +376,7 @@ dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_d
   return ddr_log1p(ddr_negate(ddr_exp(result_ln_ddr)));
 }
 
-double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t logp) {
-  // (a is a synonym for k+1, b is a synonym for n-k, x is a synonym for p, y
-  // is a synonym for q)
-  //   log((x^a)(y^b) / Beta(a,b))
-  // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
-  const double a_plus_b = aa + bb;
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  dd_real result_ln_ddr;
-  if (!use_tdr_for_binom_lnprob(S_CAST(int64_t, a_plus_b - 1))) {
-    dd_real ddrs[5];
-    ddrs[0] = ddr_lfact(a_plus_b - 1);
-    ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
-    ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
-    if (p_is_half) {
-      ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
-    } else {
-      ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
-      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
-    }
-    result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-  } else {
-    td_real tdrs[5];
-    tdrs[0] = tdr_lfact(a_plus_b - 1);
-    tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
-    tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
-    if (p_is_half) {
-      tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
-    } else {
-      if (ddr_ltd(p_ddr, 0.5)) {
-        tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
-        tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
-      } else {
-        tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
-        tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
-      }
-    }
-    result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
-  }
-  if ((!logp) && (result_ln_ddr.x[0] < -1418.0)) {
-    // Could tighten this bound.
-    return 0.0;
-  }
+dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr) {
   const double cf_eps = k2m64 * (1.0 / (1 << 3));
   const dd_real ay_minus_bx_plus1_ddr = ddr_addd(ay_minus_bx_ddr, 1);
   dd_real cc_ddr = ddr_divd(ddr_muld(ay_minus_bx_plus1_ddr, aa), aa + 1);
@@ -470,15 +429,61 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
     // The use_tdr_for_binom_lnprob() threshold should also be lowered if we
     // want to push cf_eps below 2^{-67}.
     if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= cf_eps)) {
-      result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
-      if (!inv) {
-        return logp? result_ln_ddr.x[0] : ddr_exp(result_ln_ddr).x[0];
-      }
-      const dd_real neg_result_ddr = ddr_negate(ddr_exp(result_ln_ddr));
-      return logp? ddr_log1p(neg_result_ddr).x[0] : ddr_addd(neg_result_ddr, 1.0).x[0];
+      return ff_ddr;
     }
     ff_ddr = ddr_mul(ff_ddr, delta_ddr);
   }
+}
+
+double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t logp) {
+  // (a is a synonym for k+1, b is a synonym for n-k, x is a synonym for p, y
+  // is a synonym for q)
+  //   log((x^a)(y^b) / Beta(a,b))
+  // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
+  const double a_plus_b = aa + bb;
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  dd_real result_ln_ddr;
+  if (!use_tdr_for_binom_lnprob(S_CAST(int64_t, a_plus_b - 1))) {
+    dd_real ddrs[5];
+    ddrs[0] = ddr_lfact(a_plus_b - 1);
+    ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
+    ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
+    if (p_is_half) {
+      ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
+    } else {
+      ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
+    }
+    result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
+  } else {
+    td_real tdrs[5];
+    tdrs[0] = tdr_lfact(a_plus_b - 1);
+    tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
+    tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
+    if (p_is_half) {
+      tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
+    } else {
+      if (ddr_ltd(p_ddr, 0.5)) {
+        tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
+        tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
+      } else {
+        tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
+        tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
+      }
+    }
+    result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
+  }
+  if ((!logp) && (result_ln_ddr.x[0] < -1418.0)) {
+    // Could tighten this bound.
+    return 0.0;
+  }
+  const dd_real ff_ddr = ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
+  result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
+  if (!inv) {
+    return logp? result_ln_ddr.x[0] : ddr_exp(result_ln_ddr).x[0];
+  }
+  const dd_real neg_result_ddr = ddr_negate(ddr_exp(result_ln_ddr));
+  return logp? ddr_log1p(neg_result_ddr).x[0] : ddr_addd(neg_result_ddr, 1.0).x[0];
 }
 
 // Requires 0 <= obs_succ <= obs_tot < 2^52 and 2^{-960} < p < 1.
@@ -972,6 +977,62 @@ double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t c
   return ddr_exp(ln_prob_ddr).x[0];
 }
 
+
+// Useful identities:
+// 1. ibeta_power_terms_d_ln() - log p(n-k) = log-probability for succ=k
+// 2. ibeta_continued_fraction_recip_d() * p(n-k) = tail-prob / succ=k
+/*
+dd_real binom_ln_prob_approx(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, double* nonlog_denom_ptr) {
+  if (!((n > 512) && (MINV(k+1, n-k) >= 40))) {
+    *nonlog_denom_ptr = 1;
+    return binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+  }
+  double aa = k + 1;
+  double bb = n - k;
+  *nonlog_denom_ptr = bb * p_ddr.x[0];
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  if (ay_minus_bx_ddr.x[0] < 0.0) {
+    swap_f64(&aa, &bb);
+    swap_ddr(&p_ddr, &q_ddr);
+    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
+  }
+  return ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
+}
+*/
+
+double binom_tail_lik_bfrac(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t midp) {
+  double aa = obs_k + 1;
+  double bb = n - obs_k;
+  double xx = p_ddr.x[0];
+  double yy = q_ddr.x[0];
+  const double p_nmk = bb * xx;
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  uint32_t inv = !complement;
+  if (ay_minus_bx_ddr.x[0] < 0.0) {
+    swap_f64(&aa, &bb);
+    swap_f64(&xx, &yy);
+    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
+    inv = !inv;
+  }
+  return p_nmk * ibeta_continued_fraction_recip_d(aa, bb, xx, yy, ay_minus_bx_ddr, inv, midp * (1 + complement));
+}
+
+double binom_ltail_lik_simple(double succ, double fail, double succ_odds_ratio, uint32_t midp) {
+  double lik = 1;
+  double tail_sum = 1 - midp * 0.5;
+  // Iterate outward to floating-point precision limit.
+  while (1) {
+    fail += 1;
+    lik *= succ / (succ_odds_ratio * fail);
+    succ -= 1;
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
+      return tail_sum;
+    }
+  }
+}
+
 // Returns smallest nonnegative k for which cdf(k) >= targetp.
 // Assumes 0 <= n < 2^52, and should achieve targetp relative error < 2^{-54}.
 // The goal is to support a higher-level qbinom() function where e.g.
@@ -1183,61 +1244,6 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
     tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
   }
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
-}
-
-// Useful identities:
-// 1. ibeta_power_terms_d_ln() - log p(n-k) = log-probability for succ=k
-// 2. ibeta_fraction2_d() * p(n-k) = tail-prob / succ=k
-/*
-dd_real binom_ln_prob_approx(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, double* nonlog_denom_ptr) {
-  if (!((n > 512) && (MINV(k+1, n-k) >= 40))) {
-    *nonlog_denom_ptr = 1;
-    return binom_ln_prob_internal(k, n, p_ddr, q_ddr);
-  }
-  double aa = k + 1;
-  double bb = n - k;
-  *nonlog_denom_ptr = bb * p_ddr.x[0];
-  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
-  if (ay_minus_bx_ddr.x[0] < 0.0) {
-    swap_f64(&aa, &bb);
-    swap_ddr(&p_ddr, &q_ddr);
-    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
-  }
-  return ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
-}
-
-double binom_tail_lik_bfrac(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t midp) {
-  double aa = obs_k + 1;
-  double bb = n - obs_k;
-  double xx = p_ddr.x[0];
-  double yy = q_ddr.x[0];
-  const double p_nmk = bb * xx;
-  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
-  uint32_t inv = !complement;
-  if (ay_minus_bx_ddr.x[0] < 0.0) {
-    swap_f64(&aa, &bb);
-    swap_f64(&xx, &yy);
-    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
-    inv = !inv;
-  }
-  return p_nmk * ibeta_fraction2_d(aa, bb, xx, yy, ay_minus_bx_ddr, inv, midp * (1 + complement));
-}
-*/
-
-double binom_ltail_lik_simple(double succ, double fail, double succ_odds_ratio, uint32_t midp) {
-  double lik = 1;
-  double tail_sum = 1 - midp * 0.5;
-  // Iterate outward to floating-point precision limit.
-  while (1) {
-    fail += 1;
-    lik *= succ / (succ_odds_ratio * fail);
-    succ -= 1;
-    const double preadd = tail_sum;
-    tail_sum += lik;
-    if (tail_sum == preadd) {
-      return tail_sum;
-    }
-  }
 }
 
 void materialize_oddsratio_p_q_tdr(uint32_t succ_flipped, td_real* p_tdr_ptr, td_real* q_tdr_ptr, td_real* succ_odds_ratio_tdr_ptr) {

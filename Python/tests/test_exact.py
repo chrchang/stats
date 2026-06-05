@@ -447,6 +447,7 @@ def test_qhyper():
     assert exact_tests.qhyper(0, 2, 2, 4) == 2
     assert exact_tests.qhyper(1, 2, 2, 4) == 2
     assert exact_tests.qhyper(0, 1, 1, 1, logp=True) == 1
+    assert exact_tests.qhyper(-0.1, 1, 1, 1, logp=True) == 1
 
 
 def test_HWE():
