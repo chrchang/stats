@@ -473,9 +473,9 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
     }
     result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
   }
-  if ((!logp) && (result_ln_ddr.x[0] < -1418.0)) {
-    // Could tighten this bound.
-    return 0.0;
+  // Could tighten this bound.
+  if ((result_ln_ddr.x[0] < -1418.0) && (inv || (!logp))) {
+    return (logp || (!inv))? 0.0 : 1.0;
   }
   const dd_real ff_ddr = ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
   result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
@@ -1033,6 +1033,51 @@ double binom_ltail_lik_simple(double succ, double fail, double succ_odds_ratio, 
   }
 }
 
+dd_real binom_ltail_lik_bfrac_ddr(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
+  double aa = obs_k + 1;
+  double bb = n - obs_k;
+  const dd_real p_nmk_ddr = ddr_muld(p_ddr, bb);
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  if (ay_minus_bx_ddr.x[0] < 0.0) {
+    swap_f64(&aa, &bb);
+    swap_ddr(&p_ddr, &q_ddr);
+    ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
+  }
+  return ddr_accurate_div(p_nmk_ddr, ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr));
+}
+
+dd_real binom_ltail_lik_simple_ddr(double k, double nmk, dd_real lik_ddr, dd_real qdp_ddr, double allowed_ulp_err) {
+  dd_real tailsum_ddr = lik_ddr;
+  if (k > 0) {
+    // Could use geometric-series upper bound on tailsum to raise this
+    // threshold.
+    const double min_incr_left = allowed_ulp_err / (k * k);
+    do {
+      nmk += 1;
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+      k -= 1;
+      tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+    } while (lik_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
+    if (k > 0) {
+      const double qdp = qdp_ddr.x[0];
+      double lik = lik_ddr.x[0];
+      double tailsum = 0.0;
+      while (1) {
+        nmk += 1;
+        lik *= qdp * k / nmk;
+        k -= 1;
+        const double preadd = tailsum;
+        tailsum += lik;
+        if (tailsum == preadd) {
+          break;
+        }
+      }
+      tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
+    }
+  }
+  return tailsum_ddr;
+}
+
 // Returns smallest nonnegative k for which cdf(k) >= targetp.
 // Assumes 0 <= n < 2^52, and should achieve targetp relative error < 2^{-54}.
 // The goal is to support a higher-level qbinom() function where e.g.
@@ -1118,10 +1163,12 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   const dd_real modem1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
   const dd_real modep1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
 
+  // For better numerical stability, express this quadratic in terms of
+  //   x := k - mode
+  // instead of x := k.
   const double x2_coeff = 0.5 * ddr_add(modem1_lnprob_incr_ddr, modep1_lnprob_incr_ddr).x[0];
   const double x1_coeff = 0.5 * ddr_sub(modep1_lnprob_incr_ddr, modem1_lnprob_incr_ddr).x[0];
-  // mode^2 * x2_coeff + mode * x1_coeff + x0_coeff = mode_lnprob_ddr
-  const double x0_coeff = ddr_subd(mode_lnprob_ddr, mode * prefer_fma(mode, x2_coeff, x1_coeff)).x[0];
+  const double x0_coeff = mode_lnprob_ddr.x[0];
 
   // 1. Identify k<mode such that
   //      pmf(k) * (k+1) < targetp
@@ -1148,31 +1195,40 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
       // this shouldn't happen
       sqrt_discrim = -sqrt_discrim;
     }
-    k = trunc((sqrt_discrim - x1_coeff) / (2 * x2_coeff));
+    k = trunc(mode + (sqrt_discrim - x1_coeff) / (2 * x2_coeff));
     if (k < 0) {
       k = 0;
     }
   }
-  // Our relative error budget is usually 2^{-54}.
-  // We want to ensure that accumulated error when evaluating the outer part of
-  // the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other half
-  // of the budget covers dd_real-precision evaluation of log(pmf(k)) and the
-  // inner part of the tailsum.
-  // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
-  // squared term in the denominator.
-  const double tailsum_ddr_end = -log(8 * mode * mode);
-  // |log(pmf(0) / pmf(1))| is larger than all the other gaps between
-  // adjacent log(pmf()) points to the left of the mode.  So this ensures
-  // there's at least one value of k where log(pmf(k)) - target_lnprob is in
+  // Use Pbinom benchmark result for now, could tune this separately later.
+  const uint32_t use_bfrac = (n > 131072) && (k >= 2048);
+
+  // |log(pmf(0) / pmf(1))| is larger than all the other gaps between adjacent
+  // log(pmf()) points to the left of the mode.  So this ensures there's at
+  // least one value of k where log(pmf(k)) - target_lnprob is in
   // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(0)) >=
   // target_lnprob, in which case we exit the loop at k=0.
   double lnprob_diff_min = log(qdp_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
-  if (lnprob_diff_min > tailsum_ddr_end) {
-    lnprob_diff_min = tailsum_ddr_end;
+  if (!use_bfrac) {
+    // Our relative error budget is usually 2^{-54}.
+    // We want to ensure that accumulated error when evaluating the outer part
+    // of the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other
+    // half of the budget covers dd_real-precision evaluation of log(pmf(k))
+    // and the inner part of the tailsum.
+    // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
+    // squared term in the denominator.  When we're using the simple tailsum
+    // algorithm, there's no speedup from landing closer than tailsum_ddr_end,
+    // so we widen the landing window accordingly.
+    const double tailsum_ddr_end = -log(8 * mode * mode);
+    if (lnprob_diff_min > tailsum_ddr_end) {
+      lnprob_diff_min = tailsum_ddr_end;
+    }
   }
   double nmk;
   dd_real cur_lnprob_ddr;
   while (1) {
+    // probable todo: in use_bfrac case, raise target_lnprob as much as
+    // possible during this loop
     nmk = n - k;
     // Evaluate pmf(k) to high precision.
     double lnprob_diff;
@@ -1204,39 +1260,13 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
   // Express current likelihood as a fraction of targetp.
   const double tailenter_k = k;
   const dd_real tailenter_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
-  dd_real lik_ddr = tailenter_lik_ddr;
-  dd_real tailsum_ddr = tailenter_lik_ddr;
-  if (k > 0) {
-    // Could use geometric-series upper bound on tailsum to raise this
-    // threshold.
-    // Should use bfrac for larger cases.
-    const double min_incr_left = 0.125 / (k * k);
-    do {
-      nmk += 1;
-      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
-      k -= 1;
-      tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
-    } while (lik_ddr.x[0] > tailsum_ddr.x[0] * min_incr_left);
-    if (k > 0) {
-      const double qdp = qdp_ddr.x[0];
-      double lik = lik_ddr.x[0];
-      double tailsum = 0.0;
-      while (1) {
-        nmk += 1;
-        lik *= qdp * k / nmk;
-        k -= 1;
-        const double preadd = tailsum;
-        tailsum += lik;
-        if (tailsum == preadd) {
-          break;
-        }
-      }
-      tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
-    }
-    lik_ddr = tailenter_lik_ddr;
-    k = tailenter_k;
-    nmk = n - k;
+  dd_real tailsum_ddr;
+  if (use_bfrac) {
+    tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(S_CAST(int64_t, k), n, succp_ddr, failp_ddr));
+  } else {
+    tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 0.125);
   }
+  dd_real lik_ddr = tailenter_lik_ddr;
   while (ddr_ltd(tailsum_ddr, 1.0)) {
     k += 1;
     lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
