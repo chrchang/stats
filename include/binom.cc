@@ -122,7 +122,9 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
 }
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
-double BinomMass(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t logp) {
+double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp) {
+  dd_real p_ddr = ddr_make_td(p_tdr);
+  dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   if (k == n) {
     k = 0;
     swap_ddr(&p_ddr, &q_ddr);
@@ -180,8 +182,8 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio
   return CompareFactorialProducts(2, succ_odds_ratio_tdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_tdr_ptr, ln_odds_ratio_tdr_ptr, dbl_ptr);
 }
 
-// ibeta_fraction2_...() adapted from Boost 1.91.0.  This derived code is
-// subject to the following license:
+// ibeta_...() and dependencies below are adapted from Boost 1.91.0.
+// This derived code is subject to the following license:
 //
 // *****
 // Boost Software License - Version 1.0 - August 17th, 2003
@@ -486,6 +488,202 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   return logp? ddr_log1p(neg_result_ddr).x[0] : ddr_addd(neg_result_ddr, 1.0).x[0];
 }
 
+// This is a port of R 4.6.0 src/nmath/qnorm.c , which implements
+//   Wichura, MJ (1988) Algorithm AS 241: The Percentage Points of the Normal
+//   Distribution.  Applied Statistics, 37, 477-484.
+// and
+//   Maechler, M (2022) Asymptotic Tail Formulas For Gaussian Quantiles.
+//   https://cran.r-project.org/web/packages/DPQ/vignettes/qnorm-asymp.pdf .
+//
+// Note that the R function this is derived from is GPL-2 licensed; thus this
+// function cannot be used in scipy.  (Boost has a similar function which lacks
+// the extended logp range.)
+//
+// It currently assumes p <= 0.5, but can trivially be modified to handle
+// larger p.
+//
+// The function name has a trailing 'D' (for double-precision) since
+// plink2_stats already has a faster single-parameter QuantileToZscore()
+// function which just aims for float32-like precision.
+double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
+  if (((!p_is_log) && (p_or_lnp >= 0.075)) || (p_is_log && (p_or_lnp >= -2.5902671654458267))) {
+    const double p = p_is_log? exp(p_or_lnp) : p_or_lnp;
+    assert(p <= 0.500000000000001);
+    const double q = 0.5 - p;
+    const double r = .180625 - q * q;
+    const double r2 = r * r;
+    const double numer_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            33430.575583588128105,
+            r2,
+            45921.953931549871457),
+          r2,
+          1971.5909503065514427),
+        r2,
+        3.387132872796366608);
+    const double numer_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            2509.0809287301226727,
+            r2,
+            67265.770927008700853),
+          r2,
+          13731.693765509461125),
+        r2,
+        133.14166789178437745)
+      * r;
+    const double denom_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            28729.085735721942674,
+            r2,
+            21213.794301586595867),
+          r2,
+          687.1870074920579083),
+        r2,
+        1.0);
+    const double denom_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            5226.495278852854561,
+            r2,
+            39307.89580009271061),
+          r2,
+          5394.1960214247511077),
+        r2,
+        42.313330701600911252)
+      * r;
+    return -q * (numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+  }
+  const double lnp = p_is_log? p_or_lnp : log(p_or_lnp);
+  double r = sqrt(-lnp);
+  if (r <= 5) {
+    r -= 1.6;
+    const double r2 = r * r;
+    const double numer_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            .0227238449892691845833,
+            r2,
+            1.27045825245236838258),
+          r2,
+          5.7694972214606914055),
+        r2,
+        1.42343711074968357734);
+    const double numer_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            7.7454501427834140764e-4,
+            r2,
+            .24178072517745061177),
+          r2,
+          3.64784832476320460504),
+        r2,
+        4.6303378461565452959)
+      * r;
+    const double denom_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            5.475938084995344946e-4,
+            r2,
+            .14810397642748007459),
+          r2,
+          1.6763848301838038494),
+        r2,
+        1.0);
+    const double denom_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            1.05075007164441684324e-9,
+            r2,
+            .0151986665636164571966),
+          r2,
+          .68976733498510000455),
+        r2,
+        2.05319162663775882187)
+      * r;
+    return -(numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+  }
+  if (r <= 27) {
+    r -= 5;
+    const double r2 = r * r;
+    const double numer_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            2.71155556874348757815e-5,
+            r2,
+            .026532189526576123093),
+          r2,
+          1.7848265399172913358),
+        r2,
+        6.6579046435011037772);
+    const double numer_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            2.01033439929228813265e-7,
+            r2,
+            .0012426609473880784386),
+          r2,
+          .29656057182850489123),
+        r2,
+        5.4637849111641143699)
+      * r;
+    const double denom_even_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            1.4215117583164458887e-7,
+            r2,
+            7.868691311456132591e-4),
+          r2,
+          .13692988092273580531),
+        r2,
+        1.0);
+    const double denom_odd_terms =
+      prefer_fma(
+        prefer_fma(
+          prefer_fma(
+            2.04426310338993978564e-15,
+            r2,
+            1.8463183175100546818e-5),
+          r2,
+          .0148753612908506148525),
+        r2,
+        .59983220655588793769)
+      * r;
+    return -(numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+  }
+  if (r >= 6.4e8) {
+    return -r * kSqrt2;
+  }
+  const double s2 = -ldexp(lnp, 1);
+  double x2 = s2 - log((2 * kPi) * s2);
+  if (r < 36000) {
+    x2 = s2 - log((2 * kPi) * x2) - 2.0/(2.0+x2);
+    if (r < 840) {
+      x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - 1/(4+x2))/(2+x2));
+      if (r < 109) {
+        x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - (1 - 5/(6+x2))/(4+x2))/(2+x2));
+        if (r < 55) {
+          x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - (1 - (5 - 9/(8+x2))/(6+x2))/(4+x2))/(2+x2));
+        }
+      }
+    }
+  }
+  return -sqrt(x2);
+}
+
 // Requires 0 <= obs_succ <= obs_tot < 2^52 and 2^{-960} < p < 1.
 // (Sometimes works for 0 < p <= 2^{-960}, but let's leave that out of the
 // function contract until the holes in that region are plugged in.)
@@ -523,13 +721,15 @@ double ibeta_fraction2_ddr2(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 // is limited by the float64 precision of the Lanczos and
 // continued-fraction-coefficient calculations, and everything else here is
 // tuned to that level of relative error.
-double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, int32_t midp, uint32_t logp) {
+double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp) {
   if ((obs_k < 0) || (obs_k > n)) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? (0.0 / 0.0) : 0.0;
   }
+  dd_real p_ddr = ddr_make_td(p_tdr);
+  dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   if ((n > 512) && (MINV(obs_k + 1, n - obs_k) >= 40)) {
     double aa = obs_k + 1;
     double bb = n - obs_k;
@@ -710,13 +910,15 @@ double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint
 //
 // See PbinomApprox() above for the faster variant of this function which
 // doesn't try to get the last few bits right.
-double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t logp) {
+double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint32_t logp) {
   if ((obs_k < 0) || (obs_k > n - S_CAST(int64_t, complement))) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? (0.0 / 0.0) : 0.0;
   }
+  dd_real p_ddr = ddr_make_td(p_tdr);
+  dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   // Benchmarked various values of both thresholds, this seems good on my Mac
   if ((n > 131072) && (MINV(obs_k, n - obs_k) >= 2048)) {
     double aa = obs_k + 1;
@@ -1093,16 +1295,17 @@ dd_real binom_ltail_lik_simple_ddr(double k, double nmk, dd_real lik_ddr, dd_rea
 // Probable todo: (except possibly on some very large cases) start with faster
 // lower-accuracy interval-math calculation, and fall back on reliable
 // high-accuracy calculation only when needed.
-int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
-  if (ddr_is_zero(targetp_or_lnp_ddr) || ddr_is_zero(succp_ddr) || (n == 0)) {
+int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target) {
+  if (ddr_is_zero(targetp_or_lnp_ddr) || tdr_is_zero(succp_tdr) || (n == 0)) {
     return 0;
   }
-  if (ddr_is(succp_ddr, 1) || ddr_is(targetp_or_lnp_ddr, 1)) {
+  if (tdr_is(succp_tdr, 1) || ddr_is(targetp_or_lnp_ddr, 1)) {
     return n;
   }
   // If targetp > 0.5, invert.
   const uint32_t inv = ((!log_target) && (targetp_or_lnp_ddr.x[0] > 0.5)) || (log_target && (targetp_or_lnp_ddr.x[0] > _ddr_log05.x[0]));
-  dd_real failp_ddr = ddr_negate(ddr_subd(succp_ddr, 1.0));
+  dd_real succp_ddr = ddr_make_td(succp_tdr);
+  dd_real failp_ddr = ddr_negate(ddr_make_td(tdr_addd(succp_tdr, -1.0)));
   if (inv) {
     swap_ddr(&succp_ddr, &failp_ddr);
     if (!log_target) {
@@ -1112,166 +1315,91 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_
       log_target = 0;
     }
   }
-  // n=1 doesn't play well with the current initial-guess algorithm, and is
-  // straightforward to handle directly.
-  if (n == 1) {
-    // cdf(0) = failp.
-    const int64_t k = ddr_lt(failp_ddr, targetp_or_lnp_ddr);
-    return inv? (1 - k) : k;
-  }
-  // We make an initial guess, use Newton's method to refine it (in the same
-  // way as BinomTwoSidedP() when jumping from one tail to the other),
-  // calculate tail probability to sufficient accuracy, and then start moving k
-  // inward and updating tail probability until it crosses targetp.  This
-  // avoids repetition of the tail-probability calculation.
-  //
-  // Initial guess is based on fitting a quadratic to three points of the
-  // log-probability function near the mode.  Log-likelihood is
-  //   log(p^k (1-p)^{n-k} n! / (k! (n-k)!))
-  //   = k log(p) + (n-k) log(1-p) + log(n!) - log(k!) - log((n-k)!)
-  //   = <constant> + k(log(p)-log(1-p)) - log(gamma(k+1)) - log(gamma(n+1-k))
-  // First derivative w.r.t. k is
-  //   log(p) - log(1-p) - digamma(k+1) + digamma(n+1-k)
-  // Second derivative is
-  //   -trigamma(k+1) - trigamma(n+1-k)
-  //   ~= -(1/(k+1) + 1/(n+1-k))
-  // which is slowly varying for large n and k.
-  //
-  // Probable todo: compare to R qbinom()'s use of Cornish-Fisher expansion.  I
-  // expect the R approach to be better on this front.
-  int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
-  mode = mode + (mode == 0) - (mode == n);
+  const int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
   const uint32_t use_tdr = (n >= (1LL << 39));
-  td_real n_lfact_tdr;
-  td_real logp_tdr;
   td_real logq_tdr;
   if (!use_tdr) {
-    n_lfact_tdr = tdr_make_dd(ddr_lfact(n));
-    logp_tdr = tdr_make_dd(ddr_log(succp_ddr));
     logq_tdr = tdr_make_dd(ddr_log(failp_ddr));
   } else {
-    n_lfact_tdr = tdr_lfact(n);
-    logp_tdr = tdr_log(tdr_make_dd(succp_ddr));
     logq_tdr = tdr_log(tdr_make_dd(failp_ddr));
   }
-  const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
-  const dd_real qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
-  // This is usually overkill, but if n is huge we need to compute these to
-  // high precision to make a decent initial guess.
-  const dd_real mode_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_make_td(logp_tdr), mode), ddr_muld(ddr_make_td(logq_tdr), n - mode), ddr_make_td(n_lfact_tdr)),
-                                          ddr_add_lfacts(mode, n - mode));
-  const dd_real modem1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(qdp_ddr, mode), n + 1 - mode));
-  const dd_real modep1_lnprob_incr_ddr = ddr_log(ddr_divd(ddr_muld(pdq_ddr, n - mode), mode + 1));
-
-  // For better numerical stability, express this quadratic in terms of
-  //   x := k - mode
-  // instead of x := k.
-  const double x2_coeff = 0.5 * ddr_add(modem1_lnprob_incr_ddr, modep1_lnprob_incr_ddr).x[0];
-  const double x1_coeff = 0.5 * ddr_sub(modep1_lnprob_incr_ddr, modem1_lnprob_incr_ddr).x[0];
-  const double x0_coeff = mode_lnprob_ddr.x[0];
-
-  // 1. Identify k<mode such that
-  //      pmf(k) * (k+1) < targetp
-  //    If no such k>0 exists, initialize k=0.  Also ok to initialize k=0 if
-  //    mode is small.
-  // 2. Compute pmf(k) to high accuracy.
-  // 3. Sum left-tail (<= k) likelihoods.  (Guaranteed to be < targetp unless
-  //    k=0, in which case we can immediately return 0.)  Use float64 instead
-  //    of dd_real precision when we can get away with it.
-  // 4. Sum inward until the sum >= targetp, at which point we return k.
-  const dd_real target_lnp_ddr = log_target? targetp_or_lnp_ddr : ddr_log(targetp_or_lnp_ddr);
-  // Find the x on the left side where the quadratic crosses
-  // y=log(targetp/mode).  If there's no such point, just start at
-  // x=mode-1.
-  const double target_lnprob = target_lnp_ddr.x[0] - log(mode);
-  // (-b - sqrt(b^2 - 4ac)) / 2a
-  const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - target_lnprob);
-  double k;
-  if (discrim < 0.0) {
-    k = mode - 1;
+  const double zscore = QuantileToZscoreD(targetp_or_lnp_ddr.x[0], log_target);
+  // Use Central Limit Theorem for initial guess.
+  // CLT: z = (k + 0.5 - np) / sqrt(npq)
+  //      -> z * sqrt(npq) = k + 0.5 - np
+  //         z * sqrt(npq) + np - 0.5 = k
+  const double n_d = n;
+  const double np = n_d * succp_ddr.x[0];
+  const double sqrt_npq = sqrt(np * failp_ddr.x[0]);
+  double k = zscore * sqrt_npq + np - 0.5;
+  // Tried refining this with Camp-Paulson approximation, that doesn't seem to
+  // help.
+  if (k < 0) {
+    k = 0;
+  } else if (k > n_d) {
+    k = n_d;
   } else {
-    double sqrt_discrim = sqrt(discrim);
-    if (x2_coeff > 0.0) {
-      // this shouldn't happen
-      sqrt_discrim = -sqrt_discrim;
-    }
-    k = trunc(mode + (sqrt_discrim - x1_coeff) / (2 * x2_coeff));
-    if (k < 0) {
-      k = 0;
-    }
+    k = trunc(k + 0.5);
   }
-  // Use Pbinom benchmark result for now, could tune this separately later.
-  const uint32_t use_bfrac = (n > 131072) && (k >= 2048);
+  double nmk = n_d - k;
 
-  // |log(pmf(0) / pmf(1))| is larger than all the other gaps between adjacent
-  // log(pmf()) points to the left of the mode.  So this ensures there's at
-  // least one value of k where log(pmf(k)) - target_lnprob is in
-  // (lnprob_diff_min, 0], letting us exit the loop; unless log(pmf(0)) >=
-  // target_lnprob, in which case we exit the loop at k=0.
-  double lnprob_diff_min = log(qdp_ddr.x[0] / S_CAST(double, n)) * (1 + kSmallEpsilon);
-  if (!use_bfrac) {
-    // Our relative error budget is usually 2^{-54}.
-    // We want to ensure that accumulated error when evaluating the outer part
-    // of the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other
-    // half of the budget covers dd_real-precision evaluation of log(pmf(k))
-    // and the inner part of the tailsum.
-    // 2^{-55} corresponds to 0.125 ULPs; Pbinom() comments elaborate on the
-    // squared term in the denominator.  When we're using the simple tailsum
-    // algorithm, there's no speedup from landing closer than tailsum_ddr_end,
-    // so we widen the landing window accordingly.
-    const double tailsum_ddr_end = -log(8 * mode * mode);
-    if (lnprob_diff_min > tailsum_ddr_end) {
-      lnprob_diff_min = tailsum_ddr_end;
-    }
-  }
-  double nmk;
+  // 2. Compute pmf(k) to high accuracy.
+  // 3. Sum left-tail (<= k) likelihoods, using adjacent-term ratios for small
+  //    cases and BFRAC for large cases.
+  // 4. Sum inward or outward until we find the crossing point.
+  const dd_real target_lnp_ddr = log_target? targetp_or_lnp_ddr : ddr_log(targetp_or_lnp_ddr);
   dd_real cur_lnprob_ddr;
-  while (1) {
-    // probable todo: in use_bfrac case, raise target_lnprob as much as
-    // possible during this loop
-    nmk = n - k;
-    // Evaluate pmf(k) to high precision.
-    double lnprob_diff;
-    if (!use_tdr) {
-      cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_make_td(logp_tdr), k), ddr_muld(ddr_make_td(logq_tdr), nmk), ddr_make_td(n_lfact_tdr)),
+  if (!use_tdr) {
+    cur_lnprob_ddr = ddr_muld(ddr_make_td(logq_tdr), nmk);
+    if (k > 0) {
+      cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_log(succp_ddr), k), cur_lnprob_ddr, ddr_lfact(n_d)),
                                ddr_add_lfacts(k, nmk));
-    } else {
-      cur_lnprob_ddr = ddr_make_td(tdr_sub(tdr_sort_and_add3(tdr_muld(logp_tdr, k), tdr_muld(logq_tdr, nmk), n_lfact_tdr),
-                                           tdr_add_lfacts(k, nmk)));
     }
-    lnprob_diff = cur_lnprob_ddr.x[0] - target_lnprob;
-    if (lnprob_diff > 0) {
-      if (k == 0) {
-        break;
-      }
-      // This calculation can be lower-precision.
-      const double ll_deriv = log(pdq_ddr.x[0] * (nmk + 1) / k);
-      k -= ceil(lnprob_diff / ll_deriv);
-      if (k < 0) {
-        k = 0;
-      }
-    } else if (lnprob_diff > lnprob_diff_min) {
-      break;
+  } else {
+    const td_real nmk_logq_tdr = tdr_muld(logq_tdr, nmk);
+    if (k == 0) {
+      cur_lnprob_ddr = ddr_make_td(nmk_logq_tdr);
     } else {
-      const double ll_deriv = log(pdq_ddr.x[0] * nmk / (k + 1));
-      k += S_CAST(int64_t, -lnprob_diff / ll_deriv);
+      cur_lnprob_ddr = ddr_make_td(tdr_sub(tdr_sort_and_add3(tdr_muld(tdr_log(tdr_make_dd(succp_ddr)), k), nmk_logq_tdr, tdr_lfact(n_d)),
+                                           tdr_add_lfacts(k, nmk)));
     }
   }
   // Express current likelihood as a fraction of targetp.
   const double tailenter_k = k;
   const dd_real tailenter_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
+  // lazy-initialize this
+  dd_real qdp_ddr = ddr_maked(0.0);
+
   dd_real tailsum_ddr;
-  if (use_bfrac) {
+  // Use Pbinom benchmark result for now, could tune this separately later.
+  if ((n > 131072) && (k >= 2048)) {
     tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(S_CAST(int64_t, k), n, succp_ddr, failp_ddr));
   } else {
-    tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 0.125);
+    qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
+    tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 1.0 / (1 << 14));
   }
   dd_real lik_ddr = tailenter_lik_ddr;
-  while (ddr_ltd(tailsum_ddr, 1.0)) {
+  if (ddr_ltd(tailsum_ddr, 1.0)) {
+    const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
+    do {
+      k += 1;
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+      nmk -= 1;
+      tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+    } while (ddr_ltd(tailsum_ddr, 1.0));
+  } else if (k > 0) {
+    if (ddr_is_zero(qdp_ddr)) {
+      qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
+    }
+    const dd_real overshoot_ddr = ddr_subd(tailsum_ddr, 1.0);
+    dd_real tailsub_ddr = ddr_maked(0.0);
+    do {
+      nmk += 1;
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));;
+      k -= 1;
+      tailsub_ddr = ddr_add(tailsub_ddr, lik_ddr);
+    } while (ddr_leq(tailsub_ddr, overshoot_ddr));
     k += 1;
-    lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
-    nmk -= 1;
-    tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
   }
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }

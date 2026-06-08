@@ -2,9 +2,9 @@ exact_tests
 ===========
 
 This package provides binomial, Hardy-Weinberg equilibrium, and Fisher's exact
-test (2x2 and 2x3 so far) functions, along with {p,d,q}binom() and
-{p,d,q}hyper() distribution functions.  The functions are accurate and
-efficient:
+test (2x2 and 2x3 so far) functions, along with binomial and hypergeometric
+distribution functions with scipy- and R-style interfaces.  The functions are
+accurate and efficient:
 
 - High-precision and interval arithmetic are used to ensure likelihood
   near-ties are correctly resolved.  Log-(mid)p-values are available when you
@@ -46,11 +46,11 @@ You can test the package with `pytest`.
 ```
 import exact_tests
 
-exact_tests.binom(3, n=15, p=0.1, alternative="greater")
-exact_tests.binom(2, 29, 0.1)
-exact_tests.binom(2, 29, "0.1")
-exact_tests.binom(2, 29, "0.1", midp=True)
-exact_tests.binom(100, 10000, "0.000001", logp=True)
-exact_tests.fisher([[4, 0], [0, 4]], alternative="greater", midp=True)
-exact_tests.fisher([[10000, 20000], [30000, 40000], [50000, 60000]], logp=True)
+exact_tests.binom_test(3, n=15, p=0.1, alternative="greater")
+exact_tests.binom_test(2, 29, 0.1)
+exact_tests.binom_test(2, 29, "0.1")
+exact_tests.binom_test(2, 29, "0.1", midp=True)
+exact_tests.binom_test(100, 10000, "0.000001", logp=True)
+exact_tests.fisher_test([[4, 0], [0, 4]], alternative="greater", midp=True)
+exact_tests.fisher_test([[10000, 20000], [30000, 40000], [50000, 60000]], logp=True)
 ```

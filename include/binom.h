@@ -46,28 +46,28 @@ namespace plink2 {
 
 double LnBinomCoeff(int64_t n, int64_t k);
 
-double BinomMass(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t logp);
+double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp);
 
-double PbinomApprox(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, int32_t midp, uint32_t logp);
+double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
 
-HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
+HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
   const int64_t k_decr = succ_is_greater_alt && (!midp);
   if (k_decr && (obs_k == 0)) {
     return logp? 0.0 : 1.0;
   }
-  return PbinomApprox(obs_k - k_decr, n, p_ddr, q_ddr, succ_is_greater_alt, midp, logp);
+  return PbinomApprox(obs_k - k_decr, n, p_tdr, succ_is_greater_alt, midp, logp);
 }
 
-double Pbinom(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr, uint32_t complement, uint32_t logp);
+double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint32_t logp);
 
-int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target);
+int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target);
 
-HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_or_lnp_ddr, int64_t n, dd_real succp_ddr, uint32_t log_target) {
+HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target) {
   if (!ddr_is_zero(targetp_or_lnp_ddr)) {
     const double half_ulp = 0.5 * fabs(targetp_or_lnp_ddr.x[0] - prev_float64(targetp_or_lnp_ddr.x[0]));
     targetp_or_lnp_ddr = ddr_subd(targetp_or_lnp_ddr, half_ulp);
   }
-  return Qbinom(targetp_or_lnp_ddr, n, succp_ddr, log_target);
+  return Qbinom(targetp_or_lnp_ddr, n, succp_tdr, log_target);
 }
 
 double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t midp, uint32_t logp);
