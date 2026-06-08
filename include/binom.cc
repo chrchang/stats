@@ -1292,7 +1292,7 @@ dd_real binom_ltail_lik_simple_ddr(double k, double nmk, dd_real lik_ddr, dd_rea
 // of targetp_or_lnp_ddr, for the goal described above, before calling
 // Qbinom().
 //
-// Probable todo: (except possibly on some very large cases) start with faster
+// Possible todo: (except possibly on some very large cases) start with faster
 // lower-accuracy interval-math calculation, and fall back on reliable
 // high-accuracy calculation only when needed.
 int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target) {
@@ -1315,12 +1315,14 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
       log_target = 0;
     }
   }
-  const int64_t mode = S_CAST(int64_t, prev_float64((n + 1) * succp_ddr.x[0]));
   const uint32_t use_tdr = (n >= (1LL << 39));
+  td_real logp_tdr;
   td_real logq_tdr;
   if (!use_tdr) {
+    logp_tdr = tdr_make_dd(ddr_log(succp_ddr));
     logq_tdr = tdr_make_dd(ddr_log(failp_ddr));
   } else {
+    logp_tdr = tdr_log(tdr_make_dd(succp_ddr));
     logq_tdr = tdr_log(tdr_make_dd(failp_ddr));
   }
   const double zscore = QuantileToZscoreD(targetp_or_lnp_ddr.x[0], log_target);
@@ -1328,78 +1330,144 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
   // CLT: z = (k + 0.5 - np) / sqrt(npq)
   //      -> z * sqrt(npq) = k + 0.5 - np
   //         z * sqrt(npq) + np - 0.5 = k
+  // We'd much rather undershoot than overshoot, especially when pq is small,
+  // so we throw in an extra -0.25 * (np)^{1/4}.
+  // todo: check if R's use of Cornish-Fisher expansion is more effective.
   const double n_d = n;
   const double np = n_d * succp_ddr.x[0];
   const double sqrt_npq = sqrt(np * failp_ddr.x[0]);
-  double k = zscore * sqrt_npq + np - 0.5;
+  double k = zscore * sqrt_npq + np - 0.25 * sqrt(sqrt(np));
   // Tried refining this with Camp-Paulson approximation, that doesn't seem to
   // help.
   if (k < 0) {
     k = 0;
-  } else if (k > n_d) {
-    k = n_d;
   } else {
-    k = trunc(k + 0.5);
+    // k > n should be impossible since zscore should be nonpositive.
+    k = trunc(k);
   }
-  double nmk = n_d - k;
-
+  // 1. Refine guess so that DBL_MIN * targetp < pmf(k) <= targetp.
   // 2. Compute pmf(k) to high accuracy.
   // 3. Sum left-tail (<= k) likelihoods, using adjacent-term ratios for small
   //    cases and BFRAC for large cases.
   // 4. Sum inward or outward until we find the crossing point.
+  const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
+  const dd_real qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
   const dd_real target_lnp_ddr = log_target? targetp_or_lnp_ddr : ddr_log(targetp_or_lnp_ddr);
-  dd_real cur_lnprob_ddr;
-  if (!use_tdr) {
-    cur_lnprob_ddr = ddr_muld(ddr_make_td(logq_tdr), nmk);
-    if (k > 0) {
-      cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_log(succp_ddr), k), cur_lnprob_ddr, ddr_lfact(n_d)),
-                               ddr_add_lfacts(k, nmk));
+  while (1) {
+    dd_real cur_lnprob_ddr;
+    dd_real diff_ddr;
+    double nmk;
+    while (1) {
+      nmk = n_d - k;
+      if (!use_tdr) {
+        cur_lnprob_ddr = ddr_muld(ddr_make_td(logq_tdr), nmk);
+        if (k > 0) {
+          cur_lnprob_ddr = ddr_sub(ddr_sort_and_add3(ddr_muld(ddr_make_td(logp_tdr), k), cur_lnprob_ddr, ddr_lfact(n_d)),
+                                   ddr_add_lfacts(k, nmk));
+        }
+      } else {
+        const td_real nmk_logq_tdr = tdr_muld(logq_tdr, nmk);
+        if (k == 0) {
+          cur_lnprob_ddr = ddr_make_td(nmk_logq_tdr);
+        } else {
+          cur_lnprob_ddr = ddr_make_td(tdr_sub(tdr_sort_and_add3(tdr_muld(logp_tdr, k), nmk_logq_tdr, tdr_lfact(n_d)),
+                                               tdr_add_lfacts(k, nmk)));
+        }
+      }
+      diff_ddr = ddr_sub(cur_lnprob_ddr, target_lnp_ddr);
+      if (diff_ddr.x[0] >= 0.0) {
+        if (k == 0) {
+          break;
+        }
+        // We definitely overshot.
+        // We can't be that close to the mode due to the extra fourth-root
+        // displacement, so geometric-series bound shouldn't be too loose.
+        // cdf(k) <= pmf(k) / (1-r) where r := pmf(k-1)/pmf(k)
+        // cdf(k-c) <= pmf(k) * r^c / (1-r)
+        // -> find c where targetp = pmf(k) * r^c / (1-r), round up
+        //                 targetp * (1-r) / pmf(k) = r^c
+        //                 log(targetp * (1-r) / pmf(k)) / log(r) = c
+        //                 (log(1-r) - diff) / log(r) = c
+        const double r = qdp_ddr.x[0] * k / (nmk + 1);
+        const double c = ceil((log1p(-r) - diff_ddr.x[0]) / log(r));
+        k -= c;
+        if (k < 0) {
+          k = 0;
+        }
+      } else if (diff_ddr.x[0] > -708.0) {
+        break;
+      } else {
+        // ddr_exp(diff_ddr) underflows, probably because p is extremely small
+        // and thus k must be in a very narrow window for diff_ddr to be
+        // in-range.
+        // cdf(k) <= pmf(k) / (1-r) where r := pmf(k)/pmf(k+1)
+        // cdf(k+c) <= pmf(k) * r^{-c} / (1-r)
+        // -> find c where targetp = pmf(k) * r^{-c} / (1-r), truncate; should
+        //    be guaranteed to be positive after truncation since min(succp,
+        //    failp) currently must be >= 2^{-960}, n < 2^52, and diff <= -708;
+        //    a bit more work needed to support smaller min(succp, failp).
+        //                 targetp * (1-r) / pmf(k) = r^{-c}
+        //                 log(targetp * (1-r) / pmf(k)) / log(r) = -c
+        //                 (diff - log(1-r)) / log(r) = c
+        const double r = qdp_ddr.x[0] * (k+1) / nmk;
+        const double c = trunc((diff_ddr.x[0] - log1p(-r)) / log(r));
+        assert(c > 0);
+        k += c;
+      }
     }
-  } else {
-    const td_real nmk_logq_tdr = tdr_muld(logq_tdr, nmk);
-    if (k == 0) {
-      cur_lnprob_ddr = ddr_make_td(nmk_logq_tdr);
+    // Express current likelihood as a fraction of targetp.
+    double tailenter_k = k;
+    dd_real tailenter_lik_ddr = ddr_exp(diff_ddr);
+    dd_real tailsum_ddr;
+    // Use Pbinom benchmark result for now, could tune this separately later.
+    if ((n > 131072) && (k >= 2048)) {
+      tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(S_CAST(int64_t, k), n, succp_ddr, failp_ddr));
     } else {
-      cur_lnprob_ddr = ddr_make_td(tdr_sub(tdr_sort_and_add3(tdr_muld(tdr_log(tdr_make_dd(succp_ddr)), k), nmk_logq_tdr, tdr_lfact(n_d)),
-                                           tdr_add_lfacts(k, nmk)));
+      tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 1.0 / (1 << 14));
     }
-  }
-  // Express current likelihood as a fraction of targetp.
-  const double tailenter_k = k;
-  const dd_real tailenter_lik_ddr = ddr_exp(ddr_sub(cur_lnprob_ddr, target_lnp_ddr));
-  // lazy-initialize this
-  dd_real qdp_ddr = ddr_maked(0.0);
-
-  dd_real tailsum_ddr;
-  // Use Pbinom benchmark result for now, could tune this separately later.
-  if ((n > 131072) && (k >= 2048)) {
-    tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(S_CAST(int64_t, k), n, succp_ddr, failp_ddr));
-  } else {
-    qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
-    tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 1.0 / (1 << 14));
-  }
-  dd_real lik_ddr = tailenter_lik_ddr;
-  if (ddr_ltd(tailsum_ddr, 1.0)) {
-    const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
-    do {
-      k += 1;
-      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
-      nmk -= 1;
-      tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
-    } while (ddr_ltd(tailsum_ddr, 1.0));
-  } else if (k > 0) {
-    if (ddr_is_zero(qdp_ddr)) {
-      qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
+    dd_real lik_ddr = tailenter_lik_ddr;
+    if (ddr_ltd(tailsum_ddr, 1.0)) {
+      do {
+        k += 1;
+        lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(pdq_ddr, nmk), k));
+        nmk -= 1;
+        tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+      } while (ddr_ltd(tailsum_ddr, 1.0));
+      break;
+    } else if (k == 0) {
+      break;
+    } else {
+      // On entry, lik_ddr and tailsum_ddr should always have relative error <
+      // 2^{-56} (due to the current use_tdr_for_binom_lnprob() threshold of
+      // 2^36); in practice the relative error is likely to be < 2^66.
+      //
+      // If tailsum_ddr is very close to 1, there can be significant
+      // cancellation in the computation of overshoot_ddr, but it won't matter;
+      // we will exit on the first iteration regardless.
+      //
+      // However, if tailsum_ddr is large, 2^{-56} of it can be a significant
+      // fraction of 1.  In that event, we may need to restart the main
+      // calculation with a guess informed by what we've calculated so far.
+      const dd_real tailsub_eps_ddr = ddr_mul_pwr2(tailsum_ddr, k2m53 * 0.125);
+      // pmf(k) < targetp should guarantee this, which should in turn guarantee
+      // that the loop below terminates.
+      assert(tailsub_eps_ddr.x[0] < 0.0625);
+      const dd_real overshoot_ddr = ddr_subd(tailsum_ddr, 1.0);
+      const dd_real overshoot_minus_eps_ddr = ddr_sub(overshoot_ddr, tailsub_eps_ddr);
+      dd_real tailsub_ddr = ddr_maked(0.0);
+      do {
+        nmk += 1;
+        lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));
+        k -= 1;
+        tailsub_ddr = ddr_add(tailsub_ddr, lik_ddr);
+      } while (ddr_leq(tailsub_ddr, overshoot_minus_eps_ddr));
+      if (ddr_gt(tailsub_ddr, ddr_add(overshoot_ddr, tailsub_eps_ddr))) {
+        // Whew, we're far enough from the boundary.
+        k += 1;
+        break;
+      }
+      // This k should be a good-enough initial guess.
     }
-    const dd_real overshoot_ddr = ddr_subd(tailsum_ddr, 1.0);
-    dd_real tailsub_ddr = ddr_maked(0.0);
-    do {
-      nmk += 1;
-      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_muld(qdp_ddr, k), nmk));;
-      k -= 1;
-      tailsub_ddr = ddr_add(tailsub_ddr, lik_ddr);
-    } while (ddr_leq(tailsub_ddr, overshoot_ddr));
-    k += 1;
   }
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }
