@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -20,6 +20,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
     int32_t ddr_leqd(const dd_real_struct a, double b) nogil
 
+    td_real_struct tdr_make2(const double a, const double b) nogil
+
     td_real_struct tdr_addd(const td_real_struct a, double b) nogil
 
     int32_t tdr_is_zero(const td_real_struct a) nogil
@@ -29,6 +31,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     int32_t tdr_ltd(const td_real_struct a, double b) nogil
 
     int32_t tdr_leqd(const td_real_struct a, double b) nogil
+
+    int32_t tdr_gt(const td_real_struct a, const td_real_struct b) nogil
 
 
 cdef extern from "../include/binom.h" namespace "plink2":
@@ -172,10 +176,10 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct p_tdr = TdrMake(p)
-    if not tdr_is_zero(p_tdr) and (tdr_ltd(p_tdr, 0.5**960) or not tdr_leqd(p_tdr, 1.0)):
-        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
     if tdr_is_zero(p_tdr) or tdr_is(p_tdr, 1):
         return pbinom_p01(k, n, p_tdr.x[0], complement, 0, logp)
+    if tdr_ltd(p_tdr, 0.5**960) or tdr_gt(p_tdr, tdr_make2(1, -(0.5**960))):
+        raise RuntimeError("p must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
     if approx:
         return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, 0, logp))
     return flush_if_denormal(Pbinom(k, n, p_tdr, complement, logp))
@@ -195,8 +199,8 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct distp_tdr = TdrMake(succP)
-    if not tdr_is_zero(distp_tdr) and (tdr_ltd(distp_tdr, 0.5**960) or not tdr_leqd(distp_tdr, 1.0)):
-        raise RuntimeError("succP must be 0, or in [2^{-960}, 1].")
+    if (tdr_ltd(distp_tdr, 0.5**960) and not tdr_is_zero(distp_tdr)) or (tdr_gt(distp_tdr, tdr_make2(1, -(0.5**960))) and not tdr_is(distp_tdr, 1)):
+        raise RuntimeError("succP must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
     # td_real is overkill when we're explicitly subtracting off 0.5 ULP... but
     # dd_real still provides meaningful value over plain float64 here.
     cdef dd_real_struct targetp_or_lnp_ddr = DdrMake(targetP)
@@ -274,12 +278,12 @@ def binom_test(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", 
                 return half_or_oneval(midp, logp)
             return zeroval(logp)
         return pbinom_p01(k, n, p_tdr.x[0], complement, midp, logp)
-    if (tdr_ltd(p_tdr, 0.5**960) or not tdr_leqd(p_tdr, 1.0)):
+    if tdr_ltd(p_tdr, 0.5**960) or tdr_gt(p_tdr, tdr_make2(1, -(0.5**960))):
         # TODO: these functions should allow p in (0, 2^{-960}).  Deferred
         # since, as of this writing, there are much higher-priority problems to
         # solve; but this is straightforward to get right, just need to be
         # careful about underflow.
-        raise RuntimeError("p must be 0, or in [2^{-960}, 1].")
+        raise RuntimeError("p must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
     if alternative == "two-sided":
         return flush_if_denormal(BinomTwoSidedP(k, n, p_tdr, midp, logp))
     return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, midp, logp))

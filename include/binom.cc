@@ -213,23 +213,6 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio
 
 // static const double kLentzFpmin = DBL_MIN * 16;
 
-static const double kLanczosDoubleSumDenom[13] = {0, 39916800, 120543840, 150917976, 105258076, 45995730, 13339535, 2637558, 357423, 32670, 1925, 66, 1};
-static const double kLanczosDoubleSumExpgNumer[13] = {
-  56906521.91347156388090791033559122686859,
-  103794043.1163445451906271053616070238554,
-  86363131.28813859145546927288977868422342,
-  43338889.32467613834773723740590533316085,
-  14605578.08768506808414169982791359218571,
-  3481712.15498064590882071018964774556468,
-  601859.6171681098786670226533699352302507,
-  75999.29304014542649875303443598909137092,
-  6955.999602515376140356310115515198987526,
-  449.9445569063168119446858607650988409623,
-  19.51992788247617482847860966235652136208,
-  0.5098416655656676188125178644804694509993,
-  0.006061842346248906525783753964555936883222
-};
-
 // this depends on the polynomial coefficients above
 // exactly 808618867 * 2^{-27}, don't need to represent this as dd_real
 static const double kLanczosDoubleG = 6.024680040776729583740234375;
@@ -237,13 +220,33 @@ static const double kLanczosDoubleG = 6.024680040776729583740234375;
 double lanczos_sum_d_expg_scaled_imp(double zz, double* s2_ptr) {
   // zz currently guaranteed to be >1.
   zz = 1 / zz;
-  double s1 = kLanczosDoubleSumExpgNumer[0];
-  double s2 = kLanczosDoubleSumDenom[0];
-  for (uint32_t uii = 1; uii != 13; ++uii) {
-    s1 = prefer_fma(s1, zz, kLanczosDoubleSumExpgNumer[uii]);
-    s2 = prefer_fma(s2, zz, kLanczosDoubleSumDenom[uii]);
-  }
-  *s2_ptr = s2;
+  const double s1 = POLY12(zz,
+                           0.006061842346248907,
+                           0.5098416655656676,
+                           19.519927882476175,
+                           449.9445569063168,
+                           6955.999602515376,
+                           75999.29304014542,
+                           601859.6171681099,
+                           3481712.154980646,
+                           14605578.087685067,
+                           43338889.32467614,
+                           86363131.2881386,
+                           103794043.11634454,
+                           56906521.913471565);
+  *s2_ptr = POLY11(zz,
+                   1,
+                   66,
+                   1925,
+                   32670,
+                   357423,
+                   2637558,
+                   13339535,
+                   45995730,
+                   105258076,
+                   150917976,
+                   120543840,
+                   39916800);
   return s1;
 }
 
@@ -276,7 +279,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   dd_real result_ddr = ddr_mul_pwr2(ddr_log(ddr_mul(term1_ddr, term2_ddr)), 0.5);
 
   // Calculate l1 and l2 with extra precision, since magnitude can greatly
-  // exceed that of ln(nonlog).
+  // exceed that of ln(result).
   // This removes the need for special cases.
   const dd_real l1_ddr = ddr_accurate_div(ddr_negate(ddr_add(ay_minus_bx_ddr, ddr_muld(q_ddr, gh))), agh_ddr);
   const dd_real l2_ddr = ddr_accurate_div(ddr_sub(ay_minus_bx_ddr, ddr_muld(p_ddr, gh)), bgh_ddr);
@@ -366,8 +369,8 @@ double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double 
 // the rather similar hypergeometric cdf calculation.)
 dd_real ibeta_fraction2_ln_ddr1(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
   // normalized always true, min(aa, bb) >= 40, max much larger
-  // (this should still yield correct results for smaller min(aa, bb), but it
-  // looks relatively inefficient in that case.  todo: benchmark.)
+  // (float64 Lanczos polynomial evaluation looks like it has more error than
+  // we'd like at min(aa, bb) < 40.)
   // caller responsible for guaranteeing ay - bx >= 0
   dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr);
   const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], ay_minus_bx_ddr, inv, midp_complement));
@@ -511,172 +514,86 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
     assert(p <= 0.500000000000001);
     const double q = 0.5 - p;
     const double r = .180625 - q * q;
-    const double r2 = r * r;
-    const double numer_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            33430.575583588128105,
-            r2,
-            45921.953931549871457),
-          r2,
-          1971.5909503065514427),
-        r2,
-        3.387132872796366608);
-    const double numer_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            2509.0809287301226727,
-            r2,
-            67265.770927008700853),
-          r2,
-          13731.693765509461125),
-        r2,
-        133.14166789178437745)
-      * r;
-    const double denom_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            28729.085735721942674,
-            r2,
-            21213.794301586595867),
-          r2,
-          687.1870074920579083),
-        r2,
-        1.0);
-    const double denom_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            5226.495278852854561,
-            r2,
-            39307.89580009271061),
-          r2,
-          5394.1960214247511077),
-        r2,
-        42.313330701600911252)
-      * r;
-    return -q * (numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+    // todo: benchmark polynomial evaluation strategies
+    const double numer = POLY7(r,
+                               3.387132872796366608,
+                               133.14166789178437745,
+                               1971.5909503065514427,
+                               13731.693765509461125,
+                               45921.953931549871457,
+                               67265.770927008700853,
+                               33430.575583588128105,
+                               2509.0809287301226727);
+    const double denom = POLY7(r,
+                               1,
+                               42.313330701600911252,
+                               687.1870074920579083,
+                               5394.1960214247511077,
+                               21213.794301586595867,
+                               39307.89580009271061,
+                               28729.085735721942674,
+                               5226.495278852854561);
+    return -q * numer / denom;
   }
   const double lnp = p_is_log? p_or_lnp : log(p_or_lnp);
   double r = sqrt(-lnp);
   if (r <= 5) {
     r -= 1.6;
-    const double r2 = r * r;
-    const double numer_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            .0227238449892691845833,
-            r2,
-            1.27045825245236838258),
-          r2,
-          5.7694972214606914055),
-        r2,
-        1.42343711074968357734);
-    const double numer_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            7.7454501427834140764e-4,
-            r2,
-            .24178072517745061177),
-          r2,
-          3.64784832476320460504),
-        r2,
-        4.6303378461565452959)
-      * r;
-    const double denom_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            5.475938084995344946e-4,
-            r2,
-            .14810397642748007459),
-          r2,
-          1.6763848301838038494),
-        r2,
-        1.0);
-    const double denom_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            1.05075007164441684324e-9,
-            r2,
-            .0151986665636164571966),
-          r2,
-          .68976733498510000455),
-        r2,
-        2.05319162663775882187)
-      * r;
-    return -(numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+    const double numer = POLY7(r,
+                               1.42343711074968357734,
+                               4.6303378461565452959,
+                               5.7694972214606914055,
+                               3.64784832476320460504,
+                               1.27045825245236838258,
+                               .24178072517745061177,
+                               .0227238449892691845833,
+                               7.7454501427834140764e-4);
+    const double denom = POLY7(r,
+                               1,
+                               2.05319162663775882187,
+                               1.6763848301838038494,
+                               .68976733498510000455,
+                               .14810397642748007459,
+                               .0151986665636164571966,
+                               5.475938084995344946e-4,
+                               1.05075007164441684324e-9);
+    return -numer / denom;
   }
   if (r <= 27) {
     r -= 5;
-    const double r2 = r * r;
-    const double numer_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            2.71155556874348757815e-5,
-            r2,
-            .026532189526576123093),
-          r2,
-          1.7848265399172913358),
-        r2,
-        6.6579046435011037772);
-    const double numer_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            2.01033439929228813265e-7,
-            r2,
-            .0012426609473880784386),
-          r2,
-          .29656057182850489123),
-        r2,
-        5.4637849111641143699)
-      * r;
-    const double denom_even_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            1.4215117583164458887e-7,
-            r2,
-            7.868691311456132591e-4),
-          r2,
-          .13692988092273580531),
-        r2,
-        1.0);
-    const double denom_odd_terms =
-      prefer_fma(
-        prefer_fma(
-          prefer_fma(
-            2.04426310338993978564e-15,
-            r2,
-            1.8463183175100546818e-5),
-          r2,
-          .0148753612908506148525),
-        r2,
-        .59983220655588793769)
-      * r;
-    return -(numer_even_terms + numer_odd_terms) / (denom_even_terms + denom_odd_terms);
+    const double numer = POLY7(r,
+                               6.6579046435011037772,
+                               5.4637849111641143699,
+                               1.7848265399172913358,
+                               .29656057182850489123,
+                               .026532189526576123093,
+                               .0012426609473880784386,
+                               2.71155556874348757815e-5,
+                               2.01033439929228813265e-7);
+    const double denom = POLY7(r,
+                               1,
+                               .59983220655588793769,
+                               .13692988092273580531,
+                               .0148753612908506148525,
+                               7.868691311456132591e-4,
+                               1.8463183175100546818e-5,
+                               1.4215117583164458887e-7,
+                               2.04426310338993978564e-15);
+    return -numer / denom;
   }
   if (r >= 6.4e8) {
     return -r * kSqrt2;
   }
   const double s2 = -ldexp(lnp, 1);
-  double x2 = s2 - log((2 * kPi) * s2);
+  double x2 = s2 - log(k2Pi * s2);
   if (r < 36000) {
-    x2 = s2 - log((2 * kPi) * x2) - 2.0/(2.0+x2);
+    x2 = s2 - log(k2Pi * x2) - 2.0/(2.0+x2);
     if (r < 840) {
-      x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - 1/(4+x2))/(2+x2));
+      x2 = s2 - log(k2Pi * x2) + 2*log1p(-(1 - 1/(4+x2))/(2+x2));
       if (r < 109) {
-        x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - (1 - 5/(6+x2))/(4+x2))/(2+x2));
+        x2 = s2 - log(k2Pi * x2) + 2*log1p(-(1 - (1 - 5/(6+x2))/(4+x2))/(2+x2));
         if (r < 55) {
-          x2 = s2 - log((2 * kPi) * x2) + 2*log1p(-(1 - (1 - (5 - 9/(8+x2))/(6+x2))/(4+x2))/(2+x2));
+          x2 = s2 - log(k2Pi * x2) + 2*log1p(-(1 - (1 - (5 - 9/(8+x2))/(6+x2))/(4+x2))/(2+x2));
         }
       }
     }
@@ -699,11 +616,11 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
 //
 //   >>> import exact_tests, scipy, timeit
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.01796633400954306
+//   0.016760832993895747
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.0219896660419181
+//   0.017603792002773844
 //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-//   0.017003458982799202
+//   0.016770166999776848
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
 //   1.005605333019048
 //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
@@ -1569,16 +1486,13 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   }
   const double succ_odds_ratio = succ_odds_ratio_tdr.x[0];
   // todo: benchmark different thresholds
-  // const uint32_t use_bfrac = (obs_tot > 512) && (MINV(obs_succ + 1, obs_tot - obs_succ) >= 40);
-  double tail_sum = binom_ltail_lik_simple(succ, fail, succ_odds_ratio, midp);
-  /*
+  const uint32_t consider_bfrac = (obs_tot > 512);
   double tail_sum;
-  if (use_bfrac) {
+  if (consider_bfrac && (MINV(succ + 1, fail) >= 40)) {
     tail_sum = binom_tail_lik_bfrac(obs_succ, obs_tot, ddr_make_td(p_tdr), ddr_make_td(q_tdr), 0, midp);
   } else {
     tail_sum = binom_ltail_lik_simple(succ, fail, succ_odds_ratio, midp);
   }
-  */
   // In the common case, where we're close enough to the mode that float64
   // underflow/overflow isn't an issue, use the original algorithm: sum all
   // center relative-likelihoods, sum far-tail relative-likelihoods to
@@ -1592,14 +1506,15 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   // mode, we compute a lower bound on the number of non-overflowing inward
   // steps we can take, using the log of the first-inward-step multiplier
   // (subsequent steps have smaller multipliers).
-  succ = obs_succ;
-  fail = obs_tot - obs_succ;
   const double ln_mult = log(first_inward_mult);
   double overflow_steps_lower_bound = 0x7fffffff;
   // log(DBL_MAX / (2^31 - 1)) = 688.295...
   // probably want a different rule in use_bfrac case
   if (ln_mult > (688.295 / S_CAST(double, 0x7fffffff))) {
     overflow_steps_lower_bound = 688.295 / ln_mult;
+  }
+  if (consider_bfrac && (overflow_steps_lower_bound > 40)) {
+    overflow_steps_lower_bound = 40;
   }
   // possible for modal_succ to round up to just obs_tot
   const double obs_totd = obs_tot;
@@ -1638,15 +1553,14 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
       }
       center_sum += lik;
     }
-    // Continue down tail to floating-point precision limit.
-    while (1) {
+    if (fail > 0) {
       succ += 1;
       lik *= succ_odds_ratio * fail / succ;
       fail -= 1;
-      const double preadd = tail_sum;
-      tail_sum += lik;
-      if (tail_sum == preadd) {
-        break;
+      if (consider_bfrac && (MINV(fail + 1, succ) >= 40)) {
+        tail_sum += lik * binom_tail_lik_bfrac(S_CAST(int64_t, fail), obs_tot, ddr_make_td(q_tdr), ddr_make_td(p_tdr), 0, 0);
+      } else {
+        tail_sum += lik * binom_ltail_lik_simple(fail, succ, 1.0 / succ_odds_ratio, 0);
       }
     }
     const double pval = tail_sum / (tail_sum + center_sum);
@@ -1679,7 +1593,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
       ln_odds_ratio_tdr = tdr_make(ln_odds_ratio_ddr.x[0], ln_odds_ratio_ddr.x[1], DBL_MAX);
     }
   } else {
-    materialize_oddsratio_p_q_tdr(succ_flipped, &succ_odds_ratio_tdr, &p_tdr, &q_tdr);
+    materialize_oddsratio_p_q_tdr(succ_flipped, &p_tdr, &q_tdr, &succ_odds_ratio_tdr);
     ln_odds_ratio_tdr = tdr_log(succ_odds_ratio_tdr);
     starting_lnprobv_tdr =
       tdr_sub(tdr_muld(ln_odds_ratio_tdr, succ),
@@ -1750,8 +1664,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   // largest gap between adjacent log-likelihoods on this tail.  Set
   // |lnprobv_diff_min| >= this value.
   double lnprobv_diff_min = log(succ_odds_ratio / obs_totd) * (1 + kSmallEpsilon);
-  // if (use_bfrac && (lnprobv_diff_min > -53 * kLn2)) {
-  if (lnprobv_diff_min > -53 * kLn2) {
+  if ((!consider_bfrac) && (lnprobv_diff_min > -53 * kLn2)) {
     lnprobv_diff_min = -53 * kLn2;
   }
 
@@ -1812,7 +1725,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
     one_minus_scaled_eps -= 2 * k2m52;
   }
   if (lik < 2 - one_minus_scaled_eps) {
-    materialize_oddsratio_p_q_tdr(succ_flipped, &succ_odds_ratio_tdr, &p_tdr, &q_tdr);
+    materialize_oddsratio_p_q_tdr(succ_flipped, &p_tdr, &q_tdr, &succ_odds_ratio_tdr);
     const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_tdr, S_CAST(int64_t, succ), &starting_lnprobv_tdr, &ln_odds_ratio_tdr, &lik);
     if (cmp_result <= 0) {
       tail_sum += lik;
@@ -1825,15 +1738,15 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   lik = tailenter_lik;
   succ = tailenter_succ;
   fail = obs_totd - succ;
-  while (1) {
+  if (fail > 0) {
     succ += 1;
     lik *= succ_odds_ratio * fail / succ;
-    const double preadd = tail_sum;
-    tail_sum += lik;
-    if (tail_sum == preadd) {
-      break;
-    }
     fail -= 1;
+    if (consider_bfrac && (MINV(fail + 1, succ) >= 40)) {
+      tail_sum += lik * binom_tail_lik_bfrac(S_CAST(int64_t, fail), obs_tot, ddr_make_td(q_tdr), ddr_make_td(p_tdr), 0, 0);
+    } else {
+      tail_sum += lik * binom_ltail_lik_simple(fail, succ, 1.0 / succ_odds_ratio, 0);
+    }
   }
   return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
 }

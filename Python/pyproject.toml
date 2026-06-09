@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exact_tests"
-version = "0.5.1"
+version = "0.5.2"
 authors = [
   { name="Christopher Chang", email="chrchang@alumni.caltech.edu" },
 ]
