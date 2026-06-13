@@ -15,12 +15,16 @@ ext_modules = [
     Extension("exact_tests",
               sources = ["src/exact_tests/exact.pyx",
                          "src/include/binom.cc",
+                         "src/include/binom_detail.cc",
                          "src/include/fisher.cc",
+                         "src/include/hypergeom.cc",
+                         "src/include/hypergeom_detail.cc",
                          "src/include/plink2_base.cc",
                          "src/include/plink2_float.cc",
                          "src/include/plink2_hwe.cc",
                          "src/include/plink2_highprec.cc",
-                         "src/include/plink2_ln.cc"],
+                         "src/include/plink2_ln.cc",
+                         "src/include/special_func.cc"],
               language = "c++",
               extra_compile_args = ["-std=c++14", "-Wno-unused-function", "-Wno-cpp", "-DNO_CPP11_TYPE_ENFORCEMENT", "-ffp-contract=off"],
               extra_link_args = ["-std=c++14"]
@@ -32,7 +36,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.5.2",
+    version="0.6.0",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",

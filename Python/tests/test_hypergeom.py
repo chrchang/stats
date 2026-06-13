@@ -9,12 +9,13 @@ DBL_MIN = sys.float_info.min
 # These test cases were scraped from
 #   scipy/stats/tests/test_distributions.py
 # Entries are of the form (k, M, n, N, p_want, rtol)
+# rtol=1e-15 iff p_want from MPFR.
 scipy_hypergeom_pmf_cases = [
-    (2, 2500, 50, 500, 0.0010114963068932233, 1e-11),
-    (0, 2, 1, 0, 1.0, 1e-11),
+    (2, 2500, 50, 500, 0.0010114963068932233, 1e-15),
+    (0, 2, 1, 0, 1.0, 1e-15),
     # This corresponds to negative m21, which we don't support.
     # (1, 2, 1, 0, 0.0, 1e-11),
-    (0, 2, 0, 2, 1.0, 1e-11),
+    (0, 2, 0, 2, 1.0, 1e-15),
     ]
 
 # These test cases were scraped from
@@ -23,41 +24,41 @@ scipy_hypergeom_pmf_cases = [
 scipy_hypergeom_cdf_cases = [
     (3, 10, 4, 5, 0.9761904761904762, 1e-15),
     (107, 10000, 3000, 215, 0.9999999997226765, 1e-15),
-    (10, 10000, 3000, 215, 2.681682217692179e-21, 5e-11),
+    (10, 10000, 3000, 215, 2.681682217692179e-21, 1e-15),
     ]
 scipy_hypergeom_logcdf_cases = [
     # cdf value from R; scipy test only confirms this is in [0, 1]
-    (30, 13397950, 4363, 12390, -1.3299429823230965e-17, 1e-11),
-    (1, 1e7, 1e6, 5e4, -5273.3351516552739, 1e-11),
-    (40, 1600, 50, 300, -7.5651488792285293e-23, 1e-11),
-    (125, 1600, 250, 500, -4.2426884594741954e-12, 1e-11),
+    (30, 13397950, 4363, 12390, -1.3299429823231065e-17, 1e-15),
+    (1, 1e7, 1e6, 5e4, -5273.335151655274, 1e-15),
+    (40, 1600, 50, 300, -7.565148879228446e-23, 1e-15),
+    (125, 1600, 250, 500, -4.242688459474099e-12, 1e-15),
     ]
 scipy_hypergeom_sf_cases = [
     (25, 10000, 3000, 215, 0.9999999999052958, 1e-15),
-    (125, 10000, 3000, 215, 1.4416781705752128e-18, 5e-11),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 3e4, 0, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 3.8e4, 1.904153e-114, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 3.9e4, 2.752693e-66, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 4e4, 4.931217e-32, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 4.1e4, 8.265601e-11, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 4.2e4, 0.1237904, 5e-7),
-    (2e4, 9.9e4+1.1e5, 9.9e4, 5e4, 1, 5e-7),
+    (125, 10000, 3000, 215, 1.4416781705752128e-18, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3e4, 0, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3.8e4, 1.9041533799868723e-114, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 3.9e4, 2.7526929495552316e-66, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4e4, 4.931216734847038e-32, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4.1e4, 8.265600830279146e-11, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 4.2e4, 0.12379043343026488, 1e-15),
+    (2e4, 9.9e4+1.1e5, 9.9e4, 5e4, 1, 1e-15),
     # This corrresponds to negative m22.
     # (9, 1e5, 1e5, 10, 1, 1e-11),
-    (9, 1e6, 1e5, 10, 9.9959506789896877e-11, 1e-11),
-    (9, 1e7, 1e5, 10, 9.9955458497748593e-21, 1e-11),
-    (9, 1e8, 1e5, 10, 9.9955053678820622e-31, 1e-11),
-    (9, 1e9, 1e5, 10, 9.9955013197030621e-41, 1e-11),
-    (9, 1e10, 1e5, 10, 9.9955009148852711e-51, 1e-11),
-    (9, 1e11, 1e5, 10, 9.9955008744034664e-61, 1e-11),
-    (9, 1e12, 1e5, 10, 9.9955008703553125e-71, 1e-11),
-    (9, 1e13, 1e5, 10, 9.9955008699504913e-81, 1e-11),
-    (9, 1e14, 1e5, 10, 9.9955008699100105e-91, 1e-11),
-    (9, 1e15, 1e5, 10, 9.9955008699059437e-101, 1e-11),
+    (9, 1e6, 1e5, 10, 9.995950678989679e-11, 1e-15),
+    (9, 1e7, 1e5, 10, 9.99554584977487e-21, 1e-15),
+    (9, 1e8, 1e5, 10, 9.995505367882052e-31, 1e-15),
+    (9, 1e9, 1e5, 10, 9.995501319703058e-41, 1e-15),
+    (9, 1e10, 1e5, 10, 9.99550091488526e-51, 1e-15),
+    (9, 1e11, 1e5, 10, 9.995500874403482e-61, 1e-15),
+    (9, 1e12, 1e5, 10, 9.995500870355304e-71, 1e-15),
+    (9, 1e13, 1e5, 10, 9.995500869950486e-81, 1e-15),
+    (9, 1e14, 1e5, 10, 9.995500869910004e-91, 1e-15),
+    (9, 1e15, 1e5, 10, 9.995500869905956e-101, 1e-15),
     ]
 scipy_hypergeom_logsf_cases = [
-    (1e4, 1e7, 1e6, 5e4, -2239.771249920399, 1e-11),
-    (1, 1600, 600, 300, -2.5665672697340924e-68, 1e-11),
+    (1e4, 1e7, 1e6, 5e4, -2239.771249920399, 1e-15),
+    (1, 1600, 600, 300, -2.5665672697340586e-68, 1e-15),
     ]
 
 # These test cases were scraped from
@@ -119,7 +120,7 @@ def test_dhyper():
             assert 0.0 == test_case[4]
         else:
             assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
-    assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149371888e-08, rel=1e-8, abs=0)
+    assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149436094e-08, rel=1e-15, abs=0)
     assert exact_tests.dhyper(0, 0, 0, 0) == 1.0
     assert exact_tests.dhyper(2, 2, 2, 4) == 1.0
     # todo: test exception-throwing cases
@@ -139,7 +140,11 @@ def test_phyper():
         lnp_got = exact_tests.hypergeom.logsf(test_case[0], test_case[1], test_case[2], test_case[3])
         assert lnp_got == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     for approx in [False, True]:
-        assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=approx) == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+        tol = 1e-15
+        if approx:
+            # this can scale with sqrt(M).
+            tol = 1e-10
+        assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=approx) == pytest.approx(9.686381892010733e-05, rel=tol, abs=0)
         assert exact_tests.phyper(0, 0, 0, 0, approx=approx) == 1.0
         assert exact_tests.phyper(2, 2, 2, 4, approx=approx) == 1.0
         # todo: test exception-throwing cases
@@ -183,14 +188,14 @@ def test_fisher():
     # agree to that relative tolerance for small cases (such as the scipy cases
     # where no table sum > 3000).
     for test_case in scipy_fisher22_cases:
-        pval = exact_tests.fisher_test(test_case[0], alternative=test_case[1])
+        pval = exact_tests.fisher_exact(test_case[0], alternative=test_case[1])
         assert pval == pytest.approx(test_case[2], rel=1e-13, abs=DBL_MIN), str(test_case)
-    pval = exact_tests.fisher_test([[4, 0], [0, 4]], midp=True)
-    logp = exact_tests.fisher_test([[4, 0], [0, 4]], midp=True, logp=True)
+    pval = exact_tests.fisher_exact([[4, 0], [0, 4]], midp=True)
+    logp = exact_tests.fisher_exact([[4, 0], [0, 4]], midp=True, logp=True)
     assert pval == pytest.approx(1/70, rel=1e-13, abs=0), "midp"
     assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
     # R print(phyper(1e9, 4e9, 7.999e9, 3e9), digits=17)
     # (scipy.stats.hypergeom.cdf(1e9, 11.999e9, 3e9, 4e9) is substantially
     # less accurate.)
-    assert exact_tests.fisher_test([[1e9, 2e9], [3e9, 5.999e9]], alternative="less") == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
+    assert exact_tests.fisher_exact([[1e9, 2e9], [3e9, 5.999e9]], alternative="less") == pytest.approx(9.6863818919688989e-05, rel=1e-8, abs=0)
     # todo: test exception-throwing cases

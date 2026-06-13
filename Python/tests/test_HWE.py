@@ -20,8 +20,8 @@ r_HWE_cases = [
 
 def test_HWE():
     for test_case in r_HWE_cases:
-        pval = exact_tests.HWE_test(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
-        logp = exact_tests.HWE_test(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4], logp=True)
+        pval = exact_tests.HWE_exact(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4])
+        logp = exact_tests.HWE_exact(test_case[0], test_case[1], test_case[2], alternative=test_case[3], midp=test_case[4], logp=True)
         assert pval == pytest.approx(test_case[5], rel=1e-6, abs=0), str(test_case)
         assert math.exp(logp) == pytest.approx(pval, rel=1e-13, abs=0), str("logp")
     # todo: test exception-throwing cases

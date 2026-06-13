@@ -109,6 +109,8 @@ static const double k2m30 = 1.0 / (1 << 30);
 static const double k2m35 = 1.0 / (1LL << 35);
 static const double k2m44 = 1.0 / (1LL << 44);
 static const double k2m60 = 1.0 / (1LL << 60);
+// Square of this value underflows float64 (even without denormal flushing).
+static const double k2m537p5 = kSqrt2 / (k2p400 * k2p100 * (1LL << 38));
 
 static const double kBigEpsilon = k2m21;  // must be >= sqrt(kSmallEpsilon)
 static const double kEpsilon = k2m30;

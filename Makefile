@@ -2,12 +2,16 @@ CWARN = -Wall -Wextra -Wshadow -Wformat-security -Wstrict-aliasing -Wdouble-prom
 CXXWARN = ${CWARN} -Wold-style-cast
 
 ISRC = include/binom.cc \
+       include/binom_detail.cc \
        include/fisher.cc \
+       include/hypergeom.cc \
+       include/hypergeom_detail.cc \
        include/plink2_base.cc \
        include/plink2_float.cc \
        include/plink2_highprec.cc \
        include/plink2_hwe.cc \
-       include/plink2_ln.cc
+       include/plink2_ln.cc \
+       include/special_func.cc
 
 CCHDR = $(ISRC:.cc=.h)
 

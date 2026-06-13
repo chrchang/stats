@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -12,17 +12,11 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct dd_real_struct:
         double x[2]
 
-    int32_t ddr_is_zero(const dd_real_struct a) nogil
-
-    int32_t ddr_is(const dd_real_struct a, double b) nogil
-
     int32_t ddr_ltd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_leqd(const dd_real_struct a, double b) nogil
 
     td_real_struct tdr_make2(const double a, const double b) nogil
-
-    td_real_struct tdr_addd(const td_real_struct a, double b) nogil
 
     int32_t tdr_is_zero(const td_real_struct a) nogil
 
@@ -31,6 +25,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     int32_t tdr_ltd(const td_real_struct a, double b) nogil
 
     int32_t tdr_leqd(const td_real_struct a, double b) nogil
+
+    int32_t tdr_gtd(const td_real_struct a, double b) nogil
 
     int32_t tdr_gt(const td_real_struct a, const td_real_struct b) nogil
 
@@ -47,16 +43,18 @@ cdef extern from "../include/binom.h" namespace "plink2":
     double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, td_real_struct p_tdr, int32_t midp, uint32_t logp) nogil
 
 
-cdef extern from "../include/fisher.h" namespace "plink2":
+cdef extern from "../include/hypergeom.h" namespace "plink2":
     double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp)
-
-    double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) nogil
 
     double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp) nogil
 
     double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp) nogil
 
     int64_t QhyperHalfUlp(dd_real_struct p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) nogil
+
+
+cdef extern from "../include/fisher.h" namespace "plink2":
+    double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) nogil
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
@@ -123,31 +121,6 @@ cdef double zeroval(bint logp):
 cdef double oneval(bint logp):
     return 1.0 - logp
 
-cdef double half_or_oneval(bint midp, bint logp):
-    if midp:
-        if logp:
-            return -kLn2
-        return 0.5
-    return 1.0 - logp
-
-cdef double pbinom_p01(int64_t k, int64_t n, double p, bint complement, bint midp, bint logp):
-    if complement:
-        k = n + midp - k - 1
-        p = 1 - p
-    if k < 0:
-        return zeroval(logp)
-    if k > n:
-        return oneval(logp)
-    if p == 0:
-        if k == 0:
-            return half_or_oneval(midp, logp)
-        return oneval(logp)
-    # p == 1
-    if k == n:
-        return half_or_oneval(midp, logp)
-    return zeroval(logp)
-
-
 # Returns likelihood of exactly k successes.  Relative error should be <1 ULP.
 def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
     if n < 0 or n >= (1LL << 52):
@@ -176,10 +149,8 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct p_tdr = TdrMake(p)
-    if tdr_is_zero(p_tdr) or tdr_is(p_tdr, 1):
-        return pbinom_p01(k, n, p_tdr.x[0], complement, 0, logp)
-    if tdr_ltd(p_tdr, 0.5**960) or tdr_gt(p_tdr, tdr_make2(1, -(0.5**960))):
-        raise RuntimeError("p must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
+    if tdr_ltd(p_tdr, 0) or tdr_gtd(p_tdr, 1):
+        raise RuntimeError("p must be in [0, 1].")
     if approx:
         return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, 0, logp))
     return flush_if_denormal(Pbinom(k, n, p_tdr, complement, logp))
@@ -198,8 +169,8 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
 def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    cdef td_real_struct distp_tdr = TdrMake(succP)
-    if (tdr_ltd(distp_tdr, 0.5**960) and not tdr_is_zero(distp_tdr)) or (tdr_gt(distp_tdr, tdr_make2(1, -(0.5**960))) and not tdr_is(distp_tdr, 1)):
+    cdef td_real_struct succp_tdr = TdrMake(succP)
+    if (tdr_ltd(succp_tdr, 0.5**960) and not tdr_is_zero(succp_tdr)) or (tdr_gt(succp_tdr, tdr_make2(1, -(0.5**960))) and not tdr_is(succp_tdr, 1)):
         raise RuntimeError("succP must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
     # td_real is overkill when we're explicitly subtracting off 0.5 ULP... but
     # dd_real still provides meaningful value over plain float64 here.
@@ -210,7 +181,7 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
     else:
         if ddr_ltd(targetp_or_lnp_ddr, 0.0) or not ddr_leqd(targetp_or_lnp_ddr, 1.0):
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    return QbinomHalfUlp(targetp_or_lnp_ddr, n, distp_tdr, logTarget)
+    return QbinomHalfUlp(targetp_or_lnp_ddr, n, succp_tdr, logTarget)
 
 
 # scipy-style interface.  Straightforward to fill in the missing methods (e.g.
@@ -260,7 +231,7 @@ binom = _BinomDist()
 #
 # If p is a fractions.Fraction(), it's expanded to a "triple-double" with ~159
 # bit accuracy.  This enables very accurate handling of near-ties.
-def binom_test(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
+def binomtest(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
     if n >= (1LL << 52):
@@ -271,19 +242,8 @@ def binom_test(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", 
     if complement and (not midp):
         k -= 1
     cdef td_real_struct p_tdr = TdrMake(p)
-    if tdr_is_zero(p_tdr) or tdr_is(p_tdr, 1):
-        # Degenerate cases.
-        if alternative == "two-sided":
-            if (p_tdr.x[0] == 0 and k == 0) or (p_tdr.x[0] == 1 and k == n):
-                return half_or_oneval(midp, logp)
-            return zeroval(logp)
-        return pbinom_p01(k, n, p_tdr.x[0], complement, midp, logp)
-    if tdr_ltd(p_tdr, 0.5**960) or tdr_gt(p_tdr, tdr_make2(1, -(0.5**960))):
-        # TODO: these functions should allow p in (0, 2^{-960}).  Deferred
-        # since, as of this writing, there are much higher-priority problems to
-        # solve; but this is straightforward to get right, just need to be
-        # careful about underflow.
-        raise RuntimeError("p must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
+    if tdr_ltd(p_tdr, 0) or tdr_gtd(p_tdr, 1):
+        raise RuntimeError("p must be in [0, 1].")
     if alternative == "two-sided":
         return flush_if_denormal(BinomTwoSidedP(k, n, p_tdr, midp, logp))
     return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, midp, logp))
@@ -415,7 +375,7 @@ hypergeom = _HypergeomDist()
 #   "two-sided": default, must be this if table is larger than 2x2.
 #   "less": alt hypothesis is that table[0][0] is smaller than expected.
 #   "greater": alt hypothesis is that table[0][0] is larger than expected.
-def fisher_test(list table, str alternative="two-sided", bint midp=0, bint logp=0):
+def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp=0):
     cdef uint32_t nrow = len(table)
     if nrow < 2:
         raise RuntimeError("table has less than 2 rows.")
@@ -483,7 +443,7 @@ def fisher_test(list table, str alternative="two-sided", bint midp=0, bint logp=
 # effect.)  These one-sided tests are not implemented yet.
 #
 # Variants with k>2 alleles can be evaluated with k one-vs.-rest tests.
-def HWE_test(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", bint midp=0, bint logp=0):
+def HWE_exact(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", bint midp=0, bint logp=0):
     cdef int64_t total = <int64_t>(hom1) + <int64_t>(hets) + <int64_t>(hom2)
     if hom1 < 0 or hets < 0 or hom2 < 0 or total > 0x7fffffff:
         raise RuntimeError("hom1, hets, and hom2 must be nonnegative and sum to <2^31")

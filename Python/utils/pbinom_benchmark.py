@@ -8,11 +8,22 @@ import timeit
 This collects benchmark results for exact_tests.pbinom().
 """
 
-def pbinom_benchmark(p: float, z: float, min_pow2: int, max_pow2: int, num_trials_per_pow2: int, approx=False, logp=False, bench_scipy=False):
+def parse_range_string(input_str: str):
+    result = []
+    for part in input_str.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            result.extend(range(start, end + 1))
+        else:
+            result.append(int(part))
+    return result
+
+
+def pbinom_benchmark(p: float, z: float, pow2s: list[int], num_trials_per_pow2: int, logp=False):
     pq = p * (1.0 - p)
-    if bench_scipy:
-        warmup = scipy.stats.binom.cdf(1, 2, 0.5)
-    for pow2 in range(min_pow2, max_pow2 + 1):
+    warmup = scipy.stats.binom.cdf(1, 2, 0.5)
+    secs_scipy = 0.0
+    for pow2 in pow2s:
         n = 2**pow2 - 1
         stdev = math.sqrt(n * pq)
         k = round(n * p + z * stdev)
@@ -20,15 +31,13 @@ def pbinom_benchmark(p: float, z: float, min_pow2: int, max_pow2: int, num_trial
             k = 0
         elif k > n:
             k = n
-        secs = 0.0
-        if not bench_scipy:
-            secs = timeit.timeit(lambda: exact_tests.pbinom(k, n, p, approx=approx, logp=logp), number=num_trials_per_pow2)
+        secs_noapprox = timeit.timeit(lambda: exact_tests.pbinom(k, n, p, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
+        secs_approx = timeit.timeit(lambda: exact_tests.pbinom(k, n, p, approx=True, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
+        if not logp:
+            secs_scipy = timeit.timeit(lambda: scipy.stats.binom.cdf(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
         else:
-            if not logp:
-                secs = timeit.timeit(lambda: scipy.stats.binom.cdf(k, n, p), number=num_trials_per_pow2)
-            else:
-                secs = timeit.timeit(lambda: scipy.stats.binom.logcdf(k, n, p), number=num_trials_per_pow2)
-        print("n=(2^" + str(pow2) + ")-1: " + str(secs))
+            secs_scipy = timeit.timeit(lambda: scipy.stats.binom.logcdf(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
+        print("n=(2^" + str(pow2) + ")-1: base=" + str(secs_noapprox) + "  approx=" + str(secs_approx) + "  scipy=" + str(secs_scipy) + " sec/iter")
 
 
 
@@ -39,18 +48,12 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
                              help="Success-count z-score to test.")
-    optionalarg.add_argument('-f', '--from-pow2', type=int, default=9,
-                             help="Start testing at n=2**<this value> - 1.")
-    optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
-                             help="Continue testing up to n=2**(<this value>+1) - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=25,
+    optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
+                             help="Test n=2**<these values> - 1.")
+    optionalarg.add_argument('-n', '--number', type=int, default=3,
                              help="Number of trials per power-of-2 tier.")
-    optionalarg.add_argument('-a', '--approx', action="store_true",
-                             help="Test approx=True.")
     optionalarg.add_argument('-l', '--logp', action="store_true",
                              help="Test logp=True.")
-    optionalarg.add_argument('-s', '--scipy', action="store_true",
-                             help="Benchmark scipy.stats.binom instead of exact_tests.pbinom.")
     cmd_args = parser.parse_args()
     return cmd_args
 
@@ -59,12 +62,9 @@ def main():
     cmd_args = parse_commandline_args()
     pbinom_benchmark(cmd_args.succ_prob,
                      cmd_args.z_score,
-                     cmd_args.from_pow2,
-                     cmd_args.to_pow2,
+                     parse_range_string(cmd_args.exps),
                      cmd_args.number,
-                     cmd_args.approx,
-                     cmd_args.logp,
-                     cmd_args.scipy)
+                     cmd_args.logp)
 
 
 if __name__ == '__main__':

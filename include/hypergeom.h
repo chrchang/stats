@@ -1,5 +1,5 @@
-#ifndef __FISHER_H__
-#define __FISHER_H__
+#ifndef __HYPERGEOM_H__
+#define __HYPERGEOM_H__
 
 // Fisher's Exact Test library, copyright (C) 2013-2026 Christopher Chang.
 //
@@ -16,7 +16,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "hypergeom_detail.h"
 #include "plink2_base.h"
+#include "plink2_highprec.h"
 
 // The main ideas behind these Fisher's Exact Test and hypergeometric-function
 // implementations are:
@@ -49,9 +51,28 @@
 namespace plink2 {
 #endif
 
-double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp);
+HEADER_INLINE double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp) {
+  const dd_real ln_prob_ddr = hypergeom_ln_prob_internal(m11, m12, m21, m22);
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
+}
 
-double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp);
+double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp);
+
+double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t logp);
+
+int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp);
+
+HEADER_INLINE int64_t QhyperHalfUlp(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_t logp) {
+  const double dxx = fabs(p_or_lnp_ddr.x[0]);
+  if (dxx > DBL_MIN) {
+    const double half_ulp = 0.5 * (dxx - prev_float64(dxx));
+    p_or_lnp_ddr = ddr_subd(p_or_lnp_ddr, half_ulp);
+  }
+  return Qhyper(p_or_lnp_ddr, ac, bd, ab, logp);
+}
 
 // Probable todos:
 // - Function implementing 2xk for k>2, recursion can just follow how
@@ -67,4 +88,4 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
 }
 #endif
 
-#endif  // __FISHER_H__
+#endif  // __HYPERGEOM_H__

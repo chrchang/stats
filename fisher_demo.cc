@@ -1,4 +1,5 @@
 #include "include/fisher.h"
+#include "include/hypergeom.h"
 #include "include/plink2_base.h"
 #include "include/plink2_ln.h"
 

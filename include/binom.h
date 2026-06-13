@@ -63,8 +63,9 @@ double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint
 int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target);
 
 HEADER_INLINE int64_t QbinomHalfUlp(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target) {
-  if (!ddr_is_zero(targetp_or_lnp_ddr)) {
-    const double half_ulp = 0.5 * fabs(targetp_or_lnp_ddr.x[0] - prev_float64(targetp_or_lnp_ddr.x[0]));
+  const double dxx = fabs(targetp_or_lnp_ddr.x[0]);
+  if (dxx > DBL_MIN) {
+    const double half_ulp = 0.5 * (dxx - prev_float64(dxx));
     targetp_or_lnp_ddr = ddr_subd(targetp_or_lnp_ddr, half_ulp);
   }
   return Qbinom(targetp_or_lnp_ddr, n, succp_tdr, log_target);

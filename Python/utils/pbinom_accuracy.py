@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import exact_tests
-import gmpy2
+import mpfr_impls
 import math
 import random
 import scipy
@@ -12,74 +12,20 @@ scipy.stats.binom.cdf()'s accuracy against a simple MPFR-based implementation
 (slow!).
 
 "--bits 0" mode checks exact_tests.pbinom(approx=True) and
-scipy.statas.binom.{,log}cdf(), treating exact_tests.pbinom(approx=False) as
+scipy.stats.binom.{,log}cdf(), treating exact_tests.pbinom(approx=False) as
 ground truth.
 """
 
-def pbinom_mpfr(k: int, n: int, p: float, bits: int, logp: bool):
-    # (Doesn't use continued fraction, since much of the point of this function
-    # is to validate our continued fraction implementation.)
-    #
-    # 1. If we're to the right of the mode, invert.  (Ok if the decision is
-    #    imprecise; but 1-p must be represented precisely.)
-    # Then, with high precision:
-    # 2. Compute logpmf(k).
-    # 3. Sum relative likelihoods for k, k-1, k-2, ... until configured
-    #    precision limit.
-    # 4. If we didn't invert, return exp(logpmf(k)) * lik_sum if logp=False, or
-    #    logpmf(k) + log(lik_sum) if logp=True.
-    #    If we did invert, return 1 - (exp(logpmf(k)) * lik_sum) if logp=False,
-    #    or log1p(-exp(logpmf(k)) * lik_sum) if logp=True.
-    if k == n:
-        # Special-cased so that inversion can't yield k=-1.
-        if logp:
-            return 0.0
-        return 1.0
 
-    gmpy2.get_context().precision = bits
-
-    p = gmpy2.mpfr(p)
-    # must not confuse this with logp parameter...
-    lnp = gmpy2.log(p)
-    q = 1 - p
-    lnq = gmpy2.log1p(-p)
-
-    invert = False
-    if k > n * p:
-        invert = True
-        k = n - k - 1
-        p, q = q, p
-        lnp, lnq = lnq, lnp
-
-    nmk = n - k
-    qdp = q / p
-    lnpmf = lnp * k + lnq * nmk + gmpy2.lngamma(n + 1) - gmpy2.lngamma(k + 1) - gmpy2.lngamma(nmk + 1)
-    lik = gmpy2.mpfr(1.0)
-    lik_sum = lik
-    while True:
-        nmk += 1
-        lik *= (qdp * k) / nmk
-        k -= 1
-        preadd = lik_sum
-        lik_sum += lik
-        if preadd == lik_sum:
-            break
-
-    if logp and not invert:
-        return float(lnpmf + gmpy2.log(lik_sum))
-
-    # For n in [0, 2^52), lik_sum is in [1, 2^52].
-    # Add 52 to lnpmf and divide lik_sum by 2^52 so that, for small lnpmf, we
-    # don't risk underflow at the exp(lnpmf) step when the final result
-    # doesn't underflow.
-    lnpmf_shifted = lnpmf + 52 * gmpy2.const_log2()
-    lik_sum_shifted = gmpy2.mul_2exp(lik_sum, -52)
-    product = gmpy2.exp(lnpmf_shifted) * lik_sum_shifted
-    if not invert:
-        return float(product)
-    if not logp:
-        return float(1 - product)
-    return float(gmpy2.log1p(-product))
+def parse_range_string(input_str: str):
+    result = []
+    for part in input_str.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            result.extend(range(start, end + 1))
+        else:
+            result.append(int(part))
+    return result
 
 
 def flush_if_denormal(x: float):
@@ -100,19 +46,17 @@ def compute_relerr(got: float, want: float):
     return (got - want) / want
 
 
-def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_trials_per_pow2: int, bits: int, logp: bool):
+def pbinom_accuracy_test(p: float, z: float, pow2s: list[int], num_trials_per_pow2: int, bits: int, logp: bool):
     n = 0
     pq = p * (1.0 - p)
     want = 0.0
-    got = 0.0
+    got_scipy = 0.0
     ns = []
-    test_str = "RMS="
-    if bits == 0:
-        test_str = "approxRMS="
-    for pow2 in range(min_pow2, max_pow2 + 1):
+    for pow2 in pow2s:
         min_n = 2 ** pow2
         n_limit = min_n * 2
-        relerr_ssq = 0.0
+        relerr_noapprox_ssq = 0.0
+        relerr_approx_ssq = 0.0
         relerr_scipy_ssq = 0.0
         if num_trials_per_pow2 >= n_limit - min_n:
             ns = range(min_n, n_limit)
@@ -125,26 +69,30 @@ def pbinom_accuracy_test(p: float, z: float, min_pow2: int, max_pow2: int, num_t
                 k = 0
             elif k > n:
                 k = n
-            if bits == 0:
-                want = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
-                got = flush_if_denormal(exact_tests.pbinom(k, n, p, approx=True, logp=logp))
-            else:
-                want = flush_if_denormal(pbinom_mpfr(k, n, p, bits=bits, logp=logp))
-                got = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
-                if want != got:
-                    print("  difference: k=" + str(k) + ", n=" + str(n) + ", want=" + str(want) + ", got=" + str(got))
-            relerr = compute_relerr(got, want)
-            relerr_ssq += relerr * relerr
+            got_noapprox = flush_if_denormal(exact_tests.pbinom(k, n, p, logp=logp))
+            got_approx = flush_if_denormal(exact_tests.pbinom(k, n, p, approx=True, logp=logp))
             if logp:
-                got = scipy.stats.binom.logcdf(k, n, p)
+                got_scipy = scipy.stats.binom.logcdf(k, n, p)
             else:
-                got = scipy.stats.binom.cdf(k, n, p)
-            relerr = compute_relerr(got, want)
+                got_scipy = scipy.stats.binom.cdf(k, n, p)
+            if bits == 0:
+                want = got_noapprox
+            else:
+                want = flush_if_denormal(mpfr_impls.pbinom(k, n, p, bits=bits, return_log=logp))
+                relerr = compute_relerr(got_noapprox, want)
+                relerr_noapprox_ssq += relerr * relerr
+            relerr = compute_relerr(got_approx, want)
+            relerr_approx_ssq += relerr * relerr
+            relerr = compute_relerr(got_scipy, want)
             relerr_scipy_ssq += relerr * relerr
         num_trials = len(ns)
-        test_rms = math.sqrt(relerr_ssq / num_trials)
+        approx_rms = math.sqrt(relerr_approx_ssq / num_trials)
         scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
-        print("n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): " + test_str + str(test_rms) + "  scipyRMS=" + str(scipy_rms))
+        if bits == 0:
+            print("n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): approxRMS=" + str(approx_rms) + "  scipyRMS=" + str(scipy_rms))
+        else:
+            noapprox_rms = math.sqrt(relerr_noapprox_ssq / num_trials)
+            print("n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): RMS=" + str(noapprox_rms) + "  approxRMS=" + str(approx_rms) + "  scipyRMS=" + str(scipy_rms))
 
 
 def parse_commandline_args():
@@ -154,14 +102,12 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
                              help="Success-count z-score to test.")
-    optionalarg.add_argument('-f', '--from-pow2', type=int, default=0,
-                             help="Start testing at n=2**<this value>.")
-    optionalarg.add_argument('-t', '--to-pow2', type=int, default=33,
-                             help="Continue testing up to n=2**(<this value>+1) - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=25,
+    optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
+                             help="Test n~=2**<these values>.")
+    optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
     optionalarg.add_argument('-b', '--bits', type=int, default=256,
-                             help="MPFR precision; or if 0, test approx=True and scipy against approx=False.")
+                             help="MPFR precision; or if 0, treat approx=False as ground truth.")
     optionalarg.add_argument('-l', '--logp', action="store_true",
                              help="Test logp=True.")
     optionalarg.add_argument('-s', '--seed', type=int, default=1,
@@ -175,8 +121,7 @@ def main():
     random.seed(cmd_args.seed)
     pbinom_accuracy_test(cmd_args.succ_prob,
                          cmd_args.z_score,
-                         cmd_args.from_pow2,
-                         cmd_args.to_pow2,
+                         parse_range_string(cmd_args.exps),
                          cmd_args.number,
                          cmd_args.bits,
                          cmd_args.logp)
