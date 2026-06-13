@@ -423,14 +423,12 @@ void materialize_oddsratio_p_q_tdr(uint32_t succ_flipped, td_real* p_tdr_ptr, td
   // evaluated, or both succ_odds_ratio_tdr and one of {p_tdr, q_tdr} needs to
   // be.
   if (succ_odds_ratio_tdr_ptr->x[2] == DBL_MAX) {
-    td_real* numer_tdr_ptr = p_tdr_ptr;
-    td_real* denom_tdr_ptr = q_tdr_ptr;
-    if (succ_flipped) {
-      numer_tdr_ptr = q_tdr_ptr;
-      denom_tdr_ptr = p_tdr_ptr;
+    if (!succ_flipped) {
+      *q_tdr_ptr = tdr_addd(tdr_negate(*p_tdr_ptr), 1.0);
+    } else {
+      *p_tdr_ptr = tdr_addd(tdr_negate(*q_tdr_ptr), 1.0);
     }
-    *denom_tdr_ptr = tdr_addd(tdr_negate(*numer_tdr_ptr), 1.0);
-    *succ_odds_ratio_tdr_ptr = tdr_accurate_div(*numer_tdr_ptr, *denom_tdr_ptr);
+    *succ_odds_ratio_tdr_ptr = tdr_accurate_div(*p_tdr_ptr, *q_tdr_ptr);
   }
 }
 

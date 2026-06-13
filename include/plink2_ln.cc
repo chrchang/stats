@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "plink2_float.h"
+#include "plink2_highprec.h"
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -34,7 +35,7 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
     cur_char_code = ctou32(*(++str_iter));
   }
   uint32_t cur_digit = cur_char_code - 48;
-  intptr_t e10 = 0;
+  int64_t e10 = 0;
   const char* dot_ptr;
   int64_t digits;
 #ifdef __LP64__
@@ -107,9 +108,12 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
       cur_char_code = ctou32(*(++str_iter));
     }
     cur_digit = cur_char_code - 48;
-    int32_t cur_exp = 0;
+    int64_t cur_exp = 0;
     while (cur_digit < 10) {
-      if (cur_exp >= 214748364) {
+      // 2^48 / 10
+      // beyond ~this point, even first digit of mantissa cannot be expected to
+      // be accurate to 10%; log-probability should be represented with dd_real
+      if (cur_exp >= 281474976710656LL) {
         // may as well guard against exponent overflow
         if (!exp_is_negative) {
           return nullptr;
@@ -223,9 +227,9 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
       cur_char_code = ctou32(*(++str_iter));
     }
     cur_digit = cur_char_code - 48;
-    int32_t cur_exp = 0;
+    int64_t cur_exp = 0;
     while (cur_digit < 10) {
-      if (cur_exp >= 107374182) {
+      if (cur_exp >= 281474976710656LL) {
         // may as well guard against exponent overflow
         if (!exp_is_negative) {
           return nullptr;
@@ -252,8 +256,8 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
   double ln_val = log(S_CAST(double, digits));
   if (e10) {
     // I don't expect log() to be bit-identical between FMA and non-FMA, so
-    // this doesn't make floating-point variation meaningfully worse...
-    ln_val += e10 * kLn10;
+    // this shouldn't make floating-point variation meaningfully worse...
+    ln_val = prefer_fma(e10, kLn10, ln_val);
   }
   *ln_ptr = ln_val;
   return S_CAST(CXXCONST_CP, str_iter);
@@ -473,20 +477,20 @@ char* lntoa_g(double ln_val, char* start) {
       }
       return uitoa_trunc6(BankerRoundD(dxx * 1000000, kBankerRound8), start);
     }
-    // if exponent is in danger of overflowing int32, just print '0'
-    if (ln_val < 0x7ffffffb * (-kLn10)) {
+    // if exponent < ~-2^48, just print '0'
+    if (ln_val < S_CAST(double, 1LL << 48) * (-kLn10)) {
       *start++ = '0';
       return start;
     }
   } else {
-    // if exponent is in danger of overflowing int32, just print 'inf'
-    if (ln_val > 0x7ffffffb * kLn10) {
+    // if exponent > ~2^48, just print 'inf'
+    if (ln_val > S_CAST(double, 1LL << 48) * kLn10) {
       memcpy(start, "inf", 4);
       return &(start[3]);
     }
   }
-  int32_t xp10 = S_CAST(int32_t, prefer_fma(ln_val, kRecipLn10, 5.000001349509205e-7 * kRecipLn10));
-  double mantissa = exp(prefer_fma(xp10, -kLn10, ln_val));
+  int64_t xp10 = S_CAST(int64_t, ddr_muld(_ddr_recip_ln10, ln_val + 5.000001349509205e-7).x[0]);
+  double mantissa = exp(ddr_addd(ddr_mul(ddr_makei(-xp10), _ddr_ln10), ln_val).x[0]);
   // mantissa will usually be in [.9999995, 9.999995], but |ln_val| can be
   // larger than 2^32, and floating point errors in either direction are
   // definitely possible (<20 bits of precision).
@@ -506,13 +510,13 @@ char* lntoa_g(double ln_val, char* start) {
     if (xp10 > -10) {
       *start++ = '0';
     }
-    return u32toa(-xp10, start);
+    return i64toa(-xp10, start);
   }
   start = memcpya_k2(start, "e+");
   if (xp10 < 10) {
     *start++ = '0';
   }
-  return u32toa(xp10, start);
+  return i64toa(xp10, start);
 }
 
 #ifdef __cplusplus

@@ -69,6 +69,8 @@ extern const dd_real _ddr_e;
 extern const dd_real _ddr_log2;
 extern const dd_real _ddr_log05;
 extern const dd_real _ddr_64log2;
+extern const dd_real _ddr_ln10;
+extern const dd_real _ddr_recip_ln10;
 
 CONSTI32(_tdr_n_ln_fact, 256);
 extern const td_real _tdr_ln_fact[_tdr_n_ln_fact];

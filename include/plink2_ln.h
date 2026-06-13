@@ -20,6 +20,10 @@
 
 // Just the Scan{adv,tok}Ln() and lntoa_g() functions, and what they depend on,
 // from plink2_string.
+//
+// Update (13 Jun 2026): these functions have diverged slightly from their
+// plink2 counterparts, to handle greater range.  (plink2 doesn't care about
+// integer arguments >= 2^31, this library tries to support up to 2^52 - 1.)
 
 #include "plink2_base.h"
 
