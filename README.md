@@ -23,6 +23,8 @@ Test program usage examples:
 
     $ ./binom_demo 2900 5000 0.52
     Two-sided p-value: 1.86026e-17
+    $ ./binom_demo 29000000000 50000000000 0.52
+    Two-sided p-value: 1.25064e-157483966
     $ ./fisher_demo 20 30 40 50 60 70
     P-value: 0.780903
     $ ./hwe_demo 16 3 81

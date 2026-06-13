@@ -105,13 +105,15 @@ int main(int argc, char** argv) {
       argc--;
     }
     if ((argc == 4) || (argc == 5)) {
-      uint32_t succ;
-      uint32_t obs;
-      if (unlikely(ScanUintDefcap(argv[1], &succ))) {
+      const char* succ_str_ptr = argv[1];
+      const char* obs_str_ptr = argv[2];
+      uint64_t succ;
+      uint64_t obs;
+      if (unlikely(ScanmovU64(&succ_str_ptr, &succ) || (*succ_str_ptr != '\0'))) {
         fprintf(stderr, "Error: Invalid success count '%s'.\n", argv[1]);
         goto main_ret_INVALID_CMDLINE;
       }
-      if (unlikely(ScanPosintDefcap(argv[2], &obs))) {
+      if (unlikely(ScanmovU64(&obs_str_ptr, &obs) || (*obs_str_ptr != '\0') || (obs >= (1LLU << 52)))) {
         fprintf(stderr, "Error: Invalid observation count '%s'.\n", argv[2]);
         goto main_ret_INVALID_CMDLINE;
       }
@@ -191,9 +193,9 @@ int main(int argc, char** argv) {
         }
         char name[kMaxMediumLine];
         char ratestr[kMaxMediumLine];
-        int32_t succ;
-        int32_t obs;
-        if (unlikely(sscanf(bufptr, "%s %d %d %s", name, &succ, &obs, ratestr) < 4)) {
+        int64_t succ;
+        int64_t obs;
+        if (unlikely(sscanf(bufptr, "%s %" PRId64 " %" PRId64 " %s", name, &succ, &obs, ratestr) < 4)) {
           fprintf(stderr, "Error: Line %" PRIuPTR " of %s has fewer fields than expected.\n", line_idx, argv[1]);
           goto main_ret_MALFORMED_INPUT;
         }
