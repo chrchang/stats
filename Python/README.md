@@ -26,6 +26,14 @@ benchmark scripts under utils/ .  E.g.
     n=(2^5)-1: base=6.91666e-06  approx=5.5534e-07  scipy=3.8514e-05 sec/iter
     n=(2^20)-1: base=0.000119333  approx=3.62502e-06  scipy=3.55417e-05 sec/iter
     n=(2^35)-1: base=0.00115099  approx=7.9375e-05  scipy=9.75833e-05 sec/iter
+    $ utils/binomtest_accuracy.py -p 0.7 --z-score 0.5
+    n in [2^5, 2^6): errRMS=1.19694e-16  scipyErrRMS=1.53967e-16
+    n in [2^20, 2^21): errRMS=6.4373e-16  scipyErrRMS=1.26149e-11
+    n in [2^35, 2^36): errRMS=1.48472e-15  scipyErrRMS=3.29018e-06
+    $ utils/binomtest_benchmark.py -p 0.7 --z-score 0.5
+    n=(2^5)-1: base=4.76401e-06  scipy=0.000209583 sec/iter
+    n=(2^20)-1: base=6.90267e-06  scipy=0.000506403 sec/iter
+    n=(2^35)-1: base=1.8389e-05  scipy=0.000786333 sec/iter
     $ utils/phyper_accuracy.py
     n in [2^5, 2^6): errRMS=0  approxErrRMS=1.27832e-16  scipyErrRMS=3.26681e-16
     n in [2^20, 2^21): errRMS=0  approxErrRMS=7.5947e-16  scipyErrRMS=2.76054e-10
