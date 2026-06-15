@@ -248,7 +248,7 @@ def test_binomtest():
     # huge-magnitude log
     assert exact_tests.binomtest(0, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2), rel=1e-13, abs=0)
     assert exact_tests.binomtest(1, 999999999, logp=True) == pytest.approx(-999999998 * math.log(2) + math.log(1000000000), rel=1e-13, abs=0)
-    assert exact_tests.binomtest(2900000000000, 5000000000000, 0.52, logp=True) == pytest.approx(-36262022199.691765, rel=1e-13, abs=0)
+    assert exact_tests.binomtest(2.9e12, 5e12, 0.52, logp=True) == pytest.approx(-36262022199.691765, rel=1e-13, abs=0)
     # tiny-magnitude log, unimportant case but may as well capture that we get
     # it right
     assert exact_tests.binomtest(5548, 9999, 0.37, alternative="less", logp=True) == pytest.approx(-8.201532972018594e-308, rel=1e-13, abs=0)

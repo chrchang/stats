@@ -93,15 +93,15 @@ def phyper_accuracy_test(ab: float, ac: float, z: float, pow2s: list[int], num_t
                 relerr = compute_relerr(got, want)
                 relerr_scipy_ssq += relerr * relerr
         num_trials = len(ns)
-        print_str = "n in [2^" + str(pow2) + ", 2^" + str(pow2+1) + "): "
+        print_str = f"n in [2^{pow2}, 2^{pow2+1}): "
         if bits > 0:
             noapprox_rms = math.sqrt(relerr_noapprox_ssq / num_trials)
-            print_str += "RMS=" + str(noapprox_rms) + "  "
+            print_str += f"errRMS={noapprox_rms:.6g}  "
         approx_rms = math.sqrt(relerr_approx_ssq / num_trials)
-        print_str += "approxRMS=" + str(approx_rms)
+        print_str += f"approxErrRMS={approx_rms:.6g}"
         if not omit_scipy:
             scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
-            print_str += "  scipyRMS=" + str(scipy_rms)
+            print_str += f"  scipyErrRMS={scipy_rms:.6g}"
         print(print_str)
 
 

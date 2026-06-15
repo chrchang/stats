@@ -39,9 +39,9 @@ def phyper_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trial
                 secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.cdf(k, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
             else:
                 secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.logcdf(k, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
-        print_str = "n=(2^" + str(pow2) + ")-1: base=" + str(secs_noapprox) + "  approx=" + str(secs_approx)
+        print_str = f"n=(2^{pow2})-1: base={secs_noapprox:.6g}  approx={secs_approx:.6g}"
         if not omit_scipy:
-            print_str += "  scipy=" + str(secs_scipy)
+            print_str += f"  scipy={secs_scipy:.6g}"
         print(print_str + " sec/iter")
 
 

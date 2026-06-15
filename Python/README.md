@@ -11,31 +11,31 @@ more efficient, than their scipy counterparts: see the MPFR-comparison and
 benchmark scripts under utils/ .  E.g.
 
     $ utils/pbinom_accuracy.py
-    n in [2^5, 2^6): RMS=0.0  approxRMS=7.306071560616266e-17  scipyRMS=0.0
-    n in [2^20, 2^21): RMS=0.0  approxRMS=1.2526064965951066e-15  scipyRMS=2.1803173153679657e-15
-    n in [2^35, 2^36): RMS=0.0  approxRMS=6.765221412952766e-15  scipyRMS=1.151310810012349e-14
+    n in [2^5, 2^6): errRMS=0  approxErrRMS=7.30607e-17  scipyErrRMS=0
+    n in [2^20, 2^21): errRMS=0  approxErrRMS=1.25261e-15  scipyErrRMS=2.18032e-15
+    n in [2^35, 2^36): errRMS=0  approxErrRMS=6.76522e-15  scipyErrRMS=1.15131e-14
     $ utils/pbinom_accuracy.py --z-score -2
-    n in [2^5, 2^6): RMS=6.50688277690206e-17  approxRMS=2.4782896885670045e-16  scipyRMS=1.961761908748987e-16
-    n in [2^20, 2^21): RMS=0.0  approxRMS=5.081502940565382e-16  scipyRMS=1.0124311233166742e-13
-    n in [2^35, 2^36): RMS=0.0  approxRMS=6.870911531925403e-16  scipyRMS=1.6632421178076063e-11
+    n in [2^5, 2^6): errRMS=6.50688e-17  approxErrRMS=2.47829e-16  scipyErrRMS=1.96176e-16
+    n in [2^20, 2^21): errRMS=0  approxErrRMS=5.0815e-16  scipyErrRMS=1.01243e-13
+    n in [2^35, 2^36): errRMS=0  approxErrRMS=6.87091e-16  scipyErrRMS=1.66324e-11
     $ utils/pbinom_accuracy.py -p 0.1
-    n in [2^5, 2^6): RMS=0.0  approxRMS=1.0628000483584193e-16  scipyRMS=4.2242773368500245e-16
-    n in [2^20, 2^21): RMS=0.0  approxRMS=1.6240941533512943e-15  scipyRMS=1.2335258925049512e-11
-    n in [2^35, 2^36): RMS=0.0  approxRMS=5.482663890316387e-15  scipyRMS=3.466853038093633e-07
+    n in [2^5, 2^6): errRMS=0  approxErrRMS=1.0628e-16  scipyErrRMS=4.22428e-16
+    n in [2^20, 2^21): errRMS=0  approxErrRMS=1.62409e-15  scipyErrRMS=1.23353e-11
+    n in [2^35, 2^36): errRMS=0  approxErrRMS=5.48266e-15  scipyErrRMS=3.46685e-07
     $ utils/pbinom_benchmark.py
-    n=(2^5)-1: base=9.99998883344233e-07  approx=2.582994056865573e-07  scipy=3.0166699434630573e-05 sec/iter
-    n=(2^20)-1: base=4.6941702021285894e-05  approx=3.274998744018376e-06  scipy=2.860420208889991e-05 sec/iter
-    n=(2^35)-1: base=0.0011365917016519234  approx=7.932920125313103e-05  scipy=9.544169879518449e-05 sec/iter
+    n=(2^5)-1: base=6.91666e-06  approx=5.5534e-07  scipy=3.8514e-05 sec/iter
+    n=(2^20)-1: base=0.000119333  approx=3.62502e-06  scipy=3.55417e-05 sec/iter
+    n=(2^35)-1: base=0.00115099  approx=7.9375e-05  scipy=9.75833e-05 sec/iter
     $ utils/phyper_accuracy.py
-    n in [2^5, 2^6): RMS=0.0  approxRMS=1.2783240627107975e-16  scipyRMS=3.2668147214494056e-16
-    n in [2^20, 2^21): RMS=0.0  approxRMS=7.594696303752788e-16  scipyRMS=2.7605400523075697e-10
-    n in [2^35, 2^36): RMS=0.0  approxRMS=1.639999166953556e-14  scipyRMS=1.2741882006508117e-05
+    n in [2^5, 2^6): errRMS=0  approxErrRMS=1.27832e-16  scipyErrRMS=3.26681e-16
+    n in [2^20, 2^21): errRMS=0  approxErrRMS=7.5947e-16  scipyErrRMS=2.76054e-10
+    n in [2^35, 2^36): errRMS=0  approxErrRMS=1.64e-14  scipyErrRMS=1.27419e-05
     $ utils/phyper_benchmark.py
-    n=(2^5)-1: base=2.847324746350447e-06  approx=4.306687818219264e-07  scipy=4.3361001492788397e-05 sec/iter
-    n=(2^20)-1: base=7.218066214894255e-05  approx=5.430668049181501e-06  scipy=0.0004969029978383332 sec/iter
-    n=(2^35)-1: base=0.014636972337029874  approx=0.0008547363298324248  scipy=14.766715555665238 sec/iter
+    n=(2^5)-1: base=6.63901e-06  approx=4.72336e-07  scipy=4.50973e-05 sec/iter
+    n=(2^20)-1: base=6.7625e-05  approx=5.44434e-06  scipy=0.000506611 sec/iter
+    n=(2^35)-1: base=0.0146301  approx=0.000858139  scipy=14.8541 sec/iter
 
-The primary building block is a high-precision log-factorial function utilizing
+The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).
 
 ### Build instructions
