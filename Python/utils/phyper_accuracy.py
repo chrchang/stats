@@ -49,9 +49,6 @@ def compute_relerr(got: float, want: float):
 def phyper_accuracy_test(ab: float, ac: float, z: float, pow2s: list[int], num_trials_per_pow2: int, bits: int, logp: bool, omit_scipy: bool):
     want = 0.0
     got_scipy = 0.0
-    relerr_noapprox_ssq = 0.0
-    relerr_approx_ssq = 0.0
-    relerr_scipy_ssq = 0.0
     ns = []
     for pow2 in pow2s:
         min_n = 2 ** pow2
@@ -60,25 +57,34 @@ def phyper_accuracy_test(ab: float, ac: float, z: float, pow2s: list[int], num_t
             ns = range(min_n, n_limit)
         else:
             ns = random.sample(range(min_n, n_limit), k=num_trials_per_pow2)
+        relerr_noapprox_ssq = 0.0
+        relerr_approx_ssq = 0.0
+        relerr_scipy_ssq = 0.0
         for n in ns:
             cur_ab = round(ab * n)
             cur_ac = round(ac * n)
+            d_minus_a = n - cur_ab - cur_ac
+            min_a = max(0, -d_minus_a)
             stdev = 0
             if n > 1:
                 variance = cur_ab * cur_ac * (n - cur_ab) * (n - cur_ac) / (n * n * (n - 1))
                 stdev = math.sqrt(variance)
-            k = round(cur_ab * cur_ac / n)
-            got_noapprox = flush_if_denormal(exact_tests.phyper(k, cur_ac, n - cur_ac, cur_ab, logp=logp))
-            got_approx = flush_if_denormal(exact_tests.phyper(k, cur_ac, n - cur_ac, cur_ab, approx=True, logp=logp))
+            a = round((cur_ab * cur_ac / n) + z * stdev)
+            if a < min_a:
+                a = min_a
+            elif a > min(cur_ab, cur_ac):
+                a = min(cur_ab, cur_ac)
+            got_noapprox = flush_if_denormal(exact_tests.phyper(a, cur_ac, n - cur_ac, cur_ab, logp=logp))
+            got_approx = flush_if_denormal(exact_tests.phyper(a, cur_ac, n - cur_ac, cur_ab, approx=True, logp=logp))
             if not omit_scipy:
                 if logp:
-                    got_scipy = scipy.stats.hypergeom.logcdf(k, n, cur_ab, cur_ac)
+                    got_scipy = scipy.stats.hypergeom.logcdf(a, n, cur_ab, cur_ac)
                 else:
-                    got_scipy = scipy.stats.hypergeom.cdf(k, n, cur_ab, cur_ac)
+                    got_scipy = scipy.stats.hypergeom.cdf(a, n, cur_ab, cur_ac)
             if bits == 0:
                 want = got_noapprox
             else:
-                want = flush_if_denormal(mpfr_impls.hypergeom_cdf(k, n, cur_ab, cur_ac, bits=bits, return_log=logp))
+                want = flush_if_denormal(mpfr_impls.hypergeom_cdf(a, n, cur_ab, cur_ac, bits=bits, return_log=logp))
                 relerr = compute_relerr(got_noapprox, want)
                 relerr_noapprox_ssq += relerr * relerr
             relerr = compute_relerr(got_approx, want)
@@ -87,21 +93,21 @@ def phyper_accuracy_test(ab: float, ac: float, z: float, pow2s: list[int], num_t
             relerr_scipy_ssq += relerr * relerr
             if not omit_scipy:
                 if logp:
-                    got = scipy.stats.hypergeom.logcdf(k, n, cur_ab, cur_ac)
+                    got = scipy.stats.hypergeom.logcdf(a, n, cur_ab, cur_ac)
                 else:
-                    got = scipy.stats.hypergeom.cdf(k, n, cur_ab, cur_ac)
+                    got = scipy.stats.hypergeom.cdf(a, n, cur_ab, cur_ac)
                 relerr = compute_relerr(got, want)
                 relerr_scipy_ssq += relerr * relerr
         num_trials = len(ns)
         print_str = f"n in [2^{pow2}, 2^{pow2+1}): "
         if bits > 0:
             noapprox_rms = math.sqrt(relerr_noapprox_ssq / num_trials)
-            print_str += f"errRMS={noapprox_rms:.6g}  "
+            print_str += f"errRMS={noapprox_rms:.3g}  "
         approx_rms = math.sqrt(relerr_approx_ssq / num_trials)
-        print_str += f"approxErrRMS={approx_rms:.6g}"
+        print_str += f"approxErrRMS={approx_rms:.3g}"
         if not omit_scipy:
             scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
-            print_str += f"  scipyErrRMS={scipy_rms:.6g}"
+            print_str += f"  scipyErrRMS={scipy_rms:.3g}"
         print(print_str)
 
 

@@ -940,7 +940,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   // calls.  Since they are now performed with extra precision, they require
   // hundreds or thousands of floating-point operations, so we want to limit
   // ourselves to 1-2 full evaluations most of the time.  (Possible todo: use
-  // lower-accuracy Lfact() to jump around, followed by {d,q}dr_lfact() when
+  // lower-accuracy Lfact() to jump around, followed by {d,t}dr_lfact() when
   // exiting the loop.  Should be an easy performance win, but there's a
   // complexity cost so I'll wait until I see a scenario where this branch
   // executes frequently...)

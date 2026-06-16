@@ -6,12 +6,67 @@
 #include <errno.h>
 #include <string.h>
 
-#if defined(__cplusplus)
-extern "C" {
+#ifdef __cplusplus
+namespace plink2 {
 #endif
 
-#if defined(__cplusplus)
+// Assumes cap < 2^64 / 100.
+// This may move to plink2_base.
+static inline BoolErr ScanmovU64CappedFinish(const char** str_iterp, uint64_t cap, uint64_t* valp) {
+  const char* str_iter = *str_iterp;
+  uint64_t val = *valp;
+  while (1) {
+    // a little bit of unrolling seems to help
+    const uint64_t cur_digit = ctou64(*str_iter++) - 48;
+    if (cur_digit >= 10) {
+      break;
+    }
+    const uint64_t cur_digit2 = ctou64(*str_iter++) - 48;
+    if (cur_digit2 >= 10) {
+      val = val * 10 + cur_digit;
+      if (unlikely(val > cap)) {
+        return 1;
+      }
+      break;
+    }
+    val = val * 100 + cur_digit * 10 + cur_digit2;
+    if (unlikely(val > cap)) {
+      return 1;
+    }
+  }
+  *valp = val;
+  *str_iterp = &(str_iter[-1]);
+  return 0;
 }
+
+BoolErr ScanmovU64Capped(const char** str_iterp, uint64_t cap, uint64_t* valp) {
+  const char* str_iter = *str_iterp;
+  *valp = ctou32(*str_iter++) - 48;
+  if (*valp >= 10) {
+    if (unlikely(*valp != 0xfffffffbU)) {
+      return 1;
+    }
+    *valp = ctou32(*str_iter++) - 48;
+    if (unlikely(*valp >= 10)) {
+      return 1;
+    }
+  }
+  while (!(*valp)) {
+    *valp = ctou32(*str_iter++) - 48;
+    if (unlikely((*valp) >= 10)) {
+      return 1;
+    }
+  }
+  *str_iterp = str_iter;
+  return ScanmovU64CappedFinish(str_iterp, cap, valp);
+}
+
+static inline BoolErr ScantokU64Capped(const char* str_iter, uint64_t cap, uint64_t* valp) {
+  return ScanmovU64Capped(&str_iter, cap, valp) || (!IsSpaceOrEoln(*str_iter));
+}
+
+#ifdef __cplusplus
+}  // namespace plink2
 #endif
 
 int32_t main(int argc, char** argv) {
@@ -24,24 +79,25 @@ int32_t main(int argc, char** argv) {
       midp = 1;
       argc--;
     }
+    const uint64_t kFisher22Max = (1LLU << 52) - 1;
     if ((argc >= 5) && (argc <= 7)) {
-      uint32_t m11;
-      uint32_t m12;
-      uint32_t m21;
-      uint32_t m22;
-      if (unlikely(ScanUintDefcap(argv[1], &m11))) {
+      uint64_t m11;
+      uint64_t m12;
+      uint64_t m21;
+      uint64_t m22;
+      if (unlikely(ScantokU64Capped(argv[1], kFisher22Max, &m11))) {
         fprintf(stderr, "Error: Invalid m11 value '%s'.\n", argv[1]);
         goto main_ret_INVALID_CMDLINE;
       }
-      if (unlikely(ScanUintDefcap(argv[2], &m12))) {
+      if (unlikely(ScantokU64Capped(argv[2], kFisher22Max, &m12))) {
         fprintf(stderr, "Error: Invalid m12 value '%s'.\n", argv[2]);
         goto main_ret_INVALID_CMDLINE;
       }
-      if (unlikely(ScanUintDefcap(argv[3], &m21))) {
+      if (unlikely(ScantokU64Capped(argv[3], kFisher22Max, &m21))) {
         fprintf(stderr, "Error: Invalid m21 value '%s'.\n", argv[3]);
         goto main_ret_INVALID_CMDLINE;
       }
-      if (unlikely(ScanUintDefcap(argv[4], &m22))) {
+      if (unlikely(ScantokU64Capped(argv[4], kFisher22Max, &m22))) {
         fprintf(stderr, "Error: Invalid m22 value '%s'.\n", argv[4]);
         goto main_ret_INVALID_CMDLINE;
       }
@@ -56,7 +112,7 @@ int32_t main(int argc, char** argv) {
           fprintf(stderr, "Error: Invalid m12 value '%s'.\n", argv[6]);
           goto main_ret_INVALID_CMDLINE;
         }
-        if (unlikely(S_CAST(uint64_t, m11) + m12 + m21 + m22 + m31 + m32 > 0x7fffffff)) {
+        if (unlikely(m11 + m12 + m21 + m22 + m31 + m32 > 0x7fffffff)) {
           fputs("Error: Problem instance too large.\n", stderr);
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
@@ -68,7 +124,7 @@ int32_t main(int argc, char** argv) {
         memcpy_k2(write_iter, "\n");
         fputs(buf, stdout);
       } else {
-        if (unlikely(S_CAST(uint64_t, m11) + m12 + m21 + m22 > 0x7fffffff)) {
+        if (unlikely(m11 + m12 + m21 + m22 > kFisher22Max)) {
           fputs("Error: Problem instance too large.\n", stderr);
           reterr = kPglRetNotYetSupported;
           goto main_ret_1;
@@ -132,20 +188,30 @@ int32_t main(int argc, char** argv) {
           continue;
         }
         char idstr[kMaxMediumLine];
-        uint32_t m11;
-        uint32_t m12;
-        uint32_t m21;
-        uint32_t m22;
+        uint64_t m11;
+        uint64_t m12;
+        uint64_t m21;
+        uint64_t m22;
         uint32_t m31;
         uint32_t m32;
         double ln_pval;
-        if (sscanf(bufptr, "%s %u %u %u %u %u %u", idstr, &m11, &m12, &m21, &m22, &m31, &m32) < 7) {
-          if (sscanf(bufptr, "%s %u %u %u %u", idstr, &m11, &m12, &m21, &m22) < 5) {
+        if (sscanf(bufptr, "%s %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %u %u", idstr, &m11, &m12, &m21, &m22, &m31, &m32) < 7) {
+          if (sscanf(bufptr, "%s %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64, idstr, &m11, &m12, &m21, &m22) < 5) {
             // skip improperly formatted line
             continue;
           }
+          if (unlikely((m11 > kFisher22Max) || (m12 > kFisher22Max) || (m21 > kFisher22Max) || (m22 > kFisher22Max) || (m11 + m12 + m21 + m22 > kFisher22Max))) {
+            fputs("Error: Problem instance too large.\n", stderr);
+            reterr = kPglRetNotYetSupported;
+            goto main_ret_1;
+          }
           ln_pval = Fisher22TwoSidedP(m11, m12, m21, m22, midp, 1);
         } else {
+          if (unlikely((m11 > 0x7fffffff) || (m12 > 0x7fffffff) || (m21 > 0x7fffffff) || (m22 > 0x7fffffff) || (m31 > 0x7fffffff) || (m32 > 0x7fffffff) || (m11 + m12 + m21 + m22 + m31 + m32 > 0x7fffffff))) {
+            fputs("Error: Problem instance too large.\n", stderr);
+            reterr = kPglRetNotYetSupported;
+            goto main_ret_1;
+          }
           ln_pval = Fisher23LnP(m11, m21, m31, m12, m22, m32, midp);
         }
         char buf2[80];

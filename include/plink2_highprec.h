@@ -369,6 +369,10 @@ HEADER_CINLINE int32_t ddr_is(const dd_real a, double b) {
   return (a.x[0] == b) && (a.x[1] == 0.0);
 }
 
+HEADER_CINLINE int32_t ddr_eq(const dd_real a, const dd_real b) {
+  return (a.x[0] == b.x[0]) && (a.x[1] == b.x[1]);
+}
+
 
 HEADER_CINLINE int32_t ddr_ltd(const dd_real a, const double b) {
   return (a.x[0] < b) || ((a.x[0] == b) && (a.x[1] < 0));

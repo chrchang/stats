@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -54,7 +54,7 @@ cdef extern from "../include/hypergeom.h" namespace "plink2":
 
 
 cdef extern from "../include/fisher.h" namespace "plink2":
-    double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) nogil
+    double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) nogil
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
@@ -188,24 +188,24 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
 # .stats()) if it matters.
 class _BinomDist:
     @staticmethod
-    def cdf(k, n, p=0.5):
-        return pbinom(k, n, p)
+    def cdf(k, n, p=0.5, approx=False):
+        return pbinom(k, n, p, approx=approx)
 
     @staticmethod
     def isf(q, n, p=0.5):
         return qbinom(fractions.Fraction(1, 1) - fractions.Fraction(q), n, p)
 
     @staticmethod
-    def logcdf(k, n, p=0.5):
-        return pbinom(k, n, p, logp=True)
+    def logcdf(k, n, p=0.5, approx=False):
+        return pbinom(k, n, p, logp=True, approx=approx)
 
     @staticmethod
     def logpmf(k, n, p=0.5):
         return dbinom(k, n, p, logp=True)
 
     @staticmethod
-    def logsf(k, n, p=0.5):
-        return pbinom(k, n, p, complement=True, logp=True)
+    def logsf(k, n, p=0.5, approx=False):
+        return pbinom(k, n, p, complement=True, logp=True, approx=approx)
 
     @staticmethod
     def median(n, p):
@@ -221,8 +221,8 @@ class _BinomDist:
         return qbinom(q, n, p)
 
     @staticmethod
-    def sf(k, n, p=0.5):
-        return pbinom(k, n, p, complement=True)
+    def sf(k, n, p=0.5, approx=False):
+        return pbinom(k, n, p, complement=True, approx=approx)
 
 binom = _BinomDist()
 
@@ -329,24 +329,24 @@ def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
 #               = (N, M-N, n) given scipy params
 class _HypergeomDist:
     @staticmethod
-    def cdf(k, M, n, N):
-        return phyper(k, N, M-N, n)
+    def cdf(k, M, n, N, approx=False):
+        return phyper(k, N, M-N, n, approx=approx)
 
     @staticmethod
     def isf(q, M, n, N):
         return qhyper(fractions.Fraction(1, 1) - fractions.Fraction(q), N, M-N, n)
 
     @staticmethod
-    def logcdf(k, M, n, N):
-        return phyper(k, N, M-N, n, logp=True)
+    def logcdf(k, M, n, N, approx=False):
+        return phyper(k, N, M-N, n, logp=True, approx=approx)
 
     @staticmethod
     def logpmf(k, M, n, N):
         return dhyper(k, N, M-N, n, logp=True)
 
     @staticmethod
-    def logsf(k, M, n, N):
-        return phyper(k, N, M-N, n, lowertail=False, logp=True)
+    def logsf(k, M, n, N, approx=False):
+        return phyper(k, N, M-N, n, lowertail=False, logp=True, approx=approx)
 
     @staticmethod
     def median(M, n, N):
@@ -361,8 +361,8 @@ class _HypergeomDist:
         return qhyper(q, N, M-N, n)
 
     @staticmethod
-    def sf(k, M, n, N):
-        return phyper(k, N, M-N, n, lowertail=False)
+    def sf(k, M, n, N, approx=False):
+        return phyper(k, N, M-N, n, lowertail=False, approx=approx)
 
 hypergeom = _HypergeomDist()
 
@@ -401,14 +401,14 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
         if nrow > 2 or ncol > 2:
             raise RuntimeError("alternative must be 'two-sided' for tables larger than 2x2.")
         if total >= (1LL << 52):
-            raise RuntimeError("table entries must sum to <2^52")
+            raise RuntimeError("2x2 table entries must sum to <2^52")
         m11_is_greater_alt = (alternative == "greater")
         if alternative != "less" and not m11_is_greater_alt:
             raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
         return flush_if_denormal(PhyperApprox(m11, m12, m21, m22, m11_is_greater_alt, midp, logp))
     if nrow == 2 and ncol == 2:
-        if total > 0x7fffffff:
-            raise RuntimeError("table entries must sum to <2^31")
+        if total >= (1LL << 52):
+            raise RuntimeError("2x2 table entries must sum to <2^52")
         ln_result = Fisher22TwoSidedP(m11, m12, m21, m22, midp, logp)
         return flush_if_denormal(ln_result)
     cdef int32_t m13
@@ -423,7 +423,7 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
             m23 = table[2][1]
         total += <int64_t>(m13) + <int64_t>(m23)
         if m13 < 0 or m23 < 0 or total > 0x7fffffff:
-            raise RuntimeError("table entries must be nonnegative and sum to <2^31")
+            raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
         with nogil:
             ln_result = Fisher23LnP(m11, m12, m13, m21, m22, m23, midp)
     else:

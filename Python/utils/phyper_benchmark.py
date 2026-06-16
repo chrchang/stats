@@ -27,21 +27,27 @@ def phyper_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trial
         n = 2**pow2 - 1
         cur_ab = round(ab * n)
         cur_ac = round(ac * n)
+        d_minus_a = n - cur_ab - cur_ac
+        min_a = max(0, -d_minus_a)
         stdev = 0
         if n > 1:
             variance = cur_ab * cur_ac * (n - cur_ab) * (n - cur_ac) / (n * n * (n - 1))
             stdev = math.sqrt(variance)
-        k = round(cur_ab * cur_ac / n)
-        secs_noapprox = timeit.timeit(lambda: exact_tests.phyper(k, cur_ac, n - cur_ac, cur_ab, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
-        secs_approx = timeit.timeit(lambda: exact_tests.phyper(k, cur_ac, n - cur_ac, cur_ab, approx=True, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
+        a = round((cur_ab * cur_ac / n) + z * stdev)
+        if a < min_a:
+            a = min_a
+        elif a > min(cur_ab, cur_ac):
+            a = min(cur_ab, cur_ac)
+        secs_noapprox = timeit.timeit(lambda: exact_tests.phyper(a, cur_ac, n - cur_ac, cur_ab, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
+        secs_approx = timeit.timeit(lambda: exact_tests.phyper(a, cur_ac, n - cur_ac, cur_ab, approx=True, logp=logp), number=num_trials_per_pow2) / num_trials_per_pow2
         if not omit_scipy:
             if not logp:
-                secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.cdf(k, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
+                secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.cdf(a, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
             else:
-                secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.logcdf(k, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
-        print_str = f"n=(2^{pow2})-1: base={secs_noapprox:.6g}  approx={secs_approx:.6g}"
+                secs_scipy = timeit.timeit(lambda: scipy.stats.hypergeom.logcdf(a, n, cur_ab, cur_ac), number=num_trials_per_pow2) / num_trials_per_pow2
+        print_str = f"n=(2^{pow2})-1: base={secs_noapprox:.3g}  approx={secs_approx:.3g}"
         if not omit_scipy:
-            print_str += f"  scipy={secs_scipy:.6g}"
+            print_str += f"  scipy={secs_scipy:.3g}"
         print(print_str + " sec/iter")
 
 

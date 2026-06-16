@@ -224,4 +224,53 @@ def hypergeom_cdf(k: int, M: int, n: int, N: int, bits: int, return_log: bool):
     return join_log_and_nonlog(lnpmf, lik_sum, return_log, invert)
 
 
-# todo: at least 2x2 fisher_exact
+def fisher_exact_22(obs_a: int, obs_b: int, obs_c: int, obs_d: int, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
+
+    eps_bits = (bits * 3) // 4
+    eps = gmpy2.exp2(-eps_bits)
+
+    abcd = obs_a + obs_b + obs_c + obs_d
+    ab = obs_a + obs_b
+    ac = obs_a + obs_c
+    denom = gmpy2.mpfr(abcd + 2)
+    premode = gmpy2.round2(gmpy2.mpfr((ab + 1) * (ac + 1)) / denom, eps_bits)
+    mode = gmpy2.floor(premode)
+    if obs_a == mode or (premode.is_integer() and obs_a == mode - 1):
+        return float_from_ln(0.0, return_log)
+
+    if obs_a > mode:
+        obs_a, obs_b, obs_c, obs_d = obs_b, obs_a, obs_d, obs_c
+        ac = obs_a + obs_c
+        premode = gmpy2.round2(gmpy2.mpfr((ab + 1) * (ac + 1)) / denom, eps_bits)
+        mode = gmpy2.floor(premode)
+
+    d_minus_a = obs_d - obs_a
+    min_a = max(0, -d_minus_a)
+    max_a = obs_a + min(obs_b, obs_c)
+
+    ln_left = hypergeom_cdf(obs_a, abcd, ab, ac, bits, True)
+
+    # _adj to indicate we've premultiplied by (1 - eps).
+    ln_starting_pmf_adj = hypergeom_lnpmf_internal(obs_a, obs_b, obs_c, obs_d) * (1 - eps)
+
+    ln_pmf_maxa = hypergeom_lnpmf_internal(max_a, ab - max_a, ac - max_a, d_minus_a + max_a)
+    if ln_pmf_maxa > ln_starting_pmf_adj:
+        # All contingency tables to right of mode have higher probability than
+        # our starting table.
+        return float_from_ln(ln_left, return_log)
+
+    # Binary search.  Invariant: pmf(min_a-1) > pmf(obs_a) >= pmf(max_a).
+    min_a = mode + 1
+    while min_a < max_a:
+        a = (min_a + max_a) // 2
+        ln_pmf_a = hypergeom_lnpmf_internal(a, ab - a, ac - a, d_minus_a + a)
+        if ln_pmf_a > ln_starting_pmf_adj:
+            min_a = a + 1
+        else:
+            max_a = a
+    # Invert: a, b, c, d = b, a, d, c
+    # a+b and a+b+c+d remain the same
+    ln_right = hypergeom_cdf(ab - min_a, abcd, ab, abcd - ac, bits, True)
+    ln_total = logspace_add(ln_left, ln_right)
+    return float_from_ln(ln_total, return_log)

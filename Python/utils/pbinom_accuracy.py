@@ -89,10 +89,10 @@ def pbinom_accuracy_test(p: float, z: float, pow2s: list[int], num_trials_per_po
         approx_rms = math.sqrt(relerr_approx_ssq / num_trials)
         scipy_rms = math.sqrt(relerr_scipy_ssq / num_trials)
         if bits == 0:
-            print(f"n in [2^{pow2}, 2^{pow2+1}): approxErrRMS={approx_rms:.6g}  scipyErrRMS={scipy_rms:.6g}")
+            print(f"n in [2^{pow2}, 2^{pow2+1}): approxErrRMS={approx_rms:.3g}  scipyErrRMS={scipy_rms:.3g}")
         else:
             noapprox_rms = math.sqrt(relerr_noapprox_ssq / num_trials)
-            print(f"n in [2^{pow2}, 2^{pow2+1}): errRMS={noapprox_rms:.6g}  approxErrRMS={approx_rms:.6g}  scipyErrRMS={scipy_rms:.6g}")
+            print(f"n in [2^{pow2}, 2^{pow2+1}): errRMS={noapprox_rms:.3g}  approxErrRMS={approx_rms:.3g}  scipyErrRMS={scipy_rms:.3g}")
 
 
 def parse_commandline_args():

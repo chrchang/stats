@@ -25,47 +25,42 @@
 namespace plink2 {
 #endif
 
-// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^31.
-// They're defined as int32_ts instead of uint32_ts since signed int <->
+// obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^52.
+// They're defined as int64_ts instead of uint64_ts since signed int <->
 // floating-point conversions are sometimes faster than the same-width unsigned
-// int <-> floating-point conversions.  (Yes, uint32 -> float64 should be fine
-// on 64-bit systems, but we may as well write this to also be efficient on
-// 32-bit systems when there's no real drawback to doing so.)
-//
-// TODO: make {obs_m11, obs_m12, obs_m21, obs_m22} int64s and allow sum to be
-// up to 2^52 - 1.
+// int <-> floating-point conversions.
 //
 // (Note that the odds-ratio and odds-ratio-confidence-interval reported by R
 // fisher.test can also be calculated efficiently, using e.g. the approach in
 // the R BiasedUrn package's meanFNCHypergeo() and pFNCHypergeo() functions.)
-double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int32_t obs_m22, int32_t midp, uint32_t logp) {
+double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
   // spurious index differences between Fisher22 and Fisher23.
   if (obs_m11 < obs_m22) {
-    swap_i32(&obs_m11, &obs_m22);
+    swap_i64(&obs_m11, &obs_m22);
   }
   if (obs_m12 < obs_m21) {
-    swap_i32(&obs_m12, &obs_m21);
+    swap_i64(&obs_m12, &obs_m21);
   }
-  if (S_CAST(int64_t, obs_m11) * obs_m22 > S_CAST(int64_t, obs_m12) * obs_m21) {
-    swap_i32(&obs_m11, &obs_m12);
-    swap_i32(&obs_m21, &obs_m22);
+  if (ddr_gt(ddr_mul2d(obs_m11, obs_m22), ddr_mul2d(obs_m12, obs_m21))) {
+    swap_i64(&obs_m11, &obs_m12);
+    swap_i64(&obs_m21, &obs_m22);
   }
-  if (!midp) {
-    // Fast path for p=1.
-    if ((obs_m11 + 1LL) * (obs_m22 + 1) == S_CAST(int64_t, obs_m12) * obs_m21) {
-      return logp? 0.0 : 1.0;
-    }
-  }
-  // Iterate outward to floating-point precision limit.
-
-  // I experimented with making more int32 -> double casts explicit, but
+  // I experimented with making more int -> double casts explicit, but
   // concluded that it was hurting readability more than it was helping.
   double m11 = obs_m11;
   double m12 = obs_m12;
   double m21 = obs_m21;
   double m22 = obs_m22;
+  if (!midp) {
+    // Fast path for p=1.
+    if (ddr_geq(ddr_mul2d(m11 + 1, m22 + 1), ddr_mul2d(m12, m21))) {
+      return logp? 0.0 : 1.0;
+    }
+  }
+
+  // Iterate outward to floating-point precision limit.
   double lik = 1;
   double tail_sum = 1 - 0.5 * midp;
   while (1) {
@@ -92,7 +87,7 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
   //   ((172^172) / 172!)^4 ~= 5.3e+292
   // which leaves enough headroom to accumulate the rest of the center-sum and
   // represent intermediate values without overflowing.
-  if ((obs_m11 + 172LL) * (obs_m22 + 172LL) >= (obs_m12 - 172LL) * (obs_m21 - 172LL)) {
+  if (ddr_geq(ddr_mul2d(obs_m11 + 172, obs_m22 + 172), ddr_mul2d(obs_m12 - 172, obs_m21 - 172))) {
     lik = 1;
     m11 = obs_m11;
     m12 = obs_m12;
@@ -118,7 +113,7 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
         }
         // Near-tie.  True value of lik can be greater than, equal to, or
         // less than 1.
-        const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
+        const int64_t m22_incr = S_CAST(int64_t, m22) - obs_m22;
         td_real starting_lnprobv_tdr = tdr_make1(DBL_MAX);
         const intptr_t cmp_result = HypergeomCompare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_tdr, &lik);
         if (cmp_result <= 0) {
@@ -148,29 +143,27 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
     const double pval = tail_sum / (tail_sum + center_sum);
     return logp? log(pval) : pval;
   }
-  // todo: use quad-doubles when total > ~2^42
-  dd_real starting_lnprobv_ddr =
-    ddr_negate(ddr_sort_and_add_4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
 
   // Now we want to jump near the other tail, without evaluating that many
   // contingency table log-likelihoods along the way.
   //
-  // Each full log-likelihood evaluation requires 4 ddr_lfact() calls.  Since
-  // they are now performed with extra precision, they require hundreds of
-  // floating-point operations, so we want to limit ourselves to 1-2 full
-  // evaluations most of the time.  (Possible todo: use lower-accuracy Lfact()
-  // to jump around, followed by ddr_lfact() when exiting the loop.  Should be
-  // an easy performance win, but there's a complexity cost so I'll wait until
-  // I see a scenario where this branch executes frequently...)
+  // Each full log-likelihood evaluation requires 4 ddr_lfact() or tdr_lfact()
+  // calls.  Since they are now performed with extra precision, they require
+  // hundreds or thousands of floating-point operations, so we want to limit
+  // ourselves to 1-2 full evaluations most of the time.  (Possible todo: use
+  // lower-accuracy Lfact() to jump around, followed by {d,t}dr_lfact() when
+  // exiting the loop.  Should be an easy performance win, but there's a
+  // complexity cost so I'll wait until I see a scenario where this branch
+  // executes frequently...)
   //
   // The current heuristic starts by reflecting (obs_m21 + m21) * 0.5 across
   // the mode, performing a full log-likelihood check at an adjacent valid
   // point.  (It is convenient to focus on m21 here, since m21=0 corresponds to
   // the outermost table on this tail.)  Hopefully we find that we're in
-  // (starting_lnprob - 62 * kLn2, starting_lnprob], so we're at or near a
-  // table that actually contributes to the tail-sum.  (This window is chosen
-  // to be wide enough to guarantee that at least one point falls inside when
-  // obs_m11 + obs_m12 + obs_m21 + obs_m22 < 2^31.)
+  // (starting_lnprob - lnprobv_diff_min, starting_lnprob], so we're at or
+  // near a table that actually contributes to the tail-sum.  (This window is
+  // chosen to be wide enough to guarantee that at least one point falls
+  // inside.)
   //
   // If not, we jump again, using Newton's method.
   // If m21 is too high (i.e. current log-likelihood is too high), decreasing
@@ -200,27 +193,63 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
     m21 = 2 * modal_m21 - (m21 + obs_m21) * 0.5;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
-    m21 = S_CAST(int32_t, m21);
+    m21 = S_CAST(int64_t, m21);
     if (m21 < 0) {
       m21 = 0;
     }
   }
-  const dd_real lnprobf_ddr =
-    ddr_sub(ddr_sort_and_add_4_lfacts(m1x, m2x, mx1, obs_m12 + obs_m22),
-            ddr_lfact(mxx));
-  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  // Extremal case: m11=mx1, m12=m12_minus_m21, m21=0, m22=m2x
+  //   log((m12 + 1) * (m21 + 1) / (m11 * m22))
+  // = log((m12_minus_m21 + 1) / (mx1 * m2x))
+  double lnprobv_diff_min = log((m12_minus_m21 + 1) / (mx1 * m2x)) * (1 + kSmallEpsilon);
+  const uint32_t tdr_lnprobv_needed = use_tdr_for_hypergeom_lnprob(obs_m11 + obs_m12 + obs_m21 + obs_m22);
+  td_real starting_lnprobv_tdr;
+  dd_real starting_lnprob_ddr;
+  if (!tdr_lnprobv_needed) {
+    const dd_real starting_lnprobv_ddr = ddr_negate(ddr_sort_and_add_4_lfacts(obs_m11, obs_m12, obs_m21, obs_m22));
+    starting_lnprobv_tdr = tdr_make_dd(starting_lnprobv_ddr);
+
+    const dd_real lnprobf_ddr =
+      ddr_sub(ddr_sort_and_add_4_lfacts(m1x, m2x, mx1, obs_m12 + obs_m22),
+              ddr_lfact(mxx));
+    starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  } else {
+    td_real tdrs[4];
+    tdrs[0] = tdr_lfact(obs_m11);
+    tdrs[1] = tdr_lfact(obs_m12);
+    tdrs[2] = tdr_lfact(obs_m21);
+    tdrs[3] = tdr_lfact(obs_m22);
+    starting_lnprobv_tdr = tdr_negate(tdr_sort_and_add(4, tdrs));
+
+    tdrs[0] = tdr_lfact(m1x);
+    tdrs[1] = tdr_lfact(m2x);
+    tdrs[2] = tdr_lfact(mx1);
+    tdrs[3] = tdr_lfact(obs_m12 + obs_m22);
+    const td_real lnprobf_tdr = tdr_sub(tdr_sort_and_add(4, tdrs),
+                                        tdr_lfact(mxx));
+    starting_lnprob_ddr = ddr_make_td(tdr_add(lnprobf_tdr, starting_lnprobv_tdr));
+  }
   while (1) {
     m11 = mx1 - m21;
     m12 = m12_minus_m21 + m21;
     m22 = m2x - m21;
-    const dd_real lnprobv_ddr =
-      ddr_negate(ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
-    const double lnprobv_diff = ddr_sub(lnprobv_ddr, starting_lnprobv_ddr).x[0];
-    // Could tighten this threshold further; I haven't performed a careful
-    // error analysis yet but CompareFactorialProducts() includes a plausible
-    // assumption that 2^{-60} is safe.  But code is correct as long as we're
-    // guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch for
-    // positive lnprobv_diff.
+    double lnprobv_diff;
+    if (!tdr_lnprobv_needed) {
+      const dd_real lnprobv_ddr =
+        ddr_negate(ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
+      lnprobv_diff = ddr_sub(lnprobv_ddr, ddr_make_td(starting_lnprobv_tdr)).x[0];
+    } else {
+      td_real tdrs[4];
+      tdrs[0] = tdr_lfact(m11);
+      tdrs[1] = tdr_lfact(m12);
+      tdrs[2] = tdr_lfact(m21);
+      tdrs[3] = tdr_lfact(m22);
+      const td_real lnprobv_tdr = tdr_negate(tdr_sort_and_add(4, tdrs));
+      lnprobv_diff = tdr_sub(lnprobv_tdr, starting_lnprobv_tdr).x[0];
+    }
+    // Could tighten this threshold further.  But code is correct as long as
+    // we're guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch
+    // for positive lnprobv_diff.
     if (lnprobv_diff >= k2m53) {
       if (m21 == 0) {
         // All tables on this tail have higher likelihood than the starting
@@ -237,15 +266,26 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
       if (m21 < 0) {
         m21 = 0;
       }
-    } else if (lnprobv_diff > -62 * kLn2) {
-      lik = exp(lnprobv_diff);
-      break;
     } else {
-      const double ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
-      // Round down, to guarantee we don't overshoot.
-      // We're guaranteed to make progress, since lnprobv_diff <= -62 * log(2),
-      // m11 * m22 < 2^62, and (m12 + 1) * (m21 + 1) >= 1.
-      m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
+      double ll_deriv = DBL_MAX;
+      if ((lnprobv_diff_min < -53 * kLn2) && (m21 > 0)) {
+        // Tighten this threshold if that lets us sum fewer terms later.
+        ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
+        lnprobv_diff_min = ll_deriv * (1 + kSmallEpsilon);
+      }
+      if (lnprobv_diff > lnprobv_diff_min) {
+        lik = exp(lnprobv_diff);
+        break;
+      } else {
+        if (ll_deriv == DBL_MAX) {
+          ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
+        }
+        // Round down, to guarantee we don't overshoot.
+        // We're guaranteed to make progress because of how lnprobv_diff_min
+        // was set.
+        // m11 * m22 < exp(-lnprobv_diff_min), and (m12 + 1) * (m21 + 1) >= 1.
+        m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
+      }
     }
   }
   // Sum toward center, until lik >= 1.
@@ -261,24 +301,32 @@ double Fisher22TwoSidedP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, int3
   const double tailenter_m12 = m12;
   const double tailenter_m21 = m21;
   const double tailenter_m22 = m22;
-  while (lik <= one_minus_scaled_eps) {
-    tail_sum += lik;
-    m12 += 1;
-    m21 += 1;
-    lik *= m11 * m22 / (m12 * m21);
-    m11 -= 1;
-    m22 -= 1;
-    one_minus_scaled_eps -= 2 * k2m52;
-  }
-  if (lik < 2 - one_minus_scaled_eps) {
-    const int32_t m22_incr = S_CAST(int32_t, m22) - obs_m22;
-    const intptr_t cmp_result = HypergeomCompareDdr(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, starting_lnprobv_ddr, &lik);
-    if (cmp_result <= 0) {
+  while (1) {
+    while (lik <= one_minus_scaled_eps) {
       tail_sum += lik;
-      if (midp && (cmp_result == 0)) {
-        tail_sum -= 0.5;
-      }
+      m12 += 1;
+      m21 += 1;
+      lik *= m11 * m22 / (m12 * m21);
+      m11 -= 1;
+      m22 -= 1;
+      one_minus_scaled_eps -= 2 * k2m52;
     }
+    if (lik >= 2 - one_minus_scaled_eps) {
+      break;
+    }
+    const int64_t m22_incr = S_CAST(int64_t, m22) - obs_m22;
+    if (!tdr_lnprobv_needed) {
+      starting_lnprobv_tdr.x[2] = DBL_MAX;
+    }
+    const intptr_t cmp_result = HypergeomCompare(obs_m11, obs_m12, obs_m21, obs_m22, m22_incr, &starting_lnprobv_tdr, &lik);
+    if (cmp_result >= 0) {
+      if (cmp_result == 0) {
+        tail_sum += 1 - 0.5 * midp;
+      }
+      break;
+    }
+    one_minus_scaled_eps = 1 - 3 * k2m52;
+    // In very large cases, additional step(s) may be required?
   }
   // Sum away from center, until sums stop changing.
   lik = tailenter_lik;

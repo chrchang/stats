@@ -33,17 +33,19 @@ def binomtest_benchmark(p: float, z: float, pow2s: list[int], num_trials_per_pow
             k = n
         secs_base = timeit.timeit(lambda: exact_tests.binomtest(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
         secs_scipy = timeit.timeit(lambda: scipy.stats.binomtest(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
-        print(f"n=(2^{pow2})-1: base={secs_base:.6g}  scipy={secs_scipy:.6g} sec/iter")
+        print(f"n=(2^{pow2})-1: base={secs_base:.3g}  scipy={secs_scipy:.3g} sec/iter")
 
 
 
 def parse_commandline_args():
     parser = argparse.ArgumentParser(description=__doc__)
+    requiredarg = parser.add_argument_group('Required Arguments')
+    # z=0 is not representative.
+    requiredarg.add_argument('-z', '--z-score', type=float, required=True,
+                             help="Success-count z-score to test.")
     optionalarg = parser.add_argument_group('Optional Arguments')
     optionalarg.add_argument('-p', '--succ-prob', type=float, default=0.5,
                              help="Binomial distribution success-probability to test.")
-    optionalarg.add_argument('-z', '--z-score', type=float, default=0.0,
-                             help="Success-count z-score to test.")
     optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
                              help="Test n=2**<these values> - 1.")
     optionalarg.add_argument('-n', '--number', type=int, default=3,

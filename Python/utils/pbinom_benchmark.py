@@ -37,7 +37,7 @@ def pbinom_benchmark(p: float, z: float, pow2s: list[int], num_trials_per_pow2: 
             secs_scipy = timeit.timeit(lambda: scipy.stats.binom.cdf(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
         else:
             secs_scipy = timeit.timeit(lambda: scipy.stats.binom.logcdf(k, n, p), number=num_trials_per_pow2) / num_trials_per_pow2
-        print(f"n=(2^{pow2})-1: base={secs_noapprox:.6g}  approx={secs_approx:.6g}  scipy={secs_scipy:.6g} sec/iter")
+        print(f"n=(2^{pow2})-1: base={secs_noapprox:.3g}  approx={secs_approx:.3g}  scipy={secs_scipy:.3g} sec/iter")
 
 
 
