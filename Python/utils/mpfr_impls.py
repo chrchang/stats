@@ -2,6 +2,9 @@
 import gmpy2
 
 
+# MPFR-based implementations of most functions, for verification purposes.
+# Clarity is prioritized over speed here.
+
 def to_float(x):
     bits = gmpy2.get_context().precision
     if bits >= 106:
@@ -43,7 +46,7 @@ def logspace_add(x, y):
     return x + gmpy2.log1p(gmpy2.exp(y - x))
 
 
-def dbinom(k: int, n: int, p: float, bits: int, return_log: bool):
+def binom_pmf(k: int, n: int, p: float, bits: int, return_log: bool):
     gmpy2.get_context().precision = bits
     p = gmpy2.mpfr(p)
     lnp = gmpy2.log(p)
@@ -54,7 +57,7 @@ def dbinom(k: int, n: int, p: float, bits: int, return_log: bool):
     return float_from_ln(lnpmf, return_log)
 
 
-def pbinom(k: int, n: int, p: float, bits: int, return_log: bool):
+def binom_cdf(k: int, n: int, p: float, bits: int, return_log: bool):
     # Assumes 0 < p < 1.
     # Implementation doesn't take advantage of the Aroian/DiDonato/Morris
     # continued fraction, since much of the point of this function is to
@@ -111,15 +114,16 @@ def pbinom(k: int, n: int, p: float, bits: int, return_log: bool):
 def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
     # Assumes 0 < p < 1.
     # Assumes alternative="two-sided", since the "less" and "greater" cases
-    # reduce to single pbinom() calls.
+    # reduce to single binom_cdf() calls.
     #
     # With high precision:
     # 1. Determine if we're at or to the right of the mode(s).  If we're at a
     #    mode, immediately return 1 or log(1).  If we're to the right, invert.
-    # 2. Use pbinom() to calculate left-tail probability.
+    # 2. Use binom_cdf() to calculate left-tail probability.
     # 3. Perform binary search for smallest k > mode for which pmf(k) <=
     #    pmf(obs_k).
-    # 4. Use pbinom() to calculate right-tail probability, return sum of tails.
+    # 4. Use binom_cdf() to calculate right-tail probability, return sum of
+    #    tails.
     gmpy2.get_context().precision = bits
 
     eps_bits = (bits * 3) // 4
@@ -137,12 +141,12 @@ def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
         mode = n - mode
         p, q = q, p
 
-    ln_left = pbinom(obs_k, n, p, bits, True)
+    ln_left = binom_cdf(obs_k, n, p, bits, True)
 
     # _adj to indicate we've premultiplied by (1 - eps).
-    ln_starting_pmf_adj = dbinom(obs_k, n, p, bits, True) * (1 - eps)
+    ln_starting_pmf_adj = binom_pmf(obs_k, n, p, bits, True) * (1 - eps)
 
-    ln_pmf_n = dbinom(n, n, p, bits, True)
+    ln_pmf_n = binom_pmf(n, n, p, bits, True)
     if ln_pmf_n > ln_starting_pmf_adj:
         # All contingency tables to right of mode have higher probability than
         # our starting table.
@@ -153,12 +157,12 @@ def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
     max_k = n
     while min_k < max_k:
         k = (min_k + max_k) // 2
-        ln_pmf_k = dbinom(k, n, p, bits, True)
+        ln_pmf_k = binom_pmf(k, n, p, bits, True)
         if ln_pmf_k > ln_starting_pmf_adj:
             min_k = k + 1
         else:
             max_k = k
-    ln_right = pbinom(n - min_k, n, q, bits, True)
+    ln_right = binom_cdf(n - min_k, n, q, bits, True)
     ln_total = logspace_add(ln_left, ln_right)
     return float_from_ln(ln_total, return_log)
 
@@ -179,7 +183,7 @@ def hypergeom_pmf(k: int, M: int, n: int, N: int, bits: int, return_log: bool):
 
 
 def hypergeom_cdf(k: int, M: int, n: int, N: int, bits: int, return_log: bool):
-    # Very similar to pbinom().
+    # Very similar to binom_cdf().
     #
     # 1. If we're to the right of the mode, invert.
     # Then, with high precision:
@@ -274,3 +278,75 @@ def fisher_exact_22(obs_a: int, obs_b: int, obs_c: int, obs_d: int, bits: int, r
     ln_right = hypergeom_cdf(ab - min_a, abcd, ab, abcd - ac, bits, True)
     ln_total = logspace_add(ln_left, ln_right)
     return float_from_ln(ln_total, return_log)
+
+
+# For 2x3 and larger fisher_exact tables, a simulation-based approach looks
+# like the least-bad verification option.  A proper calculation either handles
+# larger cases too slowly, or will have too much complexity that mirrors the
+# code to be verified.
+#
+# I'll punt on this for now, and return to the problem when fisher_exact
+# handles tables larger than 2x3.
+
+
+def snphwe(obs_hets: int, hom1: int, hom2: int, bits: int, return_log: bool):
+    # After one-sided HWE tests are implemented, we'll implement a
+    # Levene-Haldane cdf function, and maybe modify this function to call it.
+    # But this implementation is efficient enough if we aren't very far from
+    # the mode.
+    gmpy2.get_context().precision = bits
+
+    lik = gmpy2.mpfr(1.0)  # Normalize starting table to likelihood 1.
+    tail_sum = gmpy2.mpfr(1.0)  # It's in the tail.
+    center_sum = gmpy2.mpfr(0.0)
+    # Iterate down "left" (low hets) side.
+    hets = obs_hets
+    homc = max(hom1, hom2)
+    homr = min(hom1, hom2)
+    while True:
+        homc += 1
+        homr += 1
+        lik *= hets * (hets - 1)
+        lik /= 4 * homc * homr
+        hets -= 2
+        if lik <= gmpy2.mpfr(1.0):
+            break
+        center_sum += lik
+    while True:
+        preadd = tail_sum
+        tail_sum += lik
+        if tail_sum == preadd:
+            break
+        homc += 1
+        homr += 1
+        lik *= hets * (hets - 1)
+        lik /= 4 * homc * homr
+        hets -= 2
+    # Jump back to starting point, iterate down right side.
+    lik = gmpy2.mpfr(1.0)
+    hets = obs_hets
+    homc = max(hom1, hom2)
+    homr = min(hom1, hom2)
+    while True:
+        hets += 2
+        lik *= 4 * homc * homr
+        lik /= hets * (hets - 1)
+        homc -= 1
+        homr -= 1
+        if lik <= gmpy2.mpfr(1.0):
+            break
+        center_sum += lik
+    while True:
+        preadd = tail_sum
+        tail_sum += lik
+        if tail_sum == preadd:
+            break
+        hets += 2
+        lik *= 4 * homc * homr
+        lik /= hets * (hets - 1)
+        homc -= 1
+        homr -= 1
+    result = tail_sum / (tail_sum + center_sum)
+    if return_log:
+        return to_float(gmpy2.log(result))
+    return to_float(result)

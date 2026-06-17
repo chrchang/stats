@@ -78,7 +78,7 @@ def pbinom_accuracy_test(p: float, z: float, pow2s: list[int], num_trials_per_po
             if bits == 0:
                 want = got_noapprox
             else:
-                want = flush_if_denormal(mpfr_impls.pbinom(k, n, p, bits=bits, return_log=logp))
+                want = flush_if_denormal(mpfr_impls.binom_cdf(k, n, p, bits=bits, return_log=logp))
                 relerr = compute_relerr(got_noapprox, want)
                 relerr_noapprox_ssq += relerr * relerr
             relerr = compute_relerr(got_approx, want)

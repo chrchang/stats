@@ -62,6 +62,15 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n=(2^20)-1: base=9.21e-06  scipy=0.00069 sec/iter
     n=(2^35)-1: base=0.000743 sec/iter
 
+    $ utils/HWE_accuracy.py --maf 0.05 --z-score 1
+    n in [2^10, 2^11): errRMS=1.95e-16  snphweErrRMS=2.04e-16
+    n in [2^15, 2^16): errRMS=2.9e-16  snphweErrRMS=6.48e-16
+    n in [2^20, 2^21): errRMS=6.25e-16  snphweErrRMS=1.6e-15
+    $ utils/HWE_benchmark.py --maf 0.05 --z-score 1  # snphwe.snphwe() was accurate, but slow for biobank-scale cases (we're >200x as fast for n~=1m)
+    n=(2^10)-1: base=1.65e-07  snphwe=5.75e-07 sec/iter
+    n=(2^15)-1: base=3.85e-07  snphwe=1.25e-05 sec/iter
+    n=(2^20)-1: base=1.31e-06  snphwe=0.00038 sec/iter
+
 The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).
 
