@@ -20,6 +20,7 @@ def parse_range_string(input_str: str):
 
 
 def phyper_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trials_per_pow2: int, logp=False, omit_scipy=False):
+    warmup = exact_tests.phyper(1, 2, 2, 2)
     if not omit_scipy:
         warmup = scipy.stats.hypergeom.cdf(1, 4, 2, 2)
     secs_scipy = 0.0
@@ -62,7 +63,7 @@ def parse_commandline_args():
                              help="Z-score to test.")
     optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
                              help="Test n=2**<these values> - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=3,
+    optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
     optionalarg.add_argument('-l', '--logp', action="store_true",
                              help="Test logp=True.")

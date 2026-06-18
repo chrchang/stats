@@ -47,7 +47,7 @@ def HWE_exact_benchmark(maf: float, z: float, pow2s: list[int], num_trials_per_p
             hets = n_rare
         homc = (n_common - hets) // 2
 
-        secs_base = timeit.timeit(lambda: exact_tests.HWE_exact(homr, hets, homc), number=num_trials_per_pow2) / num_trials_per_pow2
+        secs_base = timeit.timeit(lambda: exact_tests.snphwe(hets, homr, homc), number=num_trials_per_pow2) / num_trials_per_pow2
         secs_snphwe = timeit.timeit(lambda: snphwe.snphwe(hets, homr, homc), number=num_trials_per_pow2) / num_trials_per_pow2
         print(f"n=(2^{pow2})-1: base={secs_base:.3g}  snphwe={secs_snphwe:.3g} sec/iter")
 
@@ -63,7 +63,7 @@ def parse_commandline_args():
                              help="Minor allele frequency.")
     optionalarg.add_argument('-e', '--exps', type=str, default="10,15,20",
                              help="Test n=2**<these values> - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=25,
+    optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
     # scipy fisher_exact does not support logp.
     # optionalarg.add_argument('-l', '--logp', action="store_true",

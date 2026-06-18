@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -121,8 +121,11 @@ cdef double zeroval(bint logp):
 cdef double oneval(bint logp):
     return 1.0 - logp
 
-# Returns likelihood of exactly k successes.  Relative error should be <1 ULP.
-def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
+
+# Tried making binom.{,log}pmf() just call (cpdef) dbinom(), but benchmarking
+# revealed that to have significantly higher overhead than making both dbinom()
+# and binom.{,log}pmf() call this.
+cdef double dbinom_internal(int64_t k, int64_t n, object p, bint logp) except? 2.0:
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct p_tdr = TdrMake(p)
@@ -138,14 +141,12 @@ def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
         return zeroval(logp)
     return flush_if_denormal(BinomMass(k, n, p_tdr, logp))
 
+# Returns likelihood of exactly k successes.  Relative error should be <1 ULP.
+def dbinom(int64_t k, int64_t n, object p=0.5, bint logp=0):
+    return dbinom_internal(k, n, p, logp)
 
-# Returns cumulative mass function, e.g. pbinom(n, n) is 1.
-#
-# If approx=True, this is essentially equivalent to a binom() call with
-# alternative="less", which uses a faster algorithm that doesn't try to get the
-# last few mantissa bits right.
-# Otherwise, relative error should be <0.6 ULP unless n is huge.
-def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, bint approx=0):
+
+cdef double pbinom_internal(int64_t k, int64_t n, object p, bint complement, bint logp, bint approx) except? 2.0:
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct p_tdr = TdrMake(p)
@@ -155,18 +156,17 @@ def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, b
         return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, 0, logp))
     return flush_if_denormal(Pbinom(k, n, p_tdr, complement, logp))
 
-
-# Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
-# is False, and cdf(k) >= exp(targetP) if logTarget is True.
+# Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 #
-# Implementation is *not* built on top of pbinom() in a way that e.g.
-# guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
-# qbinom(pbinom(k, n, succP) * (1 + 0.5**52), n, succP) > k in non-degenerate
-# cases.  However, it is designed to make these outcomes very likely:
-# - Qbinom() is designed for <0.6 ULP relative error and achieves <0.5 ULP the
-#   vast majority of the time.
-# - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
-def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
+# If approx=True, this is essentially equivalent to a binom() call with
+# alternative="less", which uses a faster algorithm that doesn't try to get the
+# last few mantissa bits right.
+# Otherwise, relative error should be <0.6 ULP unless n is huge.
+def pbinom(int64_t k, int64_t n, object p=0.5, bint complement=0, bint logp=0, bint approx=0):
+    return pbinom_internal(k, n, p, complement, logp, approx)
+
+
+cdef int64_t qbinom_internal(object targetP, int64_t n, object succP, bint logTarget) except? -1:
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct succp_tdr = TdrMake(succP)
@@ -183,46 +183,59 @@ def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
     return QbinomHalfUlp(targetp_or_lnp_ddr, n, succp_tdr, logTarget)
 
+# Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
+# is False, and cdf(k) >= exp(targetP) if logTarget is True.
+#
+# Implementation is *not* built on top of pbinom() in a way that e.g.
+# guarantees qbinom(pbinom(k, n, succP), n, succP) == k or
+# qbinom(pbinom(k, n, succP) * (1 + 0.5**52), n, succP) > k in non-degenerate
+# cases.  However, it is designed to make these outcomes very likely:
+# - Qbinom() is designed for <0.6 ULP relative error and achieves <0.5 ULP the
+#   vast majority of the time.
+# - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
+def qbinom(object targetP, int64_t n, object succP=0.5, bint logTarget=0):
+    return qbinom_internal(targetP, n, succP, logTarget)
+
 
 # scipy-style interface.  Straightforward to fill in the missing methods (e.g.
 # .stats()) if it matters.
 class _BinomDist:
     @staticmethod
     def cdf(k, n, p=0.5, approx=False):
-        return pbinom(k, n, p, approx=approx)
+        return pbinom_internal(k, n, p, complement=False, logp=False, approx=approx)
 
     @staticmethod
     def isf(q, n, p=0.5):
-        return qbinom(fractions.Fraction(1, 1) - fractions.Fraction(q), n, p)
+        return qbinom_internal(fractions.Fraction(1, 1) - fractions.Fraction(q), n, p, logTarget=False)
 
     @staticmethod
     def logcdf(k, n, p=0.5, approx=False):
-        return pbinom(k, n, p, logp=True, approx=approx)
+        return pbinom_internal(k, n, p, complement=False, logp=True, approx=approx)
 
     @staticmethod
     def logpmf(k, n, p=0.5):
-        return dbinom(k, n, p, logp=True)
+        return dbinom_internal(k, n, p, logp=True)
 
     @staticmethod
     def logsf(k, n, p=0.5, approx=False):
-        return pbinom(k, n, p, complement=True, logp=True, approx=approx)
+        return pbinom_internal(k, n, p, complement=True, logp=True, approx=approx)
 
     @staticmethod
     def median(n, p):
         # silly to have a p=0.5 default here
-        return qbinom(0.5, n, p)
+        return qbinom_internal(0.5, n, p, logTarget=False)
 
     @staticmethod
     def pmf(k, n, p=0.5):
-        return dbinom(k, n, p)
+        return dbinom_internal(k, n, p, logp=False)
 
     @staticmethod
-    def ppf(q, n, p=0.5):
-        return qbinom(q, n, p)
+    def ppf(q, n, p=0.5, logQ=False):
+        return qbinom_internal(q, n, p, logTarget=logQ)
 
     @staticmethod
     def sf(k, n, p=0.5, approx=False):
-        return pbinom(k, n, p, complement=True, approx=approx)
+        return pbinom_internal(k, n, p, complement=True, logp=True, approx=approx)
 
 binom = _BinomDist()
 
@@ -249,13 +262,7 @@ def binomtest(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", b
     return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, midp, logp))
 
 
-# This mirrors R dhyper()'s parameters.
-# Fisher's exact test correspondence:
-#   x -> a
-#   m -> a+c
-#   n -> b+d
-#   k -> a+b
-def dhyper(int64_t x, int64_t m, int64_t n, int64_t k, bint logp=0):
+cdef double dhyper_internal(int64_t x, int64_t m, int64_t n, int64_t k, bint logp) except? 2.0:
     if x < 0 or m < 0 or n < 0 or k < 0 or x >= (1LL << 52) or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
         raise RuntimeError("Parameters must be in [0, 2^52).")
     cdef int64_t b = k - x
@@ -267,8 +274,17 @@ def dhyper(int64_t x, int64_t m, int64_t n, int64_t k, bint logp=0):
         raise RuntimeError("m+n must be <2^52.")
     return flush_if_denormal(HypergeomMass(x, b, c, d, logp))
 
+# This mirrors R dhyper()'s parameters.
+# Fisher's exact test correspondence:
+#   x -> a
+#   m -> a+c
+#   n -> b+d
+#   k -> a+b
+def dhyper(int64_t x, int64_t m, int64_t n, int64_t k, bint logp=0):
+    return dhyper_internal(x, m, n, k, logp)
 
-def phyper(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail=1, bint logp=0, bint approx=0):
+
+cdef double phyper_internal(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail, bint logp, bint approx) except? 2.0:
     if x < 0 or m < 0 or n < 0 or k < 0 or x >= (1LL << 52) or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
         # Unlike pbinom(), we don't bother with returning NAN/0/1 in some of
         # these cases.
@@ -295,17 +311,11 @@ def phyper(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail=1, bint lo
         return flush_if_denormal(PhyperApprox(x, b, c, d, 0, 0, logp))
     return flush_if_denormal(Phyper(x, b, c, d, logp))
 
+def phyper(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail=1, bint logp=0, bint approx=0):
+    return phyper_internal(x, m, n, k, lowertail, logp, approx)
 
-# Returns smallest x in the distribution support for which cdf(x) >= p.
-#
-# Implementation is *not* built on top of phyper() in a way that e.g.
-# guarantees qhyper(phyper(x, m, n, k), m, n, k) == x or
-# qhyper(phyper(x, m, n, k) * (1 + 0.5**52), m, n, k) > a in non-degenerate
-# cases.  However, it is designed to make these outcomes very likely:
-# - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
-#   and achieves <0.5 ULP the vast majority of the time.
-# - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
-def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
+
+cdef int64_t qhyper_internal(object p, int64_t m, int64_t n, int64_t k, bint logp) except? -1:
     if m < 0 or n < 0 or k < 0 or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
         raise RuntimeError("m, n, and k must be in [0, 2^52).")
     if m + n >= (1LL << 52):
@@ -321,6 +331,18 @@ def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
             raise RuntimeError("p must be in [0, 1] when logp is False.")
     return QhyperHalfUlp(p_ddr, m, n, k, logp)
 
+# Returns smallest x in the distribution support for which cdf(x) >= p.
+#
+# Implementation is *not* built on top of phyper() in a way that e.g.
+# guarantees qhyper(phyper(x, m, n, k), m, n, k) == x or
+# qhyper(phyper(x, m, n, k) * (1 + 0.5**52), m, n, k) > a in non-degenerate
+# cases.  However, it is designed to make these outcomes very likely:
+# - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
+#   and achieves <0.5 ULP the vast majority of the time.
+# - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
+def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
+    return qhyper_internal(p, m, n, k, logp)
+
 
 # scipy-style interface.  Straightforward to fill in the missing methods (e.g.
 # .stats()) if it matters.
@@ -330,39 +352,39 @@ def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
 class _HypergeomDist:
     @staticmethod
     def cdf(k, M, n, N, approx=False):
-        return phyper(k, N, M-N, n, approx=approx)
+        return phyper_internal(k, N, M-N, n, lowertail=True, logp=False, approx=approx)
 
     @staticmethod
     def isf(q, M, n, N):
-        return qhyper(fractions.Fraction(1, 1) - fractions.Fraction(q), N, M-N, n)
+        return qhyper_internal(fractions.Fraction(1, 1) - fractions.Fraction(q), N, M-N, n, logp=False)
 
     @staticmethod
     def logcdf(k, M, n, N, approx=False):
-        return phyper(k, N, M-N, n, logp=True, approx=approx)
+        return phyper_internal(k, N, M-N, n, lowertail=True, logp=True, approx=approx)
 
     @staticmethod
     def logpmf(k, M, n, N):
-        return dhyper(k, N, M-N, n, logp=True)
+        return dhyper_internal(k, N, M-N, n, logp=True)
 
     @staticmethod
     def logsf(k, M, n, N, approx=False):
-        return phyper(k, N, M-N, n, lowertail=False, logp=True, approx=approx)
+        return phyper_internal(k, N, M-N, n, lowertail=False, logp=True, approx=approx)
 
     @staticmethod
     def median(M, n, N):
-        return qhyper(N, M-N, n)
+        return qhyper_internal(0.5, N, M-N, n, logp=False)
 
     @staticmethod
     def pmf(k, M, n, N):
-        return dhyper(k, N, M-N, n)
+        return dhyper_internal(k, N, M-N, n, logp=False)
 
     @staticmethod
     def ppf(q, M, n, N):
-        return qhyper(q, N, M-N, n)
+        return qhyper_internal(q, N, M-N, n, logp=False)
 
     @staticmethod
     def sf(k, M, n, N, approx=False):
-        return phyper(k, N, M-N, n, lowertail=False, approx=approx)
+        return phyper(k, N, M-N, n, lowertail=False, logp=False, approx=approx)
 
 hypergeom = _HypergeomDist()
 
@@ -433,6 +455,16 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
     return exp_flush(ln_result)
 
 
+cdef double HWE_exact_2sided_internal(int32_t hom1, int32_t hets, int32_t hom2, bint midp, bint logp) except? 2.0:
+    cdef int64_t total = <int64_t>(hom1) + <int64_t>(hets) + <int64_t>(hom2)
+    if hom1 < 0 or hets < 0 or hom2 < 0 or total > 0x7fffffff:
+        raise RuntimeError("hom1, hets and hom2 must be nonnegative and sum to <2^31")
+    cdef bint hets_is_greater_alt = 0
+    cdef double ln_result = HweLnP(hets, hom1, hom2, midp)
+    if logp:
+        return ln_result
+    return exp_flush(ln_result)
+
 # "HWE" is short for Hardy-Weinberg Equilibrium.
 #
 # hom1, hets, and hom2 must be nonnegative, and add up to <2^31.
@@ -444,19 +476,12 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
 #
 # Variants with k>2 alleles can be evaluated with k one-vs.-rest tests.
 def HWE_exact(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sided", bint midp=0, bint logp=0):
-    cdef int64_t total = <int64_t>(hom1) + <int64_t>(hets) + <int64_t>(hom2)
-    if hom1 < 0 or hets < 0 or hom2 < 0 or total > 0x7fffffff:
-        raise RuntimeError("hom1, hets, and hom2 must be nonnegative and sum to <2^31")
-    cdef bint hets_is_greater_alt = 0
-    cdef double ln_result
-    if alternative != "two-sided":
-        hets_is_greater_alt = (alternative == "greater")
-        if alternative != "less" and not hets_is_greater_alt:
-            raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
-        raise RuntimeError("one-sided tests not implemented yet")
-    else:
-        # note different parameter order
-        ln_result = HweLnP(hets, hom1, hom2, midp)
-    if logp:
-        return ln_result
-    return exp_flush(ln_result)
+    if alternative == "two-sided":
+        return HWE_exact_2sided_internal(hom1, hets, hom2, midp, logp)
+    cdef bint hets_is_greater_alt = (alternative == "greater")
+    if alternative != "less" and not hets_is_greater_alt:
+        raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
+    raise RuntimeError("one-sided tests not implemented yet")
+
+def snphwe(int32_t hets, int32_t hom1, int32_t hom2, bint midp=0, bint logp=0):
+    return HWE_exact_2sided_internal(hom1, hets, hom2, midp, logp)

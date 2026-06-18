@@ -77,7 +77,7 @@ def HWE_accuracy_test(maf: float, z: float, pow2s: list[int], num_trials_per_pow
             homc = (n_common - hets) // 2
 
             want = flush_if_denormal(mpfr_impls.snphwe(hets, homr, homc, bits=bits, return_log=logp))
-            got_base = flush_if_denormal(exact_tests.HWE_exact(homr, hets, homc, logp=logp))
+            got_base = flush_if_denormal(exact_tests.snphwe(hets, homr, homc, logp=logp))
             relerr = compute_relerr(got_base, want)
             relerr_base_ssq += relerr * relerr
             if not logp:

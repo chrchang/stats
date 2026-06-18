@@ -23,53 +23,53 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^20, 2^21): errRMS=0  approxErrRMS=5.08e-16  scipyErrRMS=1.01e-13
     n in [2^35, 2^36): errRMS=0  approxErrRMS=6.87e-16  scipyErrRMS=1.66e-11
     $ utils/pbinom_benchmark.py  # yes, default mode becomes slower than scipy for large n, that's why approx= exists
-    n=(2^5)-1: base=2.17e-06  approx=4.86e-07  scipy=3.73e-05 sec/iter
-    n=(2^20)-1: base=4.8e-05  approx=3.64e-06  scipy=3.33e-05 sec/iter
-    n=(2^35)-1: base=0.00114  approx=7.95e-05  scipy=9.98e-05 sec/iter
+    n=(2^5)-1: base=6.92e-07  approx=2.92e-07  scipy=2.99e-05 sec/iter
+    n=(2^20)-1: base=4.6e-05  approx=3.52e-06  scipy=2.99e-05 sec/iter
+    n=(2^35)-1: base=0.00113  approx=7.96e-05  scipy=9.5e-05 sec/iter
 
     $ utils/binomtest_accuracy.py --z-score 1
     n in [2^5, 2^6): errRMS=1.44e-16  scipyErrRMS=1.96e-16
     n in [2^20, 2^21): errRMS=5.4e-16  scipyErrRMS=6e-14
     n in [2^35, 2^36): errRMS=5.83e-16  scipyErrRMS=7.53e-12
-    $ utils/binomtest_benchmark.py --z-score 1  # ~50-100x speedup, better accuracy
-    n=(2^5)-1: base=3.72e-06  scipy=0.00021 sec/iter
-    n=(2^20)-1: base=5.17e-06  scipy=0.000478 sec/iter
-    n=(2^35)-1: base=7.36e-06  scipy=0.000775 sec/iter
+    $ utils/binomtest_benchmark.py --z-score 1  # ~100-200x speedup, better accuracy
+    n=(2^5)-1: base=8.42e-07  scipy=0.000189 sec/iter
+    n=(2^20)-1: base=4.03e-06  scipy=0.000464 sec/iter
+    n=(2^35)-1: base=5.67e-06  scipy=0.000774 sec/iter
 
     $ utils/phyper_accuracy.py --z-score -0.5  # scipy accuracy degrades quickly
     n in [2^5, 2^6): errRMS=0  approxErrRMS=1.72e-16  scipyErrRMS=2.84e-16
     n in [2^20, 2^21): errRMS=0  approxErrRMS=3.01e-15  scipyErrRMS=1.73e-10
     n in [2^35, 2^36): errRMS=0  approxErrRMS=3.93e-13  scipyErrRMS=1.05e-05
     $ utils/phyper_benchmark.py --z-score -0.5  # scipy speed is ok, except...
-    n=(2^5)-1: base=2.74e-06  approx=4.31e-07  scipy=4.45e-05 sec/iter
-    n=(2^20)-1: base=6.76e-05  approx=5.51e-06  scipy=5.36e-05 sec/iter
-    n=(2^35)-1: base=0.0069  approx=0.000402  scipy=0.00195 sec/iter
+    n=(2^5)-1: base=7.54e-07  approx=2.08e-07  scipy=3.51e-05 sec/iter
+    n=(2^20)-1: base=6.98e-05  approx=5.37e-06  scipy=4.35e-05 sec/iter
+    n=(2^35)-1: base=0.00697  approx=0.000401  scipy=0.00195 sec/iter
     $ utils/phyper_benchmark.py --z-score 0.0001  # ...it blows up for large n when z approaches 0.
-    n=(2^5)-1: base=2.53e-06  approx=4.44e-07  scipy=4.21e-05 sec/iter
-    n=(2^20)-1: base=7.16e-05  approx=5.67e-06  scipy=0.000502 sec/iter
-    n=(2^35)-1: base=0.0146  approx=0.000928  scipy=2.69 sec/iter
+    n=(2^5)-1: base=7.12e-07  approx=2.12e-07  scipy=3.51e-05 sec/iter
+    n=(2^20)-1: base=6.88e-05  approx=5.32e-06  scipy=0.000498 sec/iter
+    n=(2^35)-1: base=0.0147  approx=0.000873  scipy=2.69 sec/iter
     $ utils/phyper_benchmark.py
-    n=(2^5)-1: base=6.37e-05  approx=4.17e-07  scipy=4.57e-05 sec/iter
-    n=(2^20)-1: base=7.15e-05  approx=5.78e-06  scipy=0.000509 sec/iter
-    n=(2^35)-1: base=0.0146  approx=0.000854  scipy=14.7 sec/iter
+    n=(2^5)-1: base=7.33e-07  approx=2.12e-07  scipy=3.49e-05 sec/iter
+    n=(2^20)-1: base=6.87e-05  approx=5.32e-06  scipy=0.000492 sec/iter
+    n=(2^35)-1: base=0.0147  approx=0.000869  scipy=14.8 sec/iter
 
     $ utils/fisher_exact_22_accuracy.py --z-score -1
     n in [2^5, 2^6): errRMS=9.71e-17  scipyErrRMS=2.39e-16
     n in [2^20, 2^21): errRMS=3.17e-15  scipyErrRMS=1.85e-10
     n in [2^35, 2^36): errRMS=6.63e-13
-    $ utils/fisher_exact_22_benchmark.py --z-score -1  # ~60-75x speedup, better accuracy
-    n=(2^5)-1: base=4.4e-06  scipy=0.000284 sec/iter
-    n=(2^20)-1: base=9.21e-06  scipy=0.00069 sec/iter
-    n=(2^35)-1: base=0.000743 sec/iter
+    $ utils/fisher_exact_22_benchmark.py --z-score -1  # ~75-250x speedup, better accuracy
+    n=(2^5)-1: base=1.07e-06  scipy=0.000258 sec/iter
+    n=(2^20)-1: base=8.34e-06  scipy=0.000667 sec/iter
+    n=(2^35)-1: base=0.000742 sec/iter
 
     $ utils/HWE_accuracy.py --maf 0.05 --z-score 1
     n in [2^10, 2^11): errRMS=1.95e-16  snphweErrRMS=2.04e-16
     n in [2^15, 2^16): errRMS=2.9e-16  snphweErrRMS=6.48e-16
     n in [2^20, 2^21): errRMS=6.25e-16  snphweErrRMS=1.6e-15
-    $ utils/HWE_benchmark.py --maf 0.05 --z-score 1  # snphwe.snphwe() was accurate, but slow for biobank-scale cases (we're >200x as fast for n~=1m)
-    n=(2^10)-1: base=1.65e-07  snphwe=5.75e-07 sec/iter
-    n=(2^15)-1: base=3.85e-07  snphwe=1.25e-05 sec/iter
-    n=(2^20)-1: base=1.31e-06  snphwe=0.00038 sec/iter
+    $ utils/HWE_benchmark.py --maf 0.05 --z-score 1  # snphwe.snphwe() is accurate, but slow for biobank-scale cases (we're >200x as fast for n~=1m)
+    n=(2^10)-1: base=2.83e-07  snphwe=8.08e-07 sec/iter
+    n=(2^15)-1: base=4.5e-07  snphwe=1.24e-05 sec/iter
+    n=(2^20)-1: base=1.48e-06  snphwe=0.000388 sec/iter
 
 The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).

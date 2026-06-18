@@ -21,6 +21,7 @@ def parse_range_string(input_str: str):
 
 def binomtest_benchmark(p: float, z: float, pow2s: list[int], num_trials_per_pow2: int):
     pq = p * (1.0 - p)
+    warmup = exact_tests.binomtest(1, 2, 0.5)
     warmup = scipy.stats.binomtest(1, 2, 0.5)
     secs_scipy = 0.0
     for pow2 in pow2s:
@@ -48,7 +49,7 @@ def parse_commandline_args():
                              help="Binomial distribution success-probability to test.")
     optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
                              help="Test n=2**<these values> - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=3,
+    optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
     # scipy binomtest does not support logp.
     # optionalarg.add_argument('-l', '--logp', action="store_true",

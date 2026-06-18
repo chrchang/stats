@@ -18,6 +18,7 @@
 #include "hypergeom_detail.h"
 #include "plink2_float.h"
 #include "plink2_highprec.h"
+#include "special_func.h"
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -482,85 +483,29 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
     }
   }
 
+  // {a, b, c, d} are int64s, {m11, m12, m21, m22} are float64s.
   const double m1x = ab;
   const double m2x = abcd - ab;  // = max_d
+  const double mx1 = ac;
   const double mx2 = bd;
   const double mxx = abcd;
-  // max_d=1 doesn't play well with the current initial-guess algorithm, and is
-  // straightforward to handle directly.
-  if (max_d == 1) {
-    double m11 = m1x - mx2;
-    double m12 = mx2;
-    double m21 = m2x;
-    // double m22 = 0;
-
-    m11 += 1;
-    // m22 += 1;
-    // min(m12, m21) is guaranteed to be 1, so we don't need to multiply with
-    // dd_real precision.
-    dd_real lik_ddr = ddr_divd(ddr_maked(m12 * m21), m11);
-    // m12 -= 1;
-    // m21 -= 1;
-
-    // lik is now equal to pmf(1) / pmf(0).
-    // cdf(0) = pmf(0) / (pmf(0) + pmf(1))
-    //        = 1 / (1 + lik)
-    // p < cdf(0) -> p < 1 / (1 + lik)
-    //               p * (1 + lik) < 1
-    const dd_real p_ddr = logp? ddr_exp(p_or_lnp_ddr) : p_or_lnp_ddr;
-    const int64_t d = ddr_geqd(ddr_mul(p_ddr, ddr_addd(lik_ddr, 1.0)), 1.0);
-    return final_return_incr + (inv? (1 - d) : d);
-  }
-  // We make an initial guess, use Newton's method to refine it (in the same
-  // way as Fisher22TwoSidedP() when jumping from one tail to the other),
-  // calculate tail probability to sufficient accuracy, and then start moving
-  // d inward and updating tail probability until it crosses p.  This avoids
-  // repetition of the tail-probability calculation.
-  //
-  // Initial guess is based on fitting a quadratic to three points of the
-  // log-probability function near the mode.  Log-probability is
-  //   log(ab! cd! ac! bd! / (a! b! c! d! abcd!))
-  //   = <constant> - log(a! b! c! d!)
-  // First derivative w.r.t. d is
-  //   -digamma(a+1) + digamma(b+1) + digamma(c+1) - digamma(d+1)
-  // Second derivative is
-  //   -trigamma(a+1) - trigamma(b+1) - trigamma(c+1) - trigamma(d+1)
-  //   ~= -(1/(a+1) + 1/(b+1) + 1/(c+1) + 1/(d+1))
-  // which is slowly varying near the mode in larger cases.
-  //
-  // Probable todo: Cornish-Fisher expansion should be applicable here.
-  int64_t modal_d = S_CAST(int64_t, 0.5 + (m2x * mx2) / mxx);
-  modal_d = modal_d + (modal_d == 0) - (modal_d == abcd);
-  const double modal_dd = modal_d;
-  // {a, b, c, d} are int64s, {m11, m12, m21, m22} are float64s.
+  // ok if this is off by 1, so we don't use dd_reals
+  const double modal_dd = ceil((m2x + 1) * (mx2 + 1) / (mxx + 2)) - 1;
   const double m11_minus_m22 = a_minus_d;
-  double m22 = modal_dd;
-  double m11 = m11_minus_m22 + m22;
-  double m12 = mx2 - m22;
-  double m21 = m2x - m22;
   td_real lnprobf_tdr;
   const uint32_t use_tdr = use_tdr_for_hypergeom_lnprob(abcd);
   if (!use_tdr) {
-    lnprobf_tdr = tdr_make_dd(ddr_sub(ddr_sort_and_add_4_lfacts(m1x, m2x, mxx - mx2, mx2),
+    lnprobf_tdr = tdr_make_dd(ddr_sub(ddr_sort_and_add_4_lfacts(m1x, m2x, mx1, mx2),
                                       ddr_lfact(mxx)));
   } else {
     td_real numer_tdrs[4];
     numer_tdrs[0] = tdr_lfact(m1x);
     numer_tdrs[1] = tdr_lfact(m2x);
-    numer_tdrs[2] = tdr_lfact(mxx - mx2);
+    numer_tdrs[2] = tdr_lfact(mx1);
     numer_tdrs[3] = tdr_lfact(mx2);
     lnprobf_tdr = tdr_sub(tdr_sort_and_add(4, numer_tdrs),
                           tdr_lfact(mxx));
   }
-  const dd_real mode_lnprob_ddr = ddr_sub(ddr_make_td(lnprobf_tdr),
-                                          ddr_sort_and_add_4_lfacts(m11, m12, m21, m22));
-  const dd_real modem1_lnprob_incr_ddr = ddr_log(ddr_accurate_div(ddr_mul2d(m11, m22), ddr_mul2d(m12 + 1, m21 + 1)));
-  const dd_real modep1_lnprob_incr_ddr = ddr_log(ddr_accurate_div(ddr_mul2d(m12, m21), ddr_mul2d(m11 + 1, m22 + 1)));
-
-  const double x2_coeff = 0.5 * ddr_add(modem1_lnprob_incr_ddr, modep1_lnprob_incr_ddr).x[0];
-  const double x1_coeff = 0.5 * ddr_sub(modep1_lnprob_incr_ddr, modem1_lnprob_incr_ddr).x[0];
-  // Better numerical behavior if we let x=0 correspond to the mode.
-  const double x0_coeff = mode_lnprob_ddr.x[0];
 
   // 1. Identify d<mode such that
   //      pmf(d) * (d+1) < p
@@ -577,22 +522,22 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
   // y=log(p/mode).  If there's no such point, just start at x=mode-1.
   // (Could recalculate target_lnprob with mode replaced with d when
   // log(pmf(d)) is too high.)
-  const double search_lnprob = target_lnprob_ddr.x[0] - log(m22);
-  // (-b - sqrt(b^2 - 4ac)) / 2a
-  const double discrim = x1_coeff * x1_coeff - 4 * x2_coeff * (x0_coeff - search_lnprob);
-  if (discrim < 0.0) {
-    m22 -= 1;
+  const double search_lnprob = target_lnprob_ddr.x[0] - log(MAXV(1, modal_dd));
+  const double zscore = QuantileToZscoreD(search_lnprob, 1);
+  const double variance = (max_d > 1)? ((m1x * m2x * mx1 * mx2) / (mxx * mxx * (mxx - 1))) : 0.0;
+  const double stdev = sqrt(variance);
+  // We'd much rather undershoot than overshoot, so we throw in an extra
+  // -0.25 * (mode)^{1/4}.
+  double m22 = zscore * stdev + modal_dd - 0.25 * sqrt(sqrt(modal_dd));
+  if (m22 < 0) {
+    m22 = 0;
   } else {
-    double sqrt_discrim = sqrt(discrim);
-    if (x2_coeff > 0.0) {
-      // this shouldn't happen
-      sqrt_discrim = -sqrt_discrim;
-    }
-    m22 = trunc(modal_dd + (sqrt_discrim - x1_coeff) / (2 * x2_coeff));
-    if (m22 < 0) {
-      m22 = 0;
-    }
+    // m22 > max_d should be impossible since zscore should be nonpositive.
+    m22 = trunc(m22);
   }
+  double m11 = m11_minus_m22 + m22;
+  double m12 = mx2 - m22;
+  double m21 = m2x - m22;
   // Our relative error budget is usually 2^{-54}.
   // We want to ensure that accumulated error when evaluating the outer part
   // of the tailsum using plain float64 arithmetic < 2^{-55}.  Then the other

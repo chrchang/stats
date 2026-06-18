@@ -20,6 +20,7 @@ def parse_range_string(input_str: str):
 
 
 def fisher_exact_22_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trials_per_pow2: int):
+    warmup = exact_tests.fisher_exact([[1, 1], [1, 1]])
     warmup = scipy.stats.fisher_exact([[1, 1], [1, 1]])
     for pow2 in pow2s:
         n = 2**pow2 - 1
@@ -59,7 +60,7 @@ def parse_commandline_args():
                              help="Proportion of total in first column.")
     optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
                              help="Test n=2**<these values> - 1.")
-    optionalarg.add_argument('-n', '--number', type=int, default=3,
+    optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
     # scipy fisher_exact does not support logp.
     # optionalarg.add_argument('-l', '--logp', action="store_true",

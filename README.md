@@ -27,6 +27,8 @@ Test program usage examples:
     Two-sided p-value: 1.04869e-15748396144
     $ ./fisher_demo 20 30 40 50 60 70
     P-value: 0.780903
+    $ ./fisher_demo 5000000000 5000000000 5000000000 4900000000
+    P-value: 2.23841e-110228
     $ ./hwe_demo 16 3 81
     P-value: 0.0899446
 
