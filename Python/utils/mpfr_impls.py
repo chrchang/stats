@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import gmpy2
+import math
 
 
 # MPFR-based implementations of most functions, for verification purposes.
@@ -58,6 +59,7 @@ def binom_pmf(k: int, n: int, p: float, bits: int, return_log: bool):
 
 
 def binom_cdf(k: int, n: int, p: float, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
     # Assumes 0 < p < 1.
     # Implementation doesn't take advantage of the Aroian/DiDonato/Morris
     # continued fraction, since much of the point of this function is to
@@ -77,8 +79,6 @@ def binom_cdf(k: int, n: int, p: float, bits: int, return_log: bool):
     if k == n:
         # Special-cased so that inversion can't yield k=-1.
         return float_from_ln(0.0, return_log)
-
-    gmpy2.get_context().precision = bits
 
     p = gmpy2.mpfr(p)
     # We avoid the variable name 'logp' in this function; 'return_log' and
@@ -112,6 +112,7 @@ def binom_cdf(k: int, n: int, p: float, bits: int, return_log: bool):
 
 
 def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
     # Assumes 0 < p < 1.
     # Assumes alternative="two-sided", since the "less" and "greater" cases
     # reduce to single binom_cdf() calls.
@@ -124,7 +125,6 @@ def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
     #    pmf(obs_k).
     # 4. Use binom_cdf() to calculate right-tail probability, return sum of
     #    tails.
-    gmpy2.get_context().precision = bits
 
     eps_bits = (bits * 3) // 4
     eps = gmpy2.exp2(-eps_bits)
@@ -280,9 +280,212 @@ def fisher_exact_22(obs_a: int, obs_b: int, obs_c: int, obs_d: int, bits: int, r
     return float_from_ln(ln_total, return_log)
 
 
-# todo: implement odds-ratio functions here.  odds_ratio_concordance is weak
-# sauce when it takes so little additional work to provide a real accuracy
-# measurement.
+# For speed, we use roughly the same Newton-iteration logic as the code we're
+# verifying.  This is low-risk since we're dealing with smooth strictly
+# increasing/decreasing functions and simple termination conditions; if there's
+# a shared Newton-iteration bug, we fail to terminate or obviously
+# overflow/underflow, rather than subtly returning a shared wrong result.
+def nchypergeom_fisher_approx_mode(m1, m2, n, odds):
+    if odds == 1:
+        # Avoid division by zero.
+        return gmpy2.floor(gmpy2.mpfr((m1 + 1) * (n + 1)) / gmpy2.mpfr(m1 + m2 + 2))
+    # Solve for m11 satisfying m11 * m22 == m12 * m21 * odds.
+    aa = 1 - odds
+    bb = (m1 + n) * odds + (m2 - n)
+    neg_c = odds * (m1 * n)
+    discrim = bb * bb + 4 * aa * neg_c
+    sqrt_discrim = gmpy2.mpfr(0.0)
+    if discrim > 0:
+        sqrt_discrim = gmpy2.sqrt(discrim)
+    return int((sqrt_discrim - bb) / (2 * aa))
+
+def nchypergeom_fisher_mean(m1, m2, n, odds):
+    mode = nchypergeom_fisher_approx_mode(m1, m2, n, odds)
+    lik = gmpy2.mpfr(1.0)
+    m11 = mode
+    m12 = m1 - mode
+    m21 = n - mode
+    m22 = m2 - m21
+    # Iterate rightward until convergence.
+    rnumer = gmpy2.mpfr(mode)
+    rdenom = gmpy2.mpfr(1.0)
+    while True:
+        m11 += 1
+        m22 += 1
+        lik *= (m12 * m21) * odds
+        lik /= m11 * m22
+        m12 -= 1
+        m21 -= 1
+        preadd = rnumer
+        rnumer += lik * m11
+        if preadd == rnumer:
+            break
+        rdenom += lik
+    # Jump back to mode, and then iterate leftward until left-sums converge.
+    lik = gmpy2.mpfr(1.0)
+    m11 = mode
+    m12 = m1 - mode
+    m21 = n - mode
+    m22 = m2 - m21
+    lnumer = gmpy2.mpfr(0.0)
+    ldenom = gmpy2.mpfr(0.0)
+    while True:
+        m12 += 1
+        m21 += 1
+        lik *= m11 * m22
+        lik /= (m12 * m21) * odds
+        m11 -= 1
+        m22 -= 1
+        preadd = ldenom
+        ldenom += lik
+        if preadd == ldenom:
+            break
+        lnumer += lik * m11
+    return (lnumer + rnumer) / (ldenom + rdenom)
+
+def nchypergeom_fisher_variance_from_mean(m1, m2, n, odds, mean):
+    total = m1 + m2
+    if odds == 1:
+        # Avoid division by zero.
+        if total < 2:
+            return gmpy2.mpfr(0.0)
+        return gmpy2.mpfr(m1 * n * (total - m1) * (total - n)) / gmpy2.mpfr(total * total * (total - 1))
+    first_term = ((m1 * n) * odds - total * mean) / (1 - odds)
+    second_term = mean * (mean - (m1 + n))
+    return first_term - second_term
+
+def nchypergeom_fisher_mean_deriv_odds(m1, m2, n, odds, mean):
+    return nchypergeom_fisher_variance_from_mean(m1, m2, n, odds, mean) / odds
+
+def nchypergeom_fisher_cdf2(obs_m11, obs_m12, obs_m21, obs_m22, odds1, odds2):
+    # Assumes odds1 <= odds2, and they're close to each other.
+    lik1 = gmpy2.mpfr(1.0)
+    lik2 = gmpy2.mpfr(1.0)
+    m11 = obs_m11
+    m12 = obs_m12
+    m21 = obs_m21
+    m22 = obs_m22
+    # Iterate rightward until convergence.
+    right_sum1 = gmpy2.mpfr(0.0)
+    right_sum2 = gmpy2.mpfr(0.0)
+    while True:
+        m11 += 1
+        m22 += 1
+        shared_mult = gmpy2.mpfr(m12 * m21) / gmpy2.mpfr(m11 * m22)
+        lik1 *= shared_mult * odds1
+        lik2 *= shared_mult * odds2
+        m12 -= 1
+        m21 -= 1
+        preadd = right_sum2
+        right_sum2 += lik2
+        if preadd == right_sum2:
+            break
+        right_sum1 += lik1
+    # Don't need to worry about right_sum2 overflow here.
+    lik1 = gmpy2.mpfr(1.0)
+    lik2 = gmpy2.mpfr(1.0)
+    m11 = obs_m11
+    m12 = obs_m12
+    m21 = obs_m21
+    m22 = obs_m22
+    inv_odds1 = 1.0 / odds1
+    inv_odds2 = 1.0 / odds2
+    left_sum1 = lik1
+    left_sum2 = lik2
+    while True:
+        m12 += 1
+        m21 += 1
+        shared_mult = gmpy2.mpfr(m11 * m22) / gmpy2.mpfr(m12 * m21)
+        lik1 *= shared_mult * inv_odds1
+        lik2 *= shared_mult * inv_odds2
+        m11 -= 1
+        m22 -= 1
+        preadd = left_sum1
+        left_sum1 += lik1
+        if preadd == left_sum1:
+            break
+        left_sum2 += lik2
+    return (left_sum1 / (left_sum1 + right_sum1)), (left_sum2 / (left_sum2 + right_sum2))
+
+def logit(p):
+    return gmpy2.log(p / (1-p))
+
+def cond_odds_ratio_quantile_match(m11, m12, m21, m22, target_p):
+    # Degenerate cases.
+    if (m12 == 0) or (m21 == 0):
+        if (m11 == 0) or (m22 == 0):
+            return 1.0
+        return math.inf
+    if target_p <= 0.0:
+        return math.inf
+    if target_p >= 1.0:
+        return 0.0
+
+    bits = gmpy2.get_context().precision
+    eps = gmpy2.exp2(-(bits // 2))
+    half_eps = gmpy2.exp2(-(1 + (bits // 2)))
+    one_plus_half_eps = 1 + half_eps
+    one_minus_half_eps = 1 - half_eps
+    # Just use initial guess of 1, this forces a different iteration path than
+    # code we're verifying (and incidentally checks some shared odds=1
+    # special-case logic)
+    odds1 = gmpy2.mpfr(1.0)
+    logit_target_p = logit(target_p)
+    while True:
+        odds2 = odds1 * one_plus_half_eps
+        odds1 *= one_minus_half_eps
+        # As odds ratio increases, p decreases, so we'll get p2 <= p1.
+        p1, p2 = nchypergeom_fisher_cdf2(m11, m12, m21, m22, odds1, odds2)
+        # Interpolate or take a Newton step, treating logit(p) as a linear
+        # function of log-odds.
+        logit_p1 = logit(p1)
+        logit_p2 = logit(p2)
+        if (target_p >= p2) and (target_p <= p1):
+            interp = (logit_target_p - logit_p2) / (logit_p1 - logit_p2)
+            return odds2 * (1 - eps * interp)
+        logitp_deriv_lnodds = (logit_p2 - logit_p1) / eps
+        if target_p < p2:
+            lnodds_incr = (logit_target_p - logit_p2) / logitp_deriv_lnodds
+            odds1 = odds2 * gmpy2.exp(lnodds_incr)
+        else:
+            lnodds_incr = (logit_target_p - logit_p1) / logitp_deriv_lnodds
+            odds1 *= gmpy2.exp(lnodds_incr)
+
+
+def cond_odds_ratio(m11: int, m12: int, m21: int, m22: int, bits: int):
+    gmpy2.get_context().precision = bits
+    # Degenerate cases.
+    m11_is_maximal = (m12 == 0) or (m21 == 0)
+    if (m11 == 0) or (m22 == 0):
+        if m11_is_maximal:
+            return 1.0
+        return 0.0
+    if m11_is_maximal:
+        return math.inf
+    eps = gmpy2.exp2(-(bits // 2))
+    m1 = m11 + m12
+    m2 = m21 + m22
+    n = m11 + m21
+    # +0.5 to force different iteration path than code we're verifying
+    odds = gmpy2.mpfr(m11 + 0.5) * gmpy2.mpfr(m22 + 0.5) / (gmpy2.mpfr(m12 + 0.5) * gmpy2.mpfr(m21 + 0.5))
+    while True:
+        mean = nchypergeom_fisher_mean(m1, m2, n, odds)
+        mean_delta = m11 - mean
+        mean_deriv_odds = nchypergeom_fisher_mean_deriv_odds(m1, m2, n, odds, mean)
+        if mean_deriv_odds <= 0:
+            raise RuntimeError("non-positive mean_deriv_odds")
+        odds_incr = mean_delta / mean_deriv_odds
+        odds += odds_incr
+        if abs(odds_incr) < odds * eps:
+            return odds
+
+
+# def cond_odds_ratio_quantile_match(m11, m12, m21, m22, target_p):
+def cond_odds_ratio_ci(m11: int, m12: int, m21: int, m22: int, low=0.025, high=0.975, bits=256):
+    gmpy2.get_context().precision = bits
+    low_result = to_float(1.0 / cond_odds_ratio_quantile_match(m12, m11, m22, m21, gmpy2.mpfr(low)))
+    high_result = to_float(cond_odds_ratio_quantile_match(m11, m12, m21, m22, 1.0 - gmpy2.mpfr(high)))
+    return low_result, high_result
 
 
 # For 2x3 and larger fisher_exact tables, verification should involve some
@@ -295,11 +498,11 @@ def fisher_exact_22(obs_a: int, obs_b: int, obs_c: int, obs_d: int, bits: int, r
 
 
 def snphwe(obs_hets: int, hom1: int, hom2: int, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
     # After one-sided HWE tests are implemented, we'll implement a
     # Levene-Haldane cdf function, and maybe modify this function to call it.
     # But this implementation is efficient enough if we aren't very far from
     # the mode.
-    gmpy2.get_context().precision = bits
 
     lik = gmpy2.mpfr(1.0)  # Normalize starting table to likelihood 1.
     tail_sum = gmpy2.mpfr(1.0)  # It's in the tail.

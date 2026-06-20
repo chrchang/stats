@@ -212,8 +212,8 @@ void P_FNCHypergeoTwoOdds(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int
   m22 = obs_m22;
   const double inv_odds1 = 1.0 / odds1;
   const double inv_odds2 = 1.0 / odds2;
-  double left_sum1 = k2m52;
-  double left_sum2 = k2m52;
+  double left_sum1 = lik1;
+  double left_sum2 = lik2;
   while (1) {
     m12 += 1;
     m21 += 1;
