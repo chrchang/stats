@@ -18,8 +18,10 @@
 #include <math.h>
 
 #include "hypergeom_detail.h"
+#include "nchypergeom_fisher.h"
 #include "plink2_float.h"
 #include "plink2_highprec.h"
+#include "special_func.h"
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -30,9 +32,9 @@ namespace plink2 {
 // floating-point conversions are sometimes faster than the same-width unsigned
 // int <-> floating-point conversions.
 //
-// (Note that the odds-ratio and odds-ratio-confidence-interval reported by R
-// fisher.test can also be calculated efficiently, using e.g. the approach in
-// the R BiasedUrn package's meanFNCHypergeo() and pFNCHypergeo() functions.)
+// possible todo: add support for R fisher.test's 'or' (null-hypothesis odds
+// ratio) parameter.  This is straightforward for logp=False, and there should
+// be no practical need for logp=True (which isn't supported by R) there.
 double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
@@ -347,6 +349,129 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
     m21 -= 1;
   }
   return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+}
+
+double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22) {
+  // R's conditional MLE.
+  const int32_t m11_is_maximal = (obs_m12 == 0) || (obs_m21 == 0);
+  if ((obs_m11 == 0) || (obs_m22 == 0)) {
+    // If table is degenerate (a row and/or column sums to 0), I think 1 is a
+    // more appropriate return value than 0.
+    return S_CAST(double, m11_is_maximal);
+  }
+  if (m11_is_maximal) {
+    return INFINITY_D;
+  }
+  const double m11d = obs_m11;
+  const int64_t m1 = obs_m11 + obs_m12;
+  const int64_t m2 = obs_m21 + obs_m22;
+  const int64_t n = obs_m11 + obs_m21;
+  // Set initial guess to unconditional MLE, use Newton's method until we have
+  // float32-level accuracy (relative error < 2^{-24}).
+  double odds = S_CAST(double, obs_m11) * S_CAST(double, obs_m22) / (S_CAST(double, obs_m12) * S_CAST(double, obs_m21));
+  while (1) {
+    const double mean = MeanFNCHypergeo(m1, m2, n, odds);
+    const double mean_delta = m11d - mean;
+    if (mean_delta == 0.0) {
+      return odds;
+    }
+    const double mean_deriv_odds = MeanFNCHypergeoDerivOdds(m1, m2, n, odds, mean);
+    assert(mean_deriv_odds != 0.0);
+    const double odds_incr = mean_delta / mean_deriv_odds;
+    // printf("%.17g: %.17g %.17g %.17g\n", odds, mean, mean_deriv_odds, odds_incr);
+    odds += odds_incr;
+    if (fabs(odds_incr) < odds * (1.0 / (1 << 24))) {
+      return odds;
+    }
+  }
+}
+
+double logit_bounded(double p) {
+  if (p == 1.0) {
+    return 54 * kLn2;
+  }
+  if (p == 0.0) {
+    return -1075 * kLn2;
+  }
+  return log(p / (1-p));
+}
+
+double Fisher22OddsRatioQuantileMatch(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double target_p) {
+  if ((obs_m12 == 0) || (obs_m21 == 0)) {
+    // Degenerate cases.
+    if ((obs_m11 == 0) || (obs_m22 == 0)) {
+      return 1.0;
+    }
+    return INFINITY_D;
+  }
+  if (target_p <= k2m54) {
+    return INFINITY_D;
+  }
+  if (target_p >= 1.0) {
+    return 0.0;
+  }
+  // Initial guess: calculate unconditional MLE, map target_p to z-score, etc.
+  const double m11_p05 = S_CAST(double, obs_m11) + 0.5;
+  const double m12_p05 = S_CAST(double, obs_m12) + 0.5;
+  const double m21_p05 = S_CAST(double, obs_m21) + 0.5;
+  const double m22_p05 = S_CAST(double, obs_m22) + 0.5;
+  const double ln_or = log(m11_p05 * m22_p05 / (m12_p05 * m21_p05));
+  const double se_ln_or = sqrt(1.0/m11_p05 + 1.0/m12_p05 + 1.0/m21_p05 + 1.0/m22_p05);
+  const double zscore = QuantileToZscoreD(target_p, 0);
+  double odds1 = exp(ln_or - zscore * se_ln_or);
+  double odds2;
+  if (odds1 >= 1.0) {
+    odds2 = odds1 * (1.0 + k2m25);
+    if (odds2 > (1.0/DBL_MIN)) {
+      odds2 = 1.0/DBL_MIN;
+    }
+    odds1 = odds2 * (1.0 - k2m24);
+  } else {
+    odds1 = odds1 * (1.0 - k2m25);
+    if (odds1 < DBL_MIN) {
+      odds1 = DBL_MIN;
+    }
+    odds2 = odds1 * (1.0 + k2m24);
+  }
+  const double logit_target_p = logit_bounded(target_p);
+  while (1) {
+    // As odds ratio increases, p decreases, so we'll get p2 <= p1.
+    double p1;
+    double p2;
+    P_FNCHypergeoTwoOdds(obs_m11, obs_m12, obs_m21, obs_m22, odds1, odds2, &p1, &p2);
+    // Interpolate or take a Newton step, treating logit(p) as a linear
+    // function of log-odds.
+    const double logit_p1 = logit_bounded(p1);
+    const double logit_p2 = logit_bounded(p2);
+    if ((target_p >= p2) && (target_p <= p1)) {
+      const double interp = (logit_target_p - logit_p2) / (logit_p1 - logit_p2);
+      return odds2 * (1 - k2m24 * interp);
+    }
+    const double logitp_deriv_lnodds = (logit_p2 - logit_p1) / k2m24;  // negative
+    if (target_p < p2) {
+      if (odds2 == 1.0/DBL_MIN) {
+        // Is this possible?
+        return INFINITY_D;
+      }
+      const double lnodds_incr = (logit_target_p - logit_p2) / logitp_deriv_lnodds;
+      odds2 *= exp(lnodds_incr) * (1 + k2m25);
+      if (odds2 > (1.0/DBL_MIN)) {
+        odds2 = 1.0/DBL_MIN;
+      }
+      odds1 = odds2 * (1 - k2m24);
+    } else {
+      // target_p > p1
+      if (odds1 == DBL_MIN) {
+        return 0;
+      }
+      const double lnodds_incr = (logit_target_p - logit_p1) / logitp_deriv_lnodds;
+      odds1 *= exp(lnodds_incr) * (1 - k2m25);
+      if (odds1 < DBL_MIN) {
+        odds1 = DBL_MIN;
+      }
+      odds2 = odds1 * (1 + k2m24);
+    }
+  }
 }
 
 // Switch between log- and regular representations at kSwitchThresh.

@@ -77,6 +77,8 @@ static const double INFINITY_D = S_CAST(double, INFINITY);
 //     log: 0.946 ULP (Newlib 4.4.0, OpenLibm 0.8.3, FreeBSD 14.1)
 //     log1p: 1.74 ULP (ArmPL 24.04)
 //     sqrt: 0.5 ULP
+static const double k2m24 = 1.0 / (1LL << 24);
+static const double k2m25 = 1.0 / (1LL << 25);
 static const double k2m32 = 1.0 / (1LL << 32);
 static const double k2m50 = 1.0 / (1LL << 50);
 static const double k2m52 = 1.0 / (1LL << 52);

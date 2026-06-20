@@ -19,6 +19,7 @@ ext_modules = [
                          "src/include/fisher.cc",
                          "src/include/hypergeom.cc",
                          "src/include/hypergeom_detail.cc",
+                         "src/include/nchypergeom_fisher.cc",
                          "src/include/plink2_base.cc",
                          "src/include/plink2_float.cc",
                          "src/include/plink2_hwe.cc",
@@ -36,7 +37,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.6.3",
+    version="0.7.0",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",

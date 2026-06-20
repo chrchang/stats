@@ -377,6 +377,27 @@ double Lfact(double xx) {
   return log(xx) * (xx + 0.5) + small_term_sum;
 }
 
+dd_real ddr_sqrt(const dd_real a) {
+  // Assumes 'a' is nonnegative.
+  //
+  // Strategy: Use Karps trick: if x is an approximation
+  // to sqrt(a), then
+  //
+  //   sqrt(a) = a*x + [a - (a*x)^2] * x / 2  (approx)
+  //
+  // The approximation is accurate to twice the accuracy of x.
+  // Also, the multiplication (a*x) and [-]*x can be done with
+  // only half the precision.
+
+  if (ddr_is_zero(a)) {
+    return ddr_maked(0.0);
+  }
+
+  const double x = 1.0 / sqrt(a.x[0]);
+  const double ax = a.x[0] * x;
+  return ddr_add2d(ddr_sub(a, ddr_mul2d(ax, ax)).x[0] * (x * 0.5), ax);
+}
+
 dd_real ddr_exp(const dd_real a) {
   // Strategy: We first reduce the size of x by noting that
   //

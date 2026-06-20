@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.6.3"
+__version__ = "0.7.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -55,6 +55,10 @@ cdef extern from "../include/hypergeom.h" namespace "plink2":
 
 cdef extern from "../include/fisher.h" namespace "plink2":
     double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) nogil
+
+    double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22) nogil
+
+    double Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double* lowp, double* highp) nogil
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
@@ -170,8 +174,8 @@ cdef int64_t qbinom_internal(object targetP, int64_t n, object succP, bint logTa
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct succp_tdr = TdrMake(succP)
-    if (tdr_ltd(succp_tdr, 0.5**960) and not tdr_is_zero(succp_tdr)) or (tdr_gt(succp_tdr, tdr_make2(1, -(0.5**960))) and not tdr_is(succp_tdr, 1)):
-        raise RuntimeError("succP must be 0, 1, or in [2^{-960}, 1 - 2^{-960}].")
+    if tdr_ltd(succp_tdr, 0.0) or tdr_gt(succp_tdr, 1.0):
+        raise RuntimeError("succP must be in [0, 1].")
     # td_real is overkill when we're explicitly subtracting off 0.5 ULP... but
     # dd_real still provides meaningful value over plain float64 here.
     cdef dd_real_struct targetp_or_lnp_ddr = DdrMake(targetP)
@@ -453,6 +457,33 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
     if logp:
         return ln_result
     return exp_flush(ln_result)
+
+
+# Point estimate provided by R fisher.test.
+def cond_odds_ratio(int64_t m11, int64_t m12, int64_t m21, int64_t m22):
+    if m11 < 0 or m12 < 0 or m21 < 0 or m22 < 0:
+        raise RuntimeError("table entries must be nonnegative")
+    if m11 >= (1LL << 52) or m12 >= (1LL << 52) or m21 >= (1LL << 52) or m22 >= (1LL << 52):
+        raise RuntimeError("table entries must be <2^52")
+    cdef int64_t total = m11 + m12 + m21 + m22
+    if total >= (1LL << 52):
+        raise RuntimeError("table entries must sum to <2^52")
+    return Fisher22OddsRatio(m11, m12, m21, m22)
+
+
+# CI provided by R fisher.test.
+def cond_odds_ratio_ci(int64_t m11, int64_t m12, int64_t m21, int64_t m22, double low=0.025, double high=0.975):
+    if m11 < 0 or m12 < 0 or m21 < 0 or m22 < 0:
+        raise RuntimeError("table entries must be nonnegative")
+    if m11 >= (1LL << 52) or m12 >= (1LL << 52) or m21 >= (1LL << 52) or m22 >= (1LL << 52):
+        raise RuntimeError("table entries must be <2^52")
+    cdef int64_t total = m11 + m12 + m21 + m22
+    if total >= (1LL << 52):
+        raise RuntimeError("table entries must sum to <2^52")
+    if low > high:
+        raise RuntimeError("low can't be greater than high")
+    Fisher22OddsRatioCI(m11, m12, m21, m22, &low, &high)
+    return (low, high)
 
 
 cdef double HWE_exact_2sided_internal(int32_t hom1, int32_t hets, int32_t hom2, bint midp, bint logp) except? 2.0:

@@ -19,9 +19,9 @@ def parse_range_string(input_str: str):
     return result
 
 
-def fisher_exact_22_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trials_per_pow2: int):
-    warmup = exact_tests.fisher_exact([[1, 1], [1, 1]])
-    warmup = scipy.stats.fisher_exact([[1, 1], [1, 1]])
+def odds_ratio_benchmark(ab: float, ac: float, z: float, pow2s: list[int], num_trials_per_pow2: int, omit_scipy_ci: bool):
+    warmup = exact_tests.cond_odds_ratio(1, 1, 1, 1)
+    warmup = scipy.stats.contingency.odds_ratio([[1, 1], [1, 1]])
     for pow2 in pow2s:
         n = 2**pow2 - 1
         cur_ab = round(ab * n)
@@ -37,14 +37,22 @@ def fisher_exact_22_benchmark(ab: float, ac: float, z: float, pow2s: list[int], 
             a = min_a
         elif a > min(cur_ab, cur_ac):
             a = min(cur_ab, cur_ac)
-        table = [[a, cur_ab - a], [cur_ac - a, d_minus_a + a]]
-        secs_base = timeit.timeit(lambda: exact_tests.fisher_exact(table), number=num_trials_per_pow2) / num_trials_per_pow2
+        b = cur_ab - a
+        c = cur_ac - a
+        d = d_minus_a + a
+        table = [[a, b], [c, d]]
+        est_secs_base = timeit.timeit(lambda: exact_tests.cond_odds_ratio(a, b, c, d), number=num_trials_per_pow2) / num_trials_per_pow2
+        ci_secs_base = timeit.timeit(lambda: exact_tests.cond_odds_ratio_ci(a, b, c, d), number=num_trials_per_pow2) / num_trials_per_pow2
         if pow2 < 32:
             # scipy implementation uses int32s
-            secs_scipy = timeit.timeit(lambda: scipy.stats.fisher_exact(table), number=num_trials_per_pow2) / num_trials_per_pow2
-            print(f"n=(2^{pow2})-1: base={secs_base:.3g}  scipy={secs_scipy:.3g} sec/iter")
+            est_secs_scipy = timeit.timeit(lambda: scipy.stats.contingency.odds_ratio(table), number=num_trials_per_pow2) / num_trials_per_pow2
+            if not omit_scipy_ci:
+                ci_secs_scipy = timeit.timeit(lambda: scipy.stats.contingency.odds_ratio(table).confidence_interval(), number=num_trials_per_pow2) / num_trials_per_pow2
+                print(f"n=(2^{pow2})-1: est={est_secs_base:.3g}  ci={ci_secs_base:.3g}  scipy_est={est_secs_scipy:.3g}  scipy_ci={ci_secs_scipy:.3g} sec/iter")
+            else:
+                print(f"n=(2^{pow2})-1: est={est_secs_base:.3g}  ci={ci_secs_base:.3g}  scipy_est={est_secs_scipy:.3g} sec/iter")
         else:
-            print(f"n=(2^{pow2})-1: base={secs_base:.3g} sec/iter")
+            print(f"n=(2^{pow2})-1: est={est_secs_base:.3g}  ci={ci_secs_base:.3g} sec/iter")
 
 
 def parse_commandline_args():
@@ -58,24 +66,25 @@ def parse_commandline_args():
                              help="Proportion of total in first row.")
     optionalarg.add_argument('-p', '--col-prop', type=float, default=0.5,
                              help="Proportion of total in first column.")
-    optionalarg.add_argument('-e', '--exps', type=str, default="5,20,35",
+    # scipy CI takes way too long past 2^15...
+    optionalarg.add_argument('-e', '--exps', type=str, default="5,10,15,35",
                              help="Test n=2**<these values> - 1.")
     optionalarg.add_argument('-n', '--number', type=int, default=10,
                              help="Number of trials per power-of-2 tier.")
-    # scipy fisher_exact does not support logp.
-    # optionalarg.add_argument('-l', '--logp', action="store_true",
-    #                          help="Test logp=True.")
+    optionalarg.add_argument('-o', '--omit-scipy-ci', action="store_true",
+                             help="Skip scipy CI.")
     cmd_args = parser.parse_args()
     return cmd_args
 
 
 def main():
     cmd_args = parse_commandline_args()
-    fisher_exact_22_benchmark(cmd_args.row_prop,
-                              cmd_args.col_prop,
-                              cmd_args.z_score,
-                              parse_range_string(cmd_args.exps),
-                              cmd_args.number)
+    odds_ratio_benchmark(cmd_args.row_prop,
+                         cmd_args.col_prop,
+                         cmd_args.z_score,
+                         parse_range_string(cmd_args.exps),
+                         cmd_args.number,
+                         cmd_args.omit_scipy_ci)
 
 
 if __name__ == '__main__':

@@ -421,6 +421,8 @@ HEADER_INLINE dd_real ddr_sub(const dd_real a, const dd_real b) {
 }
 
 
+dd_real ddr_sqrt(const dd_real a);
+
 dd_real ddr_exp(const dd_real a);
 
 dd_real ddr_log(const dd_real a);

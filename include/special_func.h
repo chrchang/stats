@@ -48,7 +48,6 @@ dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_rea
 double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t return_log);
 
 
-// Currently assumes p <= 0.5 (trivial to remove this restriction).
 double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log);
 
 #ifdef __cplusplus

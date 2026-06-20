@@ -388,16 +388,25 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
 // function cannot be used in scipy.  (Boost has a similar function which lacks
 // the extended logp range.)
 //
-// It currently assumes p <= 0.5, but can trivially be modified to handle
-// larger p.
-//
 // The function name has a trailing 'D' (for double-precision) since
 // plink2_stats already has a faster single-parameter QuantileToZscore()
 // function which just aims for float32-like precision.
 double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
+  int32_t sign = -1;
+  if (!p_is_log) {
+    if (p_or_lnp > 0.5) {
+      sign = 1;
+      p_or_lnp = 1.0 - p_or_lnp;
+    }
+  } else {
+    if (p_or_lnp > -kLn2) {
+      sign = 1;
+      p_or_lnp = -expm1(p_or_lnp);
+      p_is_log = 0;
+    }
+  }
   if (((!p_is_log) && (p_or_lnp >= 0.075)) || (p_is_log && (p_or_lnp >= -2.5902671654458267))) {
     const double p = p_is_log? exp(p_or_lnp) : p_or_lnp;
-    assert(p <= 0.500000000000001);
     const double q = 0.5 - p;
     const double r = .180625 - q * q;
     // todo: benchmark polynomial evaluation strategies
@@ -419,7 +428,7 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
                                39307.89580009271061,
                                28729.085735721942674,
                                5226.495278852854561);
-    return -q * numer / denom;
+    return sign * q * numer / denom;
   }
   const double lnp = p_is_log? p_or_lnp : log(p_or_lnp);
   double r = sqrt(-lnp);
@@ -443,7 +452,7 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
                                .0151986665636164571966,
                                5.475938084995344946e-4,
                                1.05075007164441684324e-9);
-    return -numer / denom;
+    return sign * numer / denom;
   }
   if (r <= 27) {
     r -= 5;
@@ -465,10 +474,10 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
                                1.8463183175100546818e-5,
                                1.4215117583164458887e-7,
                                2.04426310338993978564e-15);
-    return -numer / denom;
+    return sign * numer / denom;
   }
   if (r >= 6.4e8) {
-    return -r * kSqrt2;
+    return sign * r * kSqrt2;
   }
   const double s2 = -ldexp(lnp, 1);
   double x2 = s2 - log(k2Pi * s2);
@@ -484,7 +493,7 @@ double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log) {
       }
     }
   }
-  return -sqrt(x2);
+  return sign * sqrt(x2);
 }
 
 #ifdef __cplusplus
