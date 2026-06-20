@@ -63,9 +63,9 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n=(2^35)-1: base=0.000742 sec/iter
 
     $ utils/odds_ratio_concordance.py --z-score 1  # we have high agreement with scipy
-    n in [2^5, 2^6): estErrRMS=1.73e-15  ciLowErrRMS=2.32e-16  ciHighErrRMS=4.42e-16
-    n in [2^10, 2^11): estErrRMS=1.15e-14  ciLowErrRMS=3.46e-16  ciHighErrRMS=2.83e-15
-    n in [2^15, 2^16): estErrRMS=1.52e-12  ciLowErrRMS=1.6e-12  ciHighErrRMS=1.26e-14
+    n in [2^5, 2^6): estDiffRMS=1.73e-15  ciLowDiffRMS=2.32e-16  ciHighDiffRMS=4.42e-16
+    n in [2^10, 2^11): estDiffRMS=1.15e-14  ciLowDiffRMS=3.46e-16  ciHighDiffRMS=2.83e-15
+    n in [2^15, 2^16): estDiffRMS=1.52e-12  ciLowDiffRMS=1.6e-12  ciHighDiffRMS=1.26e-14
     $ utils/odds_ratio_benchmark.py --z-score 1  # 200x and larger speedups
     n=(2^5)-1: est=6.38e-07  ci=1.07e-06  scipy_est=0.000445  scipy_ci=0.00257 sec/iter
     n=(2^10)-1: est=6.79e-07  ci=1.79e-06  scipy_est=0.00051  scipy_ci=0.0281 sec/iter

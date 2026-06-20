@@ -87,11 +87,11 @@ def odds_ratio_concordance_test(ab: float, ac: float, z: float, pow2s: list[int]
                 relerr_ci95_high_ssq = relerr_ci95_high * relerr_ci95_high
         num_trials = len(ns)
         est_rms = math.sqrt(relerr_est_ssq / num_trials)
-        print_str = f"n in [2^{pow2}, 2^{pow2+1}): estErrRMS={est_rms:.3g}"
+        print_str = f"n in [2^{pow2}, 2^{pow2+1}): estDiffRMS={est_rms:.3g}"
         if not omit_ci:
             ci95_low_rms = math.sqrt(relerr_ci95_low_ssq / num_trials)
             ci95_high_rms = math.sqrt(relerr_ci95_high_ssq / num_trials)
-            print_str += f"  ciLowErrRMS={ci95_low_rms:.3g}  ciHighErrRMS={ci95_high_rms:.3g}"
+            print_str += f"  ciLowDiffRMS={ci95_low_rms:.3g}  ciHighDiffRMS={ci95_high_rms:.3g}"
         print(print_str)
 
 
