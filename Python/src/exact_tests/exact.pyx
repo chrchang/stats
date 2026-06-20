@@ -56,7 +56,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22) nogil
 
-    double Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double* lowp, double* highp) nogil
+    void Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double low_p, double high_p, double* low_resultp, double* high_resultp) nogil
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
@@ -480,8 +480,10 @@ def cond_odds_ratio_ci(int64_t m11, int64_t m12, int64_t m21, int64_t m22, doubl
         raise RuntimeError("table entries must sum to <2^52")
     if low > high:
         raise RuntimeError("low can't be greater than high")
-    Fisher22OddsRatioCI(m11, m12, m21, m22, &low, &high)
-    return (low, high)
+    cdef double low_result
+    cdef double high_result
+    Fisher22OddsRatioCI(m11, m12, m21, m22, low, high, &low_result, &high_result)
+    return (low_result, high_result)
 
 
 cdef double HWE_exact_2sided_internal(int32_t hom1, int32_t hets, int32_t hom2, bint midp, bint logp) except? 2.0:

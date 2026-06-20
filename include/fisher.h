@@ -55,12 +55,13 @@ double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
 
 double Fisher22OddsRatioQuantileMatch(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double target_p);
 
-// On entry, (*lowp, *highp) should be the target quantiles.
-// On exit, they are set to the odds ratios corresponding to those quantiles.
-HEADER_INLINE double Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double* lowp, double* highp) {
+// (low_p, high_p) should be the target quantiles.
+// On exit, (*low_resultp, *high_resultp) is set to the odds ratios
+// corresponding to those quantiles.
+HEADER_INLINE void Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double low, double high, double* low_resultp, double* high_resultp) {
   // R's CI.
-  *lowp = 1.0 / Fisher22OddsRatioQuantileMatch(obs_m12, obs_m11, obs_m22, obs_m21, *lowp);
-  *highp = Fisher22OddsRatioQuantileMatch(obs_m11, obs_m12, obs_m21, obs_m22, 1.0 - *highp);
+  *low_resultp = 1.0 / Fisher22OddsRatioQuantileMatch(obs_m12, obs_m11, obs_m22, obs_m21, low);
+  *high_resultp = Fisher22OddsRatioQuantileMatch(obs_m11, obs_m12, obs_m21, obs_m22, 1.0 - high);
 }
 
 double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp);

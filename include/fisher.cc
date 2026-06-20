@@ -391,7 +391,7 @@ double logit_bounded(double p) {
     return 54 * kLn2;
   }
   if (p == 0.0) {
-    return -1075 * kLn2;
+    return -54 * kLn2;
   }
   return log(p / (1-p));
 }
