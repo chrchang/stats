@@ -63,14 +63,14 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n=(2^35)-1: base=0.000742 sec/iter
 
     $ utils/odds_ratio_concordance.py --z-score 1  # we have high agreement with scipy
-    n in [2^5, 2^6): estDiffRMS=1.73e-15  ciLowDiffRMS=2.32e-16  ciHighDiffRMS=4.42e-16
-    n in [2^10, 2^11): estDiffRMS=1.15e-14  ciLowDiffRMS=3.46e-16  ciHighDiffRMS=2.83e-15
-    n in [2^15, 2^16): estDiffRMS=1.52e-12  ciLowDiffRMS=1.6e-12  ciHighDiffRMS=1.26e-14
+    n in [2^5, 2^6): estDiffRMS=1.55e-15  ciLowDiffRMS=3.86e-17  ciHighDiffRMS=1.77e-16
+    n in [2^10, 2^11): estDiffRMS=1.2e-14  ciLowDiffRMS=1.54e-16  ciHighDiffRMS=3.15e-15
+    n in [2^15, 2^16): estDiffRMS=1.52e-12  ciLowDiffRMS=1.6e-12  ciHighDiffRMS=1.22e-14
     $ utils/odds_ratio_benchmark.py --z-score 1  # 200x and larger speedups
-    n=(2^5)-1: est=6.38e-07  ci=1.07e-06  scipy_est=0.000445  scipy_ci=0.00257 sec/iter
-    n=(2^10)-1: est=6.79e-07  ci=1.79e-06  scipy_est=0.00051  scipy_ci=0.0281 sec/iter
-    n=(2^15)-1: est=2.98e-06  ci=6.4e-06  scipy_est=0.000702  scipy_ci=2.27 sec/iter
-    n=(2^35)-1: est=0.000859  ci=0.00176 sec/iter
+    n=(2^5)-1: est=8.5e-07  ci=1.07e-06  scipy_est=0.000434  scipy_ci=0.00251 sec/iter
+    n=(2^10)-1: est=8.08e-07  ci=1.65e-06  scipy_est=0.000503  scipy_ci=0.0272 sec/iter
+    n=(2^15)-1: est=3.08e-06  ci=6.39e-06  scipy_est=0.000694  scipy_ci=2.23 sec/iter
+    n=(2^35)-1: est=0.000824  ci=0.00172 sec/iter
 
     $ utils/HWE_accuracy.py --maf 0.05 --z-score 1
     n in [2^10, 2^11): errRMS=1.95e-16  snphweErrRMS=2.04e-16

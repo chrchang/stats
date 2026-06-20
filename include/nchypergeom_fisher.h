@@ -17,6 +17,7 @@
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "plink2_base.h"
+#include "plink2_highprec.h"
 
 #ifdef __cplusplus
 namespace plink2 {
@@ -24,12 +25,12 @@ namespace plink2 {
 
 int64_t ApproxModeFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds);
 
-double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds);
+dd_real MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds);
 
-double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odds, double mean);
+double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odds, dd_real mean_ddr);
 
-HEADER_INLINE double MeanFNCHypergeoDerivOdds(int64_t m1, int64_t m2, int64_t n, double odds, double mean) {
-  return VarianceFNCHypergeoFromMean(m1, m2, n, odds, mean) / odds;
+HEADER_INLINE double MeanFNCHypergeoDerivOdds(int64_t m1, int64_t m2, int64_t n, double odds, dd_real mean_ddr) {
+  return VarianceFNCHypergeoFromMean(m1, m2, n, odds, mean_ddr) / odds;
 }
 
 void P_FNCHypergeoTwoOdds(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double odds1, double odds2, double* result1p, double* result2p);

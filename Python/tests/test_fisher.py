@@ -115,3 +115,6 @@ def test_cond_odds_ratio():
     ci95 = exact_tests.cond_odds_ratio_ci(1e4, 2e4, 3e4, 5e4)
     assert ci95[0] == pytest.approx(0.8102717994162574, rel=1e-6, abs=0)
     assert ci95[1] == pytest.approx(0.857026539321631, rel=1e-6, abs=0)
+    # these must not enter infinite loop
+    assert exact_tests.cond_odds_ratio(2**51 - 2, 1, 1, 2**51 - 1) == pytest.approx(3.036688e+30, rel=1e-6, abs=0)
+    assert exact_tests.cond_odds_ratio(1, 2**51 - 2, 2**51 - 1, 1) == pytest.approx(3.293061e-31, rel=1e-6, abs=0)

@@ -3,7 +3,7 @@ from libc.stdint cimport int64_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -480,6 +480,8 @@ def cond_odds_ratio_ci(int64_t m11, int64_t m12, int64_t m21, int64_t m22, doubl
         raise RuntimeError("table entries must sum to <2^52")
     if low > high:
         raise RuntimeError("low can't be greater than high")
+    if ((low < 0.5**24) and (low != 0.0)) or ((low > 1 - 0.5**24) and (low != 1.0)) or ((high < 0.5**24) and (high != 0.0)) or ((high > 1 - 0.5**24) and (high != 1.0)):
+        raise RuntimeError("low and high must be 0, 1, or in [2^{-24}, 1 - 2^{-24}].")
     cdef double low_result
     cdef double high_result
     Fisher22OddsRatioCI(m11, m12, m21, m22, low, high, &low_result, &high_result)

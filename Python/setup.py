@@ -37,10 +37,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.7.0",
+    version="0.7.1",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
-    description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests.",
+    description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/chrchang/stats",

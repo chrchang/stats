@@ -280,13 +280,18 @@ def fisher_exact_22(obs_a: int, obs_b: int, obs_c: int, obs_d: int, bits: int, r
     return float_from_ln(ln_total, return_log)
 
 
-# For 2x3 and larger fisher_exact tables, a simulation-based approach looks
-# like the least-bad verification option.  A proper calculation either handles
-# larger cases too slowly, or will have too much complexity that mirrors the
-# code to be verified.
+# todo: implement odds-ratio functions here.  odds_ratio_concordance is weak
+# sauce when it takes so little additional work to provide a real accuracy
+# measurement.
+
+
+# For 2x3 and larger fisher_exact tables, verification should involve some
+# simulation.  An arbitrary-precision calculation either handles larger cases
+# too slowly, or will be too likely to share bugs with the code we're trying to
+# verify.
 #
-# I'll punt on this for now, and return to the problem when fisher_exact
-# handles tables larger than 2x3.
+# However, we'll still want the arbitrary-precision calculation to help us
+# identify and plug low-hanging accuracy leaks.
 
 
 def snphwe(obs_hets: int, hom1: int, hom2: int, bits: int, return_log: bool):

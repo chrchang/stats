@@ -52,9 +52,11 @@ int64_t ApproxModeFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
   return S_CAST(int64_t, ddr_addd(sqrt_discrim_ddr, -bb).x[0] / (2 * aa) + 0.5);
 }
 
-double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
-  // Start from mode, sum outward in both directions.
-  // Don't need intermediate dd_reals to reach our accuracy target.
+dd_real MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
+  // Start from ~mode, sum outward in both directions.
+  // Don't need intermediate dd_reals to reach our accuracy target.  However,
+  // when n is very large, we do need to return a dd_real just to *represent*
+  // the final mean with sufficient accuracy.
   const int64_t mode = ApproxModeFNCHypergeo(m1, m2, n, odds);
   double lik = 1.0;
   double m11 = mode;
@@ -68,8 +70,11 @@ double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
   double m22 = m2 - m21;
 
   // Iterate rightward until convergence.
-  double rnumer = mode;
+  double rnumer = 0.0;
   double rdenom = 1.0;
+  // Numerator is sum((m11-mode)*p) instead of sum(m11*p), then we add mode
+  // back at the end.
+  double m11_minus_mode = 0;
   while (1) {
     m11 += 1;
     m22 += 1;
@@ -78,12 +83,14 @@ double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
     m21 -= 1;
     // rnumer converges more slowly than rdenom, so we only need to check the
     // former for convergence.
+    m11_minus_mode += 1;
     const double preadd = rnumer;
-    rnumer = prefer_fma(lik, m11, rnumer);
+    rnumer = prefer_fma(lik, m11_minus_mode, rnumer);
     // Since m12_odds can become slightly inaccurate, we're not guaranteed to
     // exit when m12_odds is supposed to hit zero.  Ensure we exit when
     // m12_odds is negative (or m21 hits zero).
     if (rnumer <= preadd) {
+      rnumer = preadd;
       break;
     }
     rdenom += lik;
@@ -96,6 +103,7 @@ double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
   m22 = m2 - m21;
   double lnumer = 0.0;
   double ldenom = 0.0;
+  m11_minus_mode = 0.0;
   while (1) {
     m12_odds += odds;
     m21 += 1;
@@ -108,12 +116,13 @@ double MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
     if (ldenom == preadd) {
       break;
     }
-    lnumer = prefer_fma(lik, m11, lnumer);
+    m11_minus_mode -= 1;
+    lnumer = prefer_fma(lik, m11_minus_mode, lnumer);
   }
-  return (lnumer + rnumer) / (ldenom + rdenom);
+  return ddr_add2d((lnumer + rnumer) / (ldenom + rdenom), mode);
 }
 
-double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odds, double mean) {
+double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odds, dd_real mean_ddr) {
   // Harkness, WL (1965) Properties of the Extended Hypergeometric
   // Distribution.  Annals of Mathematical Statistics, 36.
   //
@@ -129,7 +138,17 @@ double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odd
     }
     return m1d * nd * (total - m1d) * (total - nd) / (total * total * (total - 1));
   }
-  return (m1d * nd * odds - total * mean) / (1 - odds) + mean * (m1d + nd - mean);
+  // Catastrophic cancellation possible here (e.g. m1=m2=n=2^26, odds huge,
+  // mean ~= 2^26 - 1).
+  if (total < (1LL << 39)) {
+    const dd_real first_term_ddr = ddr_accurate_div(ddr_sub(ddr_muld(ddr_mul2d(m1d, nd), odds), ddr_muld(mean_ddr, total)), ddr_add2d(1, -odds));
+    const dd_real second_term_ddr = ddr_mul(ddr_subd(mean_ddr, m1d + nd), mean_ddr);
+    return ddr_sub(first_term_ddr, second_term_ddr).x[0];
+  }
+  const td_real mean_tdr = tdr_make_dd(mean_ddr);
+  const td_real first_term_tdr = tdr_accurate_div(tdr_sub(tdr_muld(tdr_make_dd(ddr_mul2d(m1d, nd)), odds), tdr_muld(mean_tdr, total)), tdr_make_dd(ddr_add2d(1, -odds)));
+  const td_real second_term_tdr = tdr_mul(tdr_subd(mean_tdr, m1d + nd), mean_tdr);
+  return tdr_sub(first_term_tdr, second_term_tdr).x[0];
 }
 
 void P_FNCHypergeoTwoOdds(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double odds1, double odds2, double* result1p, double* result2p) {
