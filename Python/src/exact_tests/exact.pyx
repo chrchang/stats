@@ -28,8 +28,6 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
 
     int32_t tdr_gtd(const td_real_struct a, double b) nogil
 
-    int32_t tdr_gt(const td_real_struct a, const td_real_struct b) nogil
-
 
 cdef extern from "../include/binom.h" namespace "plink2":
     double BinomMass(int64_t k, int64_t n, td_real_struct p_tdr, uint32_t logp) nogil
@@ -174,7 +172,7 @@ cdef int64_t qbinom_internal(object targetP, int64_t n, object succP, bint logTa
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef td_real_struct succp_tdr = TdrMake(succP)
-    if tdr_ltd(succp_tdr, 0.0) or tdr_gt(succp_tdr, 1.0):
+    if tdr_ltd(succp_tdr, 0.0) or tdr_gtd(succp_tdr, 1.0):
         raise RuntimeError("succP must be in [0, 1].")
     # td_real is overkill when we're explicitly subtracting off 0.5 ULP... but
     # dd_real still provides meaningful value over plain float64 here.
