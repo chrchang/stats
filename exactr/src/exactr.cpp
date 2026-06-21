@@ -32,8 +32,12 @@ plink2::td_real make_p_tdr(double prob, double prob_denom) {
 //' Binomial distribution pmf
 //'
 //' Mass function for binomial distribution with parameters `size` and `prob`.
-//' Implementation is based on log-factorial functions utilizing the [QD
-//' high-precision library](https://github.com/BL-highprecision/QD).
+//' Implementation is based on log-factorial functions utilizing the QD
+//' high-precision library.
+//'
+//' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+//'   precision floating point arithmetic.  Proceedings of the 15th IEEE
+//'   Symposium on Computer Arithmetic.
 //'
 //' @param x vector of success counts.
 //' @param size number of trials (zero or more).

@@ -4,7 +4,7 @@
 \alias{pbinom}
 \title{Binomial distribution cmf}
 \usage{
-pbinom(q, size, prob = 0.5, lower.tail = FALSE, log.p = FALSE, approx = FALSE)
+pbinom(q, size, prob = 0.5, lower.tail = TRUE, log.p = FALSE, approx = FALSE)
 }
 \arguments{
 \item{q}{vector of success counts.}
@@ -13,11 +13,14 @@ pbinom(q, size, prob = 0.5, lower.tail = FALSE, log.p = FALSE, approx = FALSE)
 
 \item{prob}{probability of success on each trial.}
 
-\item{lower.tail}{logical; if TRUE, probabilities are P[X <= x], otherwise, P[X > x].}
+\item{lower.tail}{logical; if TRUE, probabilities are P[X <= x],
+otherwise, P[X > x].}
 
 \item{log.p}{logical; if TRUE, probabilities p are given as log(p).}
 
-\item{approx}{logical; if TRUE, faster algorithm which doesn't aim for bit-exact results is used}
+\item{approx}{logical; if TRUE, faster algorithm which doesn't aim for
+bit-exact results is used.  (This fast mode is still more accurate than R
+4.6.0 pbinom() and scipy 1.18 stats.binom.cdf().)}
 }
 \value{
 cmf(q).
@@ -25,8 +28,15 @@ cmf(q).
 \description{
 Cumulative mass function for binomial distribution with parameters
 \code{size} and \code{prob}.  Based on the BFRAC component of Boost's TOMS 708
-implementation, and the \href{https://github.com/BL-highprecision/QD}{QD high-precision library}.
+implementation, and the QD high-precision library.  The default (\code{approx} =
+FALSE) mode aims for bit-exact results.
 }
 \references{
-https://dl.acm.org/doi/10.1145/131766.131776
+DiDonato AR, Morris AH (1992) Algorithm 708: Significant digit
+computation of the incomplete beta function ratios.  ACM Transactions on
+Mathematical Software (TOMS), 18.
+
+Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+precision floating point arithmetic.  Proceedings of the 15th IEEE
+Symposium on Computer Arithmetic.
 }

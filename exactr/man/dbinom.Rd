@@ -20,5 +20,11 @@ pmf(x).
 }
 \description{
 Mass function for binomial distribution with parameters \code{size} and \code{prob}.
-Implementation is based on log-factorial functions utilizing the \href{https://github.com/BL-highprecision/QD}{QD high-precision library}.
+Implementation is based on log-factorial functions utilizing the QD
+high-precision library.
+}
+\references{
+Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+precision floating point arithmetic.  Proceedings of the 15th IEEE
+Symposium on Computer Arithmetic.
 }
