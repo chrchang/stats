@@ -1,0 +1,31 @@
+Package: exactr
+Type: Package
+Title: Accurate and Efficient Exact Tests and Distributions
+Version: 0.1.0
+Date: 2026-06-xx
+Authors@R: c(person(given="Christopher",
+                    family="Chang",
+                    role = c("aut", "cre"),
+                    email="chrchang@alumni.caltech.edu"),
+             person("Boost Software License Contributors",
+                    role = c("cph"),
+                    comment = "Boost C++ Libraries"),
+             person("The R Core Team",
+                    role = c("cph"),
+                    comment = "R src/nmath/qnorm.c"),
+             person("The Regents of the University of California, through Lawrence Berkeley National Laboratory",
+                    role = c("cph"),
+                    comment = "QD library"))
+Description: Implements the binomial and Fisher's (2x2 and 2x3 so far) exact
+    tests, along with corresponding discrete distributions
+    (binomial, hypergeometric).  Accuracy and speed of these functions compare
+    favorably to their counterparts in the R 4.6.0 standard library.
+Encoding: UTF-8
+License: LGPL-3
+BugReports: https://github.com/chrchang/stats/issues
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+LinkingTo:
+    Rcpp
+Imports:
+    Rcpp

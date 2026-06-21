@@ -427,8 +427,7 @@ def cond_odds_ratio_quantile_match(m11, m12, m21, m22, target_p):
     one_plus_half_eps = 1 + half_eps
     one_minus_half_eps = 1 - half_eps
     # Just use initial guess of 1, this forces a different iteration path than
-    # code we're verifying (and incidentally checks some shared odds=1
-    # special-case logic)
+    # code we're verifying
     odds1 = gmpy2.mpfr(1.0)
     logit_target_p = logit(target_p)
     while True:

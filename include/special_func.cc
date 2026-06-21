@@ -384,6 +384,10 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
 //   Maechler, M (2022) Asymptotic Tail Formulas For Gaussian Quantiles.
 //   https://cran.r-project.org/web/packages/DPQ/vignettes/qnorm-asymp.pdf .
 //
+// As of this writing, the R function appears to have less-efficient polynomial
+// evaluation, so it isn't yet time to make this act as a simple alias for the
+// built-in R function when compiling the exactr package.
+//
 // Note that the R function this is derived from is GPL-2 licensed; thus this
 // function cannot be used in scipy.  (Boost has a similar function which lacks
 // the extended logp range.)

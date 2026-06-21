@@ -24,7 +24,6 @@ ext_modules = [
                          "src/include/plink2_float.cc",
                          "src/include/plink2_hwe.cc",
                          "src/include/plink2_highprec.cc",
-                         "src/include/plink2_ln.cc",
                          "src/include/special_func.cc"],
               language = "c++",
               extra_compile_args = ["-std=c++14", "-Wno-unused-function", "-Wno-cpp", "-DNO_CPP11_TYPE_ENFORCEMENT", "-ffp-contract=off"],

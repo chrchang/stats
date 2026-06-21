@@ -1,0 +1,6 @@
+The exactr package as a whole is distributed under LGPL-3.0-only.  The exactr package includes adaptations of components from other open source software projects.  The following is a list of these projects:
+
+* Boost C++ Libraries: BSL-1.0
+* plink2: written by package author
+* R: GPL-2.0-or-later
+* QD library: BSD-3-Clause-LBNL

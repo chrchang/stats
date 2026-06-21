@@ -1,0 +1,16 @@
+INCL = ../tools/include
+PKG_CPPFLAGS = -DNO_UNALIGNED -I$(INCL)
+PKG_LIBS = -lSTATS
+
+LIBSTATS_SOURCES = ${INCL}/include/binom.cc ${INCL}/include/binom_detail.cc ${INCL}/include/fisher.cc ${INCL}/include/hypergeom.cc ${INCL}/include/hypergeom_detail.cc ${INCL}/include/nchypergeom_fisher.cc $(INCL)/include/plink2_base.cc $(INCL)/include/plink2_float.cc $(INCL)/include/plink2_highprec.cc $(INCL)/include/special_func.cc
+LIBSTATS = $(LIBSTATS_SOURCES:.cc=.o)
+
+$(SHLIB): libSTATS.a
+
+libSTATS.a: $(LIBSTATS)
+	$(AR) rcs libSTATS.a $(LIBSTATS)
+
+clean:
+	rm -f $(SHLIB) $(OBJECTS) $(LIBSTATS)
+
+OBJECTS = exactr.o RcppExports.o

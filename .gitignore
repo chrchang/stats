@@ -1,5 +1,6 @@
 *~
 *.o
+*.log
 binom_demo
 fisher_demo
 hwe_demo
@@ -12,3 +13,6 @@ stats_src.zip
 /Python/__pycache__/
 /Python/tests/__pycache__/
 /Python/utils/__pycache__/
+.Rproj.user
+exactr_*.tar.gz
+exactr.Rcheck/
