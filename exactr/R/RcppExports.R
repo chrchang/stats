@@ -22,9 +22,18 @@ dbinom <- function(x, size, prob = 0.5, log = FALSE) {
 }
 
 #' @title Binomial distribution cmf
-#' @description Backend for pbinom()
+#' @description Backend for pbinom(), separated since dots aren't permitted in
+#'   C++ parameter names.
 #' @noRd
 pbinom_cpp <- function(q, size, prob = 0.5, lower_tail = TRUE, log_p = FALSE, approx = FALSE) {
     .Call(`_exactr_pbinom_cpp`, q, size, prob, lower_tail, log_p, approx)
+}
+
+#' @title Binomial distribution ppf
+#' @description Backend for qbinom(), separated since dots aren't permitted in
+#'   C++ parameter names.
+#' @noRd
+qbinom_cpp <- function(p, size, prob = 0.5, lower_tail = TRUE, log_p = FALSE) {
+    .Call(`_exactr_qbinom_cpp`, p, size, prob, lower_tail, log_p)
 }
 

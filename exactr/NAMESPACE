@@ -2,6 +2,7 @@
 
 export(dbinom)
 export(pbinom)
+export(qbinom)
 import(Rcpp)
 importFrom(Rcpp,evalCpp)
 useDynLib(exactr, .registration=TRUE)

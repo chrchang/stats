@@ -40,10 +40,26 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// qbinom_cpp
+NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_tail, bool log_p);
+RcppExport SEXP _exactr_qbinom_cpp(SEXP pSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
+    Rcpp::traits::input_parameter< double >::type size(sizeSEXP);
+    Rcpp::traits::input_parameter< double >::type prob(probSEXP);
+    Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(qbinom_cpp(p, size, prob, lower_tail, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_exactr_dbinom", (DL_FUNC) &_exactr_dbinom, 4},
     {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 6},
+    {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
     {NULL, NULL, 0}
 };
 
