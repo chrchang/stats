@@ -42,12 +42,8 @@ double LnBinomCoeff(int64_t n, int64_t k) {
 
 // Assumes 0 <= k <= n < 2^52, 0 < p < 1.
 double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp) {
-  dd_real p_ddr = ddr_make_td(p_tdr);
-  dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-  if (k == n) {
-    k = 0;
-    swap_ddr(&p_ddr, &q_ddr);
-  }
+  const dd_real p_ddr = ddr_make_td(p_tdr);
+  const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   const dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
   if (logp) {
     return ln_prob_ddr.x[0];

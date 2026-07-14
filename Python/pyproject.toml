@@ -4,14 +4,18 @@ requires = [
     "setuptools < 72.2; platform_python_implementation == 'PyPy'",
     "setuptools ; platform_python_implementation != 'PyPy'",
     "Cython>=3.1.0",
+    "numpy>=2.0.0",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "exact_tests"
-version = "0.7.1"
+name = "exact-tests"
+version = "0.8.0"
 authors = [
   { name="Christopher Chang", email="chrchang@alumni.caltech.edu" },
+]
+dependencies = [
+    "numpy>=1.21.3", # runtime requirement < build requirement
 ]
 description = "Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests."
 readme = "README.md"

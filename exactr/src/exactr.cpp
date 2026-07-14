@@ -75,6 +75,7 @@ NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log =
     }
     results[idx] = plink2::BinomMass(static_cast<int64_t>(k_round), n, prob_tdr, log);
   }
+  results.attr("dim") = x.attr("dim");
   return results;
 }
 
@@ -123,6 +124,7 @@ NumericVector pbinom_cpp(NumericVector q, double size, double prob = 0.5, bool l
     }
     results[idx] = result;
   }
+  results.attr("dim") = q.attr("dim");
   return results;
 }
 
@@ -184,6 +186,7 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob = 0.5, bool l
   if (nans_produced) {
     warning("NaNs produced");
   }
+  results.attr("dim") = p.attr("dim");
   return results;
 }
 

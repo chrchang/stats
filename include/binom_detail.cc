@@ -24,9 +24,8 @@
 namespace plink2 {
 #endif
 
-// Currently assumes k < n.  Should always have <1 ULP error; and
-// ddr_exp(result) also has <1 ULP error when it isn't < DBL_MIN.  Error
-// analysis:
+// Should always have <1 ULP error; and ddr_exp(result) also has <1 ULP error
+// when it isn't < DBL_MIN.  Error analysis:
 //
 // * For p=0.5, dd_real calculation doesn't reach absolute error > 2^{-53}
 //   until n > ~2^39.
@@ -46,15 +45,6 @@ namespace plink2 {
 //   that's fine because we no longer have heavy subtractive cancellation.
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
   const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  // strictly speaking, usually don't need to initialize this at all in
-  // p_is_half case
-  dd_real ln_q_ddr = _ddr_log05;
-  if (!p_is_half) {
-    ln_q_ddr = ddr_log_2arg(q_ddr, p_ddr);
-  }
-  if (k == 0) {
-    return ddr_muld(ln_q_ddr, n-k);
-  }
   if (!use_tdr_for_binom_lnprob(n)) {
     dd_real ddrs[5];
     ddrs[0] = ddr_lfact(n);
@@ -64,7 +54,7 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
       ddrs[3] = ddr_muld(_ddr_log05, n);
     } else {
       ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = ddr_muld(ln_q_ddr, n-k);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
     }
     return ddr_sort_and_add(5 - p_is_half, ddrs);
   }
@@ -95,6 +85,122 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
   }
   return ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
 }
+
+// Low-level interface for vectorized dbinom() (multiple k, single n and p).
+void BinomMassMultiKPrecomp(int64_t n, td_real p_tdr, uint32_t* p_is_half_ptr, td_real* lfact_n_tdr_ptr, td_real* lnp_tdr_ptr, td_real* lnq_tdr_ptr) {
+  const dd_real p_ddr = ddr_make_td(p_tdr);
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  *p_is_half_ptr = p_is_half;
+  if (!use_tdr_for_binom_lnprob(n)) {
+    *lfact_n_tdr_ptr = tdr_make_dd(ddr_lfact(n));
+    if (p_is_half) {
+      *lnp_tdr_ptr = tdr_make_dd(_ddr_log05);
+      *lnq_tdr_ptr = *lnp_tdr_ptr;
+    } else {
+      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
+      *lnp_tdr_ptr = tdr_make_dd(ddr_log(p_ddr));
+      *lnq_tdr_ptr = tdr_make_dd(ddr_log_2arg(q_ddr, p_ddr));
+    }
+    return;
+  }
+  *lfact_n_tdr_ptr = tdr_lfact(n);
+  if (p_is_half) {
+    *lnp_tdr_ptr = _tdr_log05;
+    *lnq_tdr_ptr = _tdr_log05;
+  } else {
+    if (ddr_ltd(p_ddr, 0.5)) {
+      *lnp_tdr_ptr = tdr_log(tdr_make_dd(p_ddr));
+      *lnq_tdr_ptr = tdr_log1p(tdr_make_dd(ddr_negate(p_ddr)));
+    } else {
+      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
+      *lnp_tdr_ptr = tdr_log1p(tdr_make_dd(ddr_negate(q_ddr)));
+      *lnq_tdr_ptr = tdr_log(tdr_make_dd(q_ddr));
+    }
+  }
+}
+
+double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lfact_n_tdr, const td_real lnp_tdr, const td_real lnq_tdr, uint32_t logp) {
+  // this constant should be kept in sync with use_tdr_for_binom_lnprob()
+  if (!use_tdr_for_binom_lnprob(n)) {
+    dd_real ddrs[5];
+    ddrs[0] = ddr_make_td(lfact_n_tdr);
+    ddrs[1] = ddr_negate(ddr_lfact(k));
+    ddrs[2] = ddr_negate(ddr_lfact(n-k));
+    if (p_is_half) {
+      // Preserve this special case so that results don't deviate from
+      // BinomMass().
+      ddrs[3] = ddr_muld(_ddr_log05, n);
+    } else {
+      ddrs[3] = ddr_muld(ddr_make_td(lnp_tdr), k);
+      ddrs[4] = ddr_muld(ddr_make_td(lnq_tdr), n-k);
+    }
+    const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
+    return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
+  }
+  td_real tdrs[5];
+  tdrs[0] = lfact_n_tdr;
+  tdrs[1] = tdr_negate(tdr_lfact(k));
+  tdrs[2] = tdr_negate(tdr_lfact(n-k));
+  if (p_is_half) {
+    tdrs[3] = tdr_muld(_tdr_log05, n);
+  } else {
+    tdrs[3] = tdr_muld(lnp_tdr, k);
+    tdrs[4] = tdr_muld(lnq_tdr, n-k);
+  }
+  td_real lnresult_tdr = tdr_sort_and_add(5 - p_is_half, tdrs);
+  return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
+}
+
+void BinomMassMultiPPrecomp(int64_t k, int64_t n, td_real* lfact_n_tdr_ptr, td_real* neg_lfact_k_tdr_ptr, td_real* neg_lfact_nmk_tdr_ptr) {
+  if (!use_tdr_for_binom_lnprob(n)) {
+    *neg_lfact_k_tdr_ptr = tdr_make_dd(ddr_negate(ddr_lfact(k)));
+    *lfact_n_tdr_ptr = tdr_make_dd(ddr_lfact(n));
+    *neg_lfact_nmk_tdr_ptr = tdr_make_dd(ddr_negate(ddr_lfact(n-k)));
+    return;
+  }
+  *neg_lfact_k_tdr_ptr = tdr_negate(tdr_lfact(k));
+  *lfact_n_tdr_ptr = tdr_lfact(n);
+  *neg_lfact_nmk_tdr_ptr = tdr_negate(tdr_lfact(n-k));
+}
+
+double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n_tdr, const td_real neg_lfact_k_tdr, const td_real neg_lfact_nmk_tdr, uint32_t logp) {
+  const dd_real p_ddr = ddr_make_td(p_tdr);
+  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+  if (!use_tdr_for_binom_lnprob(n)) {
+    dd_real ddrs[5];
+    ddrs[0] = ddr_make_td(lfact_n_tdr);
+    ddrs[1] = ddr_make_td(neg_lfact_k_tdr);
+    ddrs[2] = ddr_make_td(neg_lfact_nmk_tdr);
+    if (p_is_half) {
+      ddrs[3] = ddr_muld(_ddr_log05, n);
+    } else {
+      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
+      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
+    }
+    const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
+    return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
+  }
+  td_real tdrs[5];
+  tdrs[0] = lfact_n_tdr;
+  tdrs[1] = neg_lfact_k_tdr;
+  tdrs[2] = neg_lfact_nmk_tdr;
+  if (p_is_half) {
+    tdrs[3] = tdr_muld(_tdr_log05, n);
+  } else {
+    if (ddr_ltd(p_ddr, 0.5)) {
+      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
+      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
+    } else {
+      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
+      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
+      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
+    }
+  }
+  td_real lnresult_tdr = tdr_sort_and_add(5, tdrs);
+  return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
+}
+
 
 // - succ_odds_ratio_tdr must be p/(1-p), where p is the expected success rate.
 //

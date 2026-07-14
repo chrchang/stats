@@ -1,4 +1,4 @@
-exact_tests
+exact-tests
 ===========
 
 This package implements the binomial, Hardy-Weinberg equilibrium, and Fisher's

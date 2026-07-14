@@ -33,13 +33,21 @@ HEADER_INLINE uint32_t use_tdr_for_binom_lnprob(int64_t obs_tot) {
   return (obs_tot >= (1LL << 36));
 }
 
-// Currently assumes k < n.  Should always have <1 ULP error; and
-// ddr_exp(result) also has <1 ULP error when it isn't < DBL_MIN.
+// Should always have <1 ULP error; and ddr_exp(result) also has <1 ULP error
+// when it isn't < DBL_MIN.
 //
 // This implementation is a bit slow, but it's relatively simple and reliable.
 // (ibeta_power_terms_d_ln() trades off a tiny bit of accuracy for a
 // significant speed improvement.)
 dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr);
+
+void BinomMassMultiKPrecomp(int64_t n, td_real p_tdr, uint32_t* p_is_half_ptr, td_real* lfact_n_tdr_ptr, td_real* lnp_tdr_ptr, td_real* lnq_tdr_ptr);
+
+double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lfact_n_tdr, const td_real lnp_tdr, const td_real lnq_tdr, uint32_t logp);
+
+void BinomMassMultiPPrecomp(int64_t k, int64_t n, td_real* lfact_n_tdr_ptr, td_real* neg_lfact_k_tdr_ptr, td_real* neg_lfact_nmk_tdr_ptr);
+
+double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n_tdr, const td_real neg_lfact_k_tdr, const td_real neg_lfact_nmk_tdr, uint32_t logp);
 
 // - succ_odds_ratio_tdr must be p/(1-p), where p is the expected success rate.
 //

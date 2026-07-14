@@ -3,6 +3,7 @@
 import setuptools
 from setuptools.extension import Extension
 from Cython.Build import cythonize
+import numpy as np
 
 # Note that this package makes heavy use of high-precision arithmetic functions
 # which get a huge speedup from Fused Multiply-Add (FMA) instructions,
@@ -27,7 +28,8 @@ ext_modules = [
                          "src/include/special_func.cc"],
               language = "c++",
               extra_compile_args = ["-std=c++14", "-Wno-unused-function", "-Wno-cpp", "-DNO_CPP11_TYPE_ENFORCEMENT", "-ffp-contract=off"],
-              extra_link_args = ["-std=c++14"]
+              extra_link_args = ["-std=c++14"],
+              include_dirs = [np.get_include()]
               )
     ]
 
@@ -36,7 +38,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.7.1",
+    version="0.8.0",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",
@@ -48,11 +50,14 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GNU Lesser General Public License v3.0 only (LGPL-3.0-only)"
+        "License :: OSI Approved :: GNU Lesser General Public License v3.0 only (LGPL-3.0-only)",
         "Operating System :: OS Independent",
     ],
     package_dir={"": "src"},
     packages=setuptools.find_namespace_packages(where="src"),
     python_requires=">=3.10",
     ext_modules=cythonize(ext_modules),
+    install_requires = [
+        "numpy>=1.21.3",
+    ],
 )
