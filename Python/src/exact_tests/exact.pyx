@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as np
 
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -228,7 +228,13 @@ cdef dbinom_vectorize_nonk(object k, object n, object p, bint logp):
     for idx, pd in enumerate(pa.flat):
         if pd < 0.0 or not pd <= 1.0:
             raise RuntimeError("p must be in [0, 1].")
-        results.flat[idx] = flush_if_denormal(BinomMassJustP(tdr_make1(pd), ki, ni, lfact_n_tdr, neg_lfact_k_tdr, neg_lfact_nmk_tdr, logp))
+        if pd == 0.0 or pd == 1.0:
+            if (pd == 0.0 and ki == 0) or (ki == ni and pd == 1.0):
+                result = oneval(logp)
+            result = zeroval(logp)
+        else:
+            result = flush_if_denormal(BinomMassJustP(tdr_make1(pd), ki, ni, lfact_n_tdr, neg_lfact_k_tdr, neg_lfact_nmk_tdr, logp))
+        results.flat[idx] = result
     return results
 
 cdef dbinom_vv_internal(object k, object n, object p, bint logp):

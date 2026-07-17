@@ -105,8 +105,8 @@ def test_dbinom():
     assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
     # broadcast tests
     assert exact_tests.dbinom([1, 2], 4) == pytest.approx(np.array([0.25, 0.375]), rel=1e-15, abs=0)
-    assert exact_tests.binom.pmf(2, 4, [0.25, 0.5]) == pytest.approx(np.array([0.2109375, 0.375]), rel=1e-15, abs=0)
-    assert exact_tests.binom.pmf([1, 2], 4, [[0.25], [0.5]]) == pytest.approx(np.array([[0.421875, 0.2109375], [0.25, 0.375]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf(2, 4, [0, 0.5]) == pytest.approx(np.array([0, 0.375]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf([1, 2], 4, [[0], [0.5]]) == pytest.approx(np.array([[0, 0], [0.25, 0.375]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
