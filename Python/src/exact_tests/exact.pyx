@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as np
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -85,20 +85,26 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
     double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp) nogil
 
 
-# The pmf and cmf functions here should default to delivering <1 ULP relative
-# error for the calculation the caller actually wants; and similarly, the
-# quantile functions should correspond to cmf approximations with at least
-# 53-bit accuracy everywhere.
+# The pmf and cmf functions here default to delivering <1 ULP relative error;
+# and similarly, the quantile functions are designed to correspond to cmf
+# approximations with at least 53-bit accuracy everywhere.
 #
-# Of course, a binomial-distribution calculation with e.g. p=1/3 is a
-# reasonable thing to want, yet 1/3 cannot be precisely represented by a
-# float64.  We're poorly positioned to achieve our goal if we force the caller
-# to misrepresent p by up to 0.5 ULPs up front.
+# However, there can be additional error from imprecise representation of p,
+# e.g. the user actually wants to perform the calculation for p=1/3, but the
+# closest float64 is off by 1/3 ULP.  Because the underlying C-library
+# functions already need high-precision arithmetic to handle log-factorials
+# well, it doesn't take much of an additional stretch to support a
+# high-precision representation of p.  So they actually accept p as a td_real
+# ("triple-double") with ~159-bit precision instead of the usual 53; and this
+# TdrMake() function converts a fractions.Fraction-compatible Python object to
+# a td_real.
 #
-# So the underlying C-library functions actually accept p as a td_real
-# ("triple-double") with ~159-bit precision instead of the usual 53, and
-# perform the underlying calculation with >53 bits of precision.  For now, this
-# is only exposed by the binomtest() function.
+# For now, this capability is only exposed in the Python API by the binomtest()
+# function.  It has extra value there because the alternative (for the default
+# two-sided test) is to have a wide tie-detection epsilon, which is
+# incompatible with accurate handling of large cases: see e.g. the n=21000000
+# test cases where it's just taken for granted that R sometimes has relative
+# error >1e-4.
 cdef td_real_struct TdrMake(object p):
     cdef td_real_struct p_tdr
     if isinstance(p, (float, np.float64, np.float32)):
@@ -123,38 +129,20 @@ cdef double oneval(bint logp):
     return 1.0 - logp
 
 
-# Tried making binom.{,log}pmf() just call (cpdef) dbinom(), but benchmarking
-# revealed that to have significantly higher overhead than making both dbinom()
-# and binom.{,log}pmf() call this.
-cdef dbinom_v_internal(object k, int64_t n, double p, bint logp):
-    if n < 0 or n >= (1LL << 52):
-        raise RuntimeError("n must be in [0, 2^52).")
+cdef dbinom_vectorize_k(object k, int64_t n, double p, bint logp):
+    ka = np.asarray(k, dtype=np.int64)
+    results = np.empty(ka.shape, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
         out_of_support_result = NAN
     else:
         out_of_support_result = 0.0
-    cdef int64_t ki
-    try:
-        ki = k
-        if ki < 0 or ki > n:
-            return out_of_support_result
-        if p == 0.0 or p == 1.0:
-            if (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
-                return oneval(logp)
-            return zeroval(logp)
-        return flush_if_denormal(BinomMass(ki, n, tdr_make1(p), logp))
-    except TypeError:
-        pass
-    ka_py = np.asarray(k, dtype=np.int64)
-    results = np.empty(ka_py.shape, dtype=np.float64)
-    cdef np.ndarray[np.int64_t] ka = ka_py.flatten()
     cdef double result
     if p == 0.0 or p == 1.0:
-        for idx, cur_ki in enumerate(ka):
-            if cur_ki < 0 or cur_ki > n:
+        for idx, ki in enumerate(ka.flat):
+            if ki < 0 or ki > n:
                 result = out_of_support_result
-            elif (p == 0.0 and cur_ki == 0) or (cur_ki == n and p == 1.0):
+            elif (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
                 result = oneval(logp)
             else:
                 result = zeroval(logp)
@@ -165,27 +153,37 @@ cdef dbinom_v_internal(object k, int64_t n, double p, bint logp):
     cdef td_real_struct lnp_tdr
     cdef td_real_struct lnq_tdr
     BinomMassMultiKPrecomp(n, tdr_make1(p), &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr)
-    for idx, cur_ki in enumerate(ka):
-        if cur_ki < 0 or cur_ki > n:
+    for idx, ki in enumerate(ka.flat):
+        if ki < 0 or ki > n:
             result = out_of_support_result
         else:
-            result = flush_if_denormal(BinomMassJustK(cur_ki, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, logp))
+            result = flush_if_denormal(BinomMassJustK(ki, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, logp))
         results.flat[idx] = result
     return results
 
-cdef dbinom_vv_internal(object k, object n, object p, bint logp):
-    # Is dbinom_v_internal() good enough?
-    cdef int64_t ni
-    cdef double pd
+cdef dbinom_v_internal(object k, int64_t n, double p, bint logp):
+    if n < 0 or n >= (1LL << 52):
+        raise RuntimeError("n must be in [0, 2^52).")
+    cdef int64_t ki
     try:
-        ni = n
-        pd = p
-        return dbinom_v_internal(k, ni, pd, logp)
+        ki = k
     except TypeError:
-        pass
-    ka_py = np.asarray(k, dtype=np.int64)
-    na_py = np.asarray(n, dtype=np.int64)
-    pa_py = np.asarray(p, dtype=np.float64)
+        return dbinom_vectorize_k(k, n, p, logp)
+    if ki < 0 or ki > n:
+        if logp:
+            return NAN
+        else:
+            return 0.0
+    if p == 0.0 or p == 1.0:
+        if (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
+            return oneval(logp)
+        return zeroval(logp)
+    return flush_if_denormal(BinomMass(ki, n, tdr_make1(p), logp))
+
+cdef dbinom_vectorize_nonk(object k, object n, object p, bint logp):
+    ka = np.asarray(k, dtype=np.int64)
+    na = np.asarray(n, dtype=np.int64)
+    pa = np.asarray(p, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
         out_of_support_result = NAN
@@ -193,11 +191,10 @@ cdef dbinom_vv_internal(object k, object n, object p, bint logp):
         out_of_support_result = 0.0
     cdef int64_t ki
     cdef double result
-    if np.size(ka_py) != 1 or np.size(na_py) != 1:
-        it = np.nditer([ka_py, na_py, pa_py], flags=['c_index'])
+    if np.size(ka) != 1 or np.size(na) != 1:
+        it = np.nditer([ka, na, pa], flags=['c_index'])
         results = np.empty(it.shape, dtype=np.float64)
-        for x in it:
-            ki, ni, pd = x
+        for ki, ni, pd in it:
             if ni < 0 or ni >= (1LL << 52):
                 raise RuntimeError("n must be in [0, 2^52).")
             if pd < 0.0 or not pd <= 1.0:
@@ -213,14 +210,13 @@ cdef dbinom_vv_internal(object k, object n, object p, bint logp):
             results.flat[it.index] = result
         return results
     # This case isn't that uncommon, and is straightforward to optimize.
-    ni = na_py.flat[0]
+    ni = na.flat[0]
     if ni < 0 or ni >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    results = np.empty(pa_py.shape, dtype=np.float64)
-    ki = ka_py.flat[0]
-    pa = pa_py.flatten()
+    results = np.empty(pa.shape, dtype=np.float64)
+    ki = ka.flat[0]
     if ki < 0 or ki > ni:
-        for idx, pd in enumerate(pa):
+        for idx, pd in enumerate(pa.flat):
             if pd < 0.0 or not pd <= 1.0:
                 raise RuntimeError("p must be in [0, 1].")
             results.flat[idx] = out_of_support_result
@@ -229,12 +225,21 @@ cdef dbinom_vv_internal(object k, object n, object p, bint logp):
     cdef td_real_struct neg_lfact_k_tdr
     cdef td_real_struct neg_lfact_nmk_tdr
     BinomMassMultiPPrecomp(ki, ni, &lfact_n_tdr, &neg_lfact_k_tdr, &neg_lfact_nmk_tdr)
-    for idx, pd in enumerate(pa):
+    for idx, pd in enumerate(pa.flat):
         if pd < 0.0 or not pd <= 1.0:
             raise RuntimeError("p must be in [0, 1].")
         results.flat[idx] = flush_if_denormal(BinomMassJustP(tdr_make1(pd), ki, ni, lfact_n_tdr, neg_lfact_k_tdr, neg_lfact_nmk_tdr, logp))
     return results
 
+cdef dbinom_vv_internal(object k, object n, object p, bint logp):
+    cdef int64_t ni
+    cdef double pd
+    try:
+        ni = n
+        pd = p
+    except TypeError:
+        return dbinom_vectorize_nonk(k, n, p, logp)
+    return dbinom_v_internal(k, ni, pd, logp)
 
 # Returns likelihood of exactly k successes.  Relative error should be <1 ULP.
 # This R-style entry point can only broadcast k, not n or p.
@@ -242,15 +247,62 @@ def dbinom(object k, int64_t n, double p=0.5, bint logp=0):
     return dbinom_v_internal(k, n, p, logp)
 
 
-cdef double pbinom_internal(int64_t k, int64_t n, double p, bint complement, bint logp, bint approx) except? 2.0:
+cdef pbinom_vectorize_k(object k, int64_t n, double p, bint complement, bint logp, bint approx):
+    ka = np.asarray(k, dtype=np.int64)
+    results = np.empty(ka.shape, dtype=np.float64)
+    cdef td_real_struct p_tdr = tdr_make1(p)
+    cdef double result
+    for idx, ki in enumerate(ka.flat):
+        if approx:
+            result = PbinomApprox(ki, n, p_tdr, complement, 0, logp)
+        else:
+            result = Pbinom(ki, n, p_tdr, complement, logp)
+        results.flat[idx] = flush_if_denormal(result)
+    return results
+
+cdef pbinom_v_internal(object k, int64_t n, double p, bint complement, bint logp, bint approx):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     if p < 0.0 or not p <= 1.0:
         raise RuntimeError("p must be in [0, 1].")
+    cdef int64_t ki
+    try:
+        ki = k
+    except TypeError:
+        return pbinom_vectorize_k(k, n, p, complement, logp, approx)
+    cdef td_real_struct p_tdr = tdr_make1(p)
     if approx:
-        return flush_if_denormal(PbinomApprox(k, n, tdr_make1(p), complement, 0, logp))
-    return flush_if_denormal(Pbinom(k, n, tdr_make1(p), complement, logp))
+        return flush_if_denormal(PbinomApprox(ki, n, p_tdr, complement, 0, logp))
+    return flush_if_denormal(Pbinom(ki, n, p_tdr, complement, logp))
 
+cdef pbinom_vectorize_nonk(object k, object n, object p, bint complement, bint logp, bint approx):
+    ka = np.asarray(k, dtype=np.int64)
+    na = np.asarray(n, dtype=np.int64)
+    pa = np.asarray(p, dtype=np.float64)
+    it = np.nditer([ka, na, pa], flags=['c_index'])
+    results = np.empty(it.shape, dtype=np.float64)
+    cdef double result
+    for ki, ni, pd in it:
+        if ni < 0 or ni >= (1LL << 52):
+            raise RuntimeError("n must be in [0, 2^52).")
+        if pd < 0.0 or not pd <= 1.0:
+            raise RuntimeError("p must be in [0, 1].")
+        if approx:
+            result = PbinomApprox(ki, ni, tdr_make1(pd), complement, 0, logp)
+        else:
+            result = Pbinom(ki, ni, tdr_make1(pd), complement, logp)
+        results.flat[it.index] = flush_if_denormal(result)
+    return results
+
+cdef pbinom_vv_internal(object k, object n, object p, bint complement, bint logp, bint approx):
+    cdef int64_t ni
+    cdef double pd
+    try:
+        ni = n
+        pd = p
+    except TypeError:
+        return pbinom_vectorize_nonk(k, n, p, complement, logp, approx)
+    return pbinom_v_internal(k, ni, pd, complement, logp, approx)
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 #
@@ -259,21 +311,82 @@ cdef double pbinom_internal(int64_t k, int64_t n, double p, bint complement, bin
 # last few mantissa bits right.
 # Otherwise, relative error should be <0.6 ULP unless n is huge.
 def pbinom(object k, int64_t n, double p=0.5, bint complement=0, bint logp=0, bint approx=0):
-    return pbinom_internal(k, n, p, complement, logp, approx)
+    return pbinom_v_internal(k, n, p, complement, logp, approx)
 
 
-cdef int64_t qbinom_internal(dd_real_struct targetp_or_lnp_ddr, int64_t n, double succp, bint logTarget) except? -1:
+cdef qbinom_vectorize_targetp(object targetP, int64_t n, double succP, bint invert, bint logTarget):
+    qa = np.asarray(targetP, dtype=np.float64)
+    results = np.empty(qa.shape, dtype=np.float64)
+    cdef dd_real_struct q_or_lnq_ddr
+    cdef double result
+    for idx, qd in enumerate(qa.flat):
+        if invert:
+            q_or_lnq_ddr = ddr_add2d(1.0, -qd)
+        else:
+            q_or_lnq_ddr = ddr_maked(qd)
+        if logTarget:
+            if not ddr_leqd(q_or_lnq_ddr, 0.0):
+                raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+        else:
+            if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
+                raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
+        results.flat[idx] = QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+    return results
+
+cdef qbinom_v_internal(object targetP, int64_t n, double succP, bint invert, bint logTarget):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
-    if succp < 0.0 or not succp <= 1.0:
+    if succP < 0.0 or not succP <= 1.0:
         raise RuntimeError("succP must be in [0, 1].")
+    cdef double qd
+    try:
+        qd = targetP
+    except TypeError:
+        return qbinom_vectorize_targetp(targetP, n, succP, invert, logTarget)
+    cdef dd_real_struct q_or_lnq_ddr
+    if invert:
+        q_or_lnq_ddr = ddr_add2d(1.0, -qd)
+    else:
+        q_or_lnq_ddr = ddr_maked(qd)
     if logTarget:
-        if not ddr_leqd(targetp_or_lnp_ddr, 0.0):
+        if not ddr_leqd(q_or_lnq_ddr, 0.0):
             raise RuntimeError("targetP must be <= 0 when logTarget is True.")
     else:
-        if ddr_ltd(targetp_or_lnp_ddr, 0.0) or not ddr_leqd(targetp_or_lnp_ddr, 1.0):
+        if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    return QbinomHalfUlp(targetp_or_lnp_ddr, n, tdr_make1(succp), logTarget)
+    return QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+
+cdef qbinom_vectorize_non_targetp(object targetP, object n, object succP, bint invert, bint logTarget):
+    qa = np.asarray(targetP, dtype=np.float64)
+    na = np.asarray(n, dtype=np.int64)
+    pa = np.asarray(succP, dtype=np.float64)
+    it = np.nditer([qa, na, pa], flags=['c_index'])
+    results = np.empty(it.shape, dtype=np.float64)
+    cdef double result
+    cdef dd_real_struct q_or_lnq_ddr
+    for qd, ni, pd in it:
+        if invert:
+            q_or_lnq_ddr = ddr_add2d(1.0, -qd)
+        else:
+            q_or_lnq_ddr = ddr_maked(qd)
+        if logTarget:
+            if not ddr_leqd(q_or_lnq_ddr, 0.0):
+                raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+        else:
+            if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
+                raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
+        results.flat[it.index] = QbinomHalfUlp(q_or_lnq_ddr, ni, tdr_make1(pd), logTarget)
+    return results
+
+cdef qbinom_vv_internal(object targetP, object n, object succP, bint invert, bint logTarget):
+    cdef int64_t ni
+    cdef double pd
+    try:
+        ni = n
+        pd = succP
+    except TypeError:
+        return qbinom_vectorize_non_targetp(targetP, n, succP, invert, logTarget)
+    return qbinom_v_internal(targetP, ni, pd, invert, logTarget)
 
 # Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
 # is False, and cdf(k) >= exp(targetP) if logTarget is True.
@@ -285,49 +398,49 @@ cdef int64_t qbinom_internal(dd_real_struct targetp_or_lnp_ddr, int64_t n, doubl
 # - Qbinom() is designed for <0.6 ULP relative error and achieves <0.5 ULP the
 #   vast majority of the time.
 # - The internal Qbinom() call is made with 0.5 ULP subtracted off of q.
-def qbinom(double targetP, int64_t n, double succP=0.5, bint logTarget=0):
-    return qbinom_internal(ddr_maked(targetP), n, succP, logTarget)
+def qbinom(object targetP, int64_t n, double succP=0.5, bint logTarget=0):
+    return qbinom_v_internal(targetP, n, succP, False, logTarget)
 
 
 # scipy-style interface.  Straightforward to fill in the missing methods (e.g.
 # .stats()) if it matters.
 class _BinomDist:
     @staticmethod
-    def cdf(int64_t k, int64_t n, double p=0.5, bint approx=False):
-        return pbinom_internal(k, n, p, complement=False, logp=False, approx=approx)
+    def cdf(object k, object n, object p=0.5, bint approx=False):
+        return pbinom_vv_internal(k, n, p, complement=False, logp=False, approx=approx)
 
     @staticmethod
-    def isf(double q, int64_t n, double p=0.5):
-        return qbinom_internal(ddr_add2d(1.0, -q), n, p, logTarget=False)
+    def isf(object q, object n, object p=0.5):
+        return qbinom_vv_internal(q, n, p, invert=True, logTarget=False)
 
     @staticmethod
-    def logcdf(int64_t k, int64_t n, double p=0.5, bint approx=False):
-        return pbinom_internal(k, n, p, complement=False, logp=True, approx=approx)
+    def logcdf(object k, object n, object p=0.5, bint approx=False):
+        return pbinom_vv_internal(k, n, p, complement=False, logp=True, approx=approx)
 
     @staticmethod
-    def logpmf(int64_t k, int64_t n, double p=0.5):
+    def logpmf(object k, object n, object p=0.5):
         return dbinom_vv_internal(k, n, p, logp=True)
 
     @staticmethod
-    def logsf(int64_t k, int64_t n, double p=0.5, bint approx=False):
-        return pbinom_internal(k, n, p, complement=True, logp=True, approx=approx)
+    def logsf(object k, object n, object p=0.5, bint approx=False):
+        return pbinom_vv_internal(k, n, p, complement=True, logp=True, approx=approx)
 
     @staticmethod
-    def median(int64_t n, double p):
+    def median(object n, object p):
         # silly to have a p=0.5 default here
-        return qbinom_internal(ddr_maked(0.5), n, p, logTarget=False)
+        return qbinom_vv_internal(0.5, n, p, invert=False, logTarget=False)
 
     @staticmethod
-    def pmf(int64_t k, int64_t n, double p=0.5):
+    def pmf(object k, object n, object p=0.5):
         return dbinom_vv_internal(k, n, p, logp=False)
 
     @staticmethod
-    def ppf(double q, int64_t n, double p=0.5, bint logQ=False):
-        return qbinom_internal(ddr_maked(q), n, p, logTarget=logQ)
+    def ppf(object q, object n, object p=0.5, bint logQ=False):
+        return qbinom_vv_internal(q, n, p, invert=False, logTarget=logQ)
 
     @staticmethod
-    def sf(int64_t k, int64_t n, double p=0.5, bint approx=False):
-        return pbinom_internal(k, n, p, complement=True, logp=True, approx=approx)
+    def sf(object k, object n, object p=0.5, bint approx=False):
+        return pbinom_vv_internal(k, n, p, complement=True, logp=True, approx=approx)
 
 binom = _BinomDist()
 

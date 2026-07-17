@@ -6,11 +6,10 @@ from Cython.Build import cythonize
 import numpy as np
 
 # Note that this package makes heavy use of high-precision arithmetic functions
-# which get a huge speedup from Fused Multiply-Add (FMA) instructions,
+# which get a significant speedup from Fused Multiply-Add (FMA) instructions,
 # available in x86-64-v3 but not base x86-64.  As a consequence, once PEP 817
-# is finalized (and possibly even before that), it is critical to take
-# advantage of it.  If other build backends add support for PEP 817 before
-# setuptools does, we must switch.
+# is finalized, we should take advantage of it.  If other build backends add
+# support for PEP 817 before setuptools does, we should switch.
 
 ext_modules = [
     Extension("exact_tests",
@@ -38,7 +37,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.8.1",
+    version="0.8.2",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",

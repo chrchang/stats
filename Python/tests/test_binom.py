@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import exact_tests
 import math
+import numpy as np
 import pytest
 import sys
 
@@ -102,6 +103,10 @@ def test_dbinom():
     assert exact_tests.dbinom(2, 2, 1.0) == 1.0
     assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
     assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
+    # broadcast tests
+    assert exact_tests.dbinom([1, 2], 4) == pytest.approx(np.array([0.25, 0.375]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf(2, 4, [0.25, 0.5]) == pytest.approx(np.array([0.2109375, 0.375]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf([1, 2], 4, [[0.25], [0.5]]) == pytest.approx(np.array([[0.421875, 0.2109375], [0.25, 0.375]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
@@ -128,6 +133,9 @@ def test_pbinom():
     assert exact_tests.pbinom(5549, 9999, 0.37, logp=True) == pytest.approx(-3.8607083741381037e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
     assert exact_tests.pbinom(2**50 - 555, 2**51, 0.499999) == pytest.approx(1, rel=1e-15, abs=0)
+    # broadcast tests
+    assert exact_tests.pbinom([1, 2], 4) == pytest.approx(np.array([0.3125, 0.6875]), rel=1e-15, abs=0)
+    assert exact_tests.binom.cdf([1, 2], 4, [[0.25], [0.5]]) == pytest.approx(np.array([[0.73828125, 0.94921875], [0.3125, 0.6875]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
@@ -149,6 +157,9 @@ def test_qbinom():
     assert exact_tests.qbinom(1, 2, 1.0) == 2
     assert exact_tests.qbinom(-1000000000 * math.log(2), 999999999, logTarget=True) == 0
     assert exact_tests.qbinom(-999999998 * math.log(2), 999999999, logTarget=True) == 1
+    # broadcast tests
+    np.testing.assert_array_equal(exact_tests.qbinom([0.3, 0.7], 4), np.array([1, 3]))
+    np.testing.assert_array_equal(exact_tests.binom.ppf([0.3, 0.7], 4, [[0.4], [0.6]]), np.array([[1, 2], [2, 3]]))
     # todo: test exception-throwing cases
 
 

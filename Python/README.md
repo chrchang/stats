@@ -23,9 +23,9 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^20, 2^21): errRMS=0  approxErrRMS=5.08e-16  scipyErrRMS=1.01e-13
     n in [2^35, 2^36): errRMS=0  approxErrRMS=6.87e-16  scipyErrRMS=1.66e-11
     $ utils/pbinom_benchmark.py  # yes, default mode becomes slower than scipy for large n, that's why approx= exists
-    n=(2^5)-1: base=6.92e-07  approx=2.92e-07  scipy=2.99e-05 sec/iter
-    n=(2^20)-1: base=4.6e-05  approx=3.52e-06  scipy=2.99e-05 sec/iter
-    n=(2^35)-1: base=0.00113  approx=7.96e-05  scipy=9.5e-05 sec/iter
+    n=(2^5)-1: base=7.46e-07  approx=3e-07  scipy=3.03e-05 sec/iter
+    n=(2^20)-1: base=4.73e-05  approx=3.51e-06  scipy=2.93e-05 sec/iter
+    n=(2^35)-1: base=0.00114  approx=7.93e-05  scipy=9.52e-05 sec/iter
 
     $ utils/binomtest_accuracy.py --z-score 1
     n in [2^5, 2^6): errRMS=1.44e-16  scipyErrRMS=1.96e-16
