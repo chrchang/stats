@@ -53,8 +53,8 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
     if (p_is_half) {
       ddrs[3] = ddr_muld(_ddr_log05, n);
     } else {
-      ddrs[3] = (k == 0)? ddr_maked(0.0) : ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = (n-k==0)? ddr_maked(0.0) : ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
+      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
     }
     return ddr_sort_and_add(5 - p_is_half, ddrs);
   }
@@ -76,11 +76,11 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
     // mode, the final magnitude will be large (so higher absolute error is
     // fine).
     if (ddr_ltd(p_ddr, 0.5)) {
-      tdrs[3] = (k == 0)? tdr_make1(0.0) : tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
-      tdrs[4] = (n-k==0)? tdr_make1(0.0) : tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
+      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
+      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
     } else {
-      tdrs[3] = (k == 0)? tdr_make1(0.0) : tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
-      tdrs[4] = (n-k==0)? tdr_make1(0.0) : tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
+      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
+      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
     }
   }
   return ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
@@ -131,8 +131,8 @@ double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lf
       // BinomMass().
       ddrs[3] = ddr_muld(_ddr_log05, n);
     } else {
-      ddrs[3] = (k == 0)? ddr_maked(0.0) : ddr_muld(ddr_make_td(lnp_tdr), k);
-      ddrs[4] = (n-k==0)? ddr_maked(0.0) : ddr_muld(ddr_make_td(lnq_tdr), n-k);
+      ddrs[3] = ddr_muld(ddr_make_td(lnp_tdr), k);
+      ddrs[4] = ddr_muld(ddr_make_td(lnq_tdr), n-k);
     }
     const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
     return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
@@ -144,8 +144,8 @@ double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lf
   if (p_is_half) {
     tdrs[3] = tdr_muld(_tdr_log05, n);
   } else {
-    tdrs[3] = (k == 0)? tdr_make1(0.0) : tdr_muld(lnp_tdr, k);
-    tdrs[4] = (n-k==0)? tdr_make1(0.0) : tdr_muld(lnq_tdr, n-k);
+    tdrs[3] = tdr_muld(lnp_tdr, k);
+    tdrs[4] = tdr_muld(lnq_tdr, n-k);
   }
   td_real lnresult_tdr = tdr_sort_and_add(5 - p_is_half, tdrs);
   return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
@@ -175,8 +175,8 @@ double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n
       ddrs[3] = ddr_muld(_ddr_log05, n);
     } else {
       const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      ddrs[3] = (k == 0)? ddr_maked(0.0) : ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = (n-k==0)? ddr_maked(0.0) : ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
+      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
     }
     const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
     return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
@@ -189,12 +189,12 @@ double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n
     tdrs[3] = tdr_muld(_tdr_log05, n);
   } else {
     if (ddr_ltd(p_ddr, 0.5)) {
-      tdrs[3] = (k == 0)? tdr_make1(0.0) : tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
-      tdrs[4] = (n-k==0)? tdr_make1(0.0) : tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
+      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
+      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
     } else {
       const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      tdrs[3] = (k == 0)? tdr_make1(0.0) : tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
-      tdrs[4] = (n-k==0)? tdr_make1(0.0) : tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
+      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
+      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
     }
   }
   td_real lnresult_tdr = tdr_sort_and_add(5, tdrs);

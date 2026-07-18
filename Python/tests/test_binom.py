@@ -104,9 +104,10 @@ def test_dbinom():
     assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
     assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
     # broadcast tests
-    assert exact_tests.dbinom([1, 2], 4) == pytest.approx(np.array([0.25, 0.375]), rel=1e-15, abs=0)
-    assert exact_tests.binom.pmf(2, 4, [0, 0.5]) == pytest.approx(np.array([0, 0.375]), rel=1e-15, abs=0)
-    assert exact_tests.binom.pmf([1, 4], 4, [[0], [1]]) == pytest.approx(np.array([[0, 0], [0, 1]]), rel=1e-15, abs=0)
+    assert exact_tests.dbinom([[[0, 1, 2], [3, 4, 5]]], 10) == pytest.approx(np.array([[[0.0009765625, 0.009765625, 0.0439453125], [0.1171875, 0.205078125, 0.24609375]]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf(1, 3, [[[0, 0.2, 0.4], [0.6, 0.8, 1]]]) == pytest.approx(np.array([[[0, 0.384, 0.432], [0.288, 0.096, 0]]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf([0, 1, 2], 2, [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 0, 0], [0.5625, 0.375, 0.0625], [0.25, 0.5, 0.25], [0, 0, 1]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf([0, 1, 2], [2, 3, 4], [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 0, 0], [0.5625, 0.421875, 0.2109375], [0.25, 0.375, 0.375], [0, 0, 0]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
@@ -134,8 +135,9 @@ def test_pbinom():
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
     assert exact_tests.pbinom(2**50 - 555, 2**51, 0.499999) == pytest.approx(1, rel=1e-15, abs=0)
     # broadcast tests
-    assert exact_tests.pbinom([1, 2], 4) == pytest.approx(np.array([0.3125, 0.6875]), rel=1e-15, abs=0)
-    assert exact_tests.binom.cdf([1, 2], 4, [[0.25], [0.5]]) == pytest.approx(np.array([[0.73828125, 0.94921875], [0.3125, 0.6875]]), rel=1e-15, abs=0)
+    assert exact_tests.pbinom([[[0, 1, 2], [3, 4, 5]]], 5) == pytest.approx(np.array([[[0.03125, 0.1875, 0.5], [0.8125, 0.96875, 1]]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.cdf([0, 1, 2], 2, [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 1, 1], [0.5625, 0.9375, 1], [0.25, 0.75, 1], [0, 0, 1]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.cdf([0, 1, 2], [2, 3, 4], [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 1, 1], [0.5625, 0.84375, 0.94921875], [0.25, 0.5, 0.6875], [0, 0, 0]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
@@ -147,6 +149,10 @@ def test_qbinom():
             assert test_case[0] == exact_tests.qbinom(pval, test_case[1], test_case[2])
             if pval < 1.0:
                 assert test_case[0] + 1 == exact_tests.qbinom(pval * (1 + 0.5 ** 52), test_case[1], test_case[2])
+    # Note that both R qbinom() and scipy.stats.binom.ppf() handle some of
+    # edge cases differently.
+    # We consistently return the minimum k in {0, 1, ..., n} for which cdf(k,
+    # n, succP) >= targetP.
     assert exact_tests.qbinom(0, 0) == 0
     assert exact_tests.qbinom(1, 0) == 0
     assert exact_tests.qbinom(0, 2, 0.0) == 0
@@ -158,8 +164,9 @@ def test_qbinom():
     assert exact_tests.qbinom(-1000000000 * math.log(2), 999999999, logTarget=True) == 0
     assert exact_tests.qbinom(-999999998 * math.log(2), 999999999, logTarget=True) == 1
     # broadcast tests
-    np.testing.assert_array_equal(exact_tests.qbinom([0.3, 0.7], 4), np.array([1, 3]))
-    np.testing.assert_array_equal(exact_tests.binom.ppf([0.3, 0.7], 4, [[0.4], [0.6]]), np.array([[1, 2], [2, 3]]))
+    np.testing.assert_array_equal(exact_tests.qbinom([[[0, 0.2, 0.4], [0.6, 0.8, 1]]], 7), np.array([[[0, 2, 3], [4, 5, 7]]]))
+    np.testing.assert_array_equal(exact_tests.binom.ppf([0, 0.5, 1], 4, [[0], [0.25], [0.5], [1]]), np.array([[0, 0, 0], [0, 1, 4], [0, 2, 4], [0, 4, 4]]))
+    np.testing.assert_array_equal(exact_tests.binom.ppf([0, 0.5, 1], [4, 5, 6], [[0], [0.25], [0.5], [1]]), np.array([[0, 0, 0], [0, 1, 6], [0, 2, 6], [0, 5, 6]]))
     # todo: test exception-throwing cases
 
 

@@ -1,11 +1,11 @@
-# cython: language_level=3
-from libc.stdint cimport int64_t, uint32_t, int32_t
+# cython: language_level=3, boundscheck=False, wraparound=False
+from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t
 from libc.math cimport NAN
 import fractions
 import numpy as np
-cimport numpy as np
+cimport numpy as cnp
 
-__version__ = "0.8.4"
+__version__ = "0.8.5"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -120,55 +120,63 @@ cdef td_real_struct TdrMake(object p):
     p_tdr.x[2] = float(rem1 - fractions.Fraction(p_tdr.x[1]))
     return p_tdr
 
-cdef double zeroval(bint logp):
+cdef double zeroval(bint logp) nogil:
     if logp:
         return NAN
     return 0.0
 
-cdef double oneval(bint logp):
+cdef double oneval(bint logp) nogil:
     return 1.0 - logp
 
 
-cdef dbinom_vectorize_k(object k, int64_t n, double p, bint logp):
-    ka = np.asarray(k, dtype=np.int64)
-    results = np.empty(ka.shape, dtype=np.float64)
+cdef dbinom_vectorize_k(object k_obj, int64_t n, double p, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    cdef int64_t [::1] kar = ka.ravel()
+    cdef uintptr_t kar_size = kar.size
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(kar_size, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
         out_of_support_result = NAN
     else:
         out_of_support_result = 0.0
+    cdef uintptr_t idx
+    cdef int64_t ki
     cdef double result
     if p == 0.0 or p == 1.0:
-        for idx, ki in enumerate(ka.flat):
-            if ki < 0 or ki > n:
-                result = out_of_support_result
-            elif (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
-                result = oneval(logp)
-            else:
-                result = zeroval(logp)
-            results.flat[idx] = result
-        return results
+        with nogil:
+            for idx in range(kar_size):
+                ki = kar[idx]
+                if ki < 0 or ki > n:
+                    result = out_of_support_result
+                elif (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
+                    result = oneval(logp)
+                else:
+                    result = zeroval(logp)
+                results[idx] = result
+        return np.reshape(results, ka.shape)
     cdef uint32_t p_is_half
     cdef td_real_struct lfact_n_tdr
     cdef td_real_struct lnp_tdr
     cdef td_real_struct lnq_tdr
-    BinomMassMultiKPrecomp(n, tdr_make1(p), &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr)
-    for idx, ki in enumerate(ka.flat):
-        if ki < 0 or ki > n:
-            result = out_of_support_result
-        else:
-            result = flush_if_denormal(BinomMassJustK(ki, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, logp))
-        results.flat[idx] = result
-    return results
+    with nogil:
+        BinomMassMultiKPrecomp(n, tdr_make1(p), &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr)
+        for idx in range(kar_size):
+            ki = kar[idx]
+            if ki < 0 or ki > n:
+                result = out_of_support_result
+            else:
+                result = flush_if_denormal(BinomMassJustK(ki, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, logp))
+            results[idx] = result
+    return np.reshape(results, ka.shape)
 
-cdef dbinom_v_internal(object k, int64_t n, double p, bint logp):
+cdef dbinom_v_internal(object k_obj, int64_t n, double p, bint logp):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     cdef int64_t ki
     try:
-        ki = k
+        ki = k_obj
     except TypeError:
-        return dbinom_vectorize_k(k, n, p, logp)
+        return dbinom_vectorize_k(k_obj, n, p, logp)
     if ki < 0 or ki > n:
         if logp:
             return NAN
@@ -180,74 +188,96 @@ cdef dbinom_v_internal(object k, int64_t n, double p, bint logp):
         return zeroval(logp)
     return flush_if_denormal(BinomMass(ki, n, tdr_make1(p), logp))
 
-cdef dbinom_vectorize_nonk(object k, object n, object p, bint logp):
-    ka = np.asarray(k, dtype=np.int64)
-    na = np.asarray(n, dtype=np.int64)
-    pa = np.asarray(p, dtype=np.float64)
+cdef dbinom_vectorize_all(object k_obj, object n_obj, object p_obj, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    pa = np.asarray(p_obj, dtype=np.float64)
+    it = np.nditer([ka, na, pa], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
         out_of_support_result = NAN
     else:
         out_of_support_result = 0.0
+    # important to declare these types, otherwise loops are a lot slower
     cdef int64_t ki
+    cdef int64_t ni
+    cdef double pd
     cdef double result
-    if np.size(ka) != 1 or np.size(na) != 1:
-        it = np.nditer([ka, na, pa], flags=['c_index'])
-        results = np.empty(it.shape, dtype=np.float64)
-        for ki, ni, pd in it:
-            if ni < 0 or ni >= (1LL << 52):
-                raise RuntimeError("n must be in [0, 2^52).")
-            if pd < 0.0 or not pd <= 1.0:
-                raise RuntimeError("p must be in [0, 1].")
-            if ki < 0 or ki > n:
-                result = out_of_support_result
-            elif pd == 0.0 or pd == 1.0:
-                if (pd == 0.0 and ki == 0) or (ki == ni and pd == 1.0):
-                    result = oneval(logp)
-                else:
-                    result = zeroval(logp)
-            else:
-                result = flush_if_denormal(BinomMass(ki, ni, tdr_make1(pd), logp))
-            results.flat[it.index] = result
-        return results
-    # This case isn't that uncommon, and is straightforward to optimize.
-    ni = na.flat[0]
-    if ni < 0 or ni >= (1LL << 52):
-        raise RuntimeError("n must be in [0, 2^52).")
-    results = np.empty(pa.shape, dtype=np.float64)
-    ki = ka.flat[0]
-    if ki < 0 or ki > ni:
-        for idx, pd in enumerate(pa.flat):
-            if pd < 0.0 or not pd <= 1.0:
-                raise RuntimeError("p must be in [0, 1].")
-            results.flat[idx] = out_of_support_result
-        return results
-    cdef td_real_struct lfact_n_tdr
-    cdef td_real_struct neg_lfact_k_tdr
-    cdef td_real_struct neg_lfact_nmk_tdr
-    BinomMassMultiPPrecomp(ki, ni, &lfact_n_tdr, &neg_lfact_k_tdr, &neg_lfact_nmk_tdr)
-    for idx, pd in enumerate(pa.flat):
+    for ki, ni, pd in it:
+        if ni < 0 or ni >= (1LL << 52):
+            raise RuntimeError("n must be in [0, 2^52).")
         if pd < 0.0 or not pd <= 1.0:
             raise RuntimeError("p must be in [0, 1].")
-        if pd == 0.0 or pd == 1.0:
+        if ki < 0 or ki > ni:
+            result = out_of_support_result
+        elif pd == 0.0 or pd == 1.0:
             if (pd == 0.0 and ki == 0) or (ki == ni and pd == 1.0):
                 result = oneval(logp)
             else:
                 result = zeroval(logp)
         else:
-            result = flush_if_denormal(BinomMassJustP(tdr_make1(pd), ki, ni, lfact_n_tdr, neg_lfact_k_tdr, neg_lfact_nmk_tdr, logp))
-        results.flat[idx] = result
-    return results
+            result = flush_if_denormal(BinomMass(ki, ni, tdr_make1(pd), logp))
+        results[it.index] = result
+    return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape, pa.shape))
 
-cdef dbinom_vv_internal(object k, object n, object p, bint logp):
+cdef dbinom_vectorize_kp(object k_obj, int64_t n, object p_obj, bint logp):
+    cdef int64_t ki
+    try:
+        ki = k_obj
+    except TypeError:
+        return dbinom_vectorize_all(k_obj, n, p_obj, logp)
+    if n < 0 or n >= (1LL << 52):
+        raise RuntimeError("n must be in [0, 2^52).")
+    # This case isn't that uncommon, and is straightforward to optimize.
+    pa = np.asarray(p_obj, dtype=np.float64)
+    cdef double [::1] par = pa.ravel()
+    cdef uintptr_t par_size = par.size
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(par_size, dtype=np.float64)
+    cdef double out_of_support_result
+    if logp:
+        out_of_support_result = NAN
+    else:
+        out_of_support_result = 0.0
+    cdef double pd
+    if ki < 0 or ki > n:
+        for idx in range(par_size):
+            pd = par[idx]
+            if pd < 0.0 or not pd <= 1.0:
+                raise RuntimeError("p must be in [0, 1].")
+            results[idx] = out_of_support_result
+        return np.reshape(results, pa.shape)
+    cdef td_real_struct lfact_n_tdr
+    cdef td_real_struct neg_lfact_k_tdr
+    cdef td_real_struct neg_lfact_nmk_tdr
+    BinomMassMultiPPrecomp(ki, n, &lfact_n_tdr, &neg_lfact_k_tdr, &neg_lfact_nmk_tdr)
+    cdef double result
+    for idx in range(par_size):
+        pd = par[idx]
+        if pd < 0.0 or not pd <= 1.0:
+            raise RuntimeError("p must be in [0, 1].")
+        if pd == 0.0 or pd == 1.0:
+            if (pd == 0.0 and ki == 0) or (ki == n and pd == 1.0):
+                result = oneval(logp)
+            else:
+                result = zeroval(logp)
+        else:
+            result = flush_if_denormal(BinomMassJustP(tdr_make1(pd), ki, n, lfact_n_tdr, neg_lfact_k_tdr, neg_lfact_nmk_tdr, logp))
+        results[idx] = result
+    return np.reshape(results, pa.shape)
+
+cdef dbinom_vv_internal(object k_obj, object n_obj, object p_obj, bint logp):
     cdef int64_t ni
+    try:
+        ni = n_obj
+    except TypeError:
+        return dbinom_vectorize_all(k_obj, n_obj, p_obj, logp)
     cdef double pd
     try:
-        ni = n
-        pd = p
+        pd = p_obj
     except TypeError:
-        return dbinom_vectorize_nonk(k, n, p, logp)
-    return dbinom_v_internal(k, ni, pd, logp)
+        return dbinom_vectorize_kp(k_obj, ni, p_obj, logp)
+    return dbinom_v_internal(k_obj, ni, pd, logp)
 
 # Returns likelihood of exactly k successes.  Relative error should be <1 ULP.
 # This R-style entry point can only broadcast k, not n or p.
@@ -255,40 +285,49 @@ def dbinom(object k, int64_t n, double p=0.5, bint logp=0):
     return dbinom_v_internal(k, n, p, logp)
 
 
-cdef pbinom_vectorize_k(object k, int64_t n, double p, bint complement, bint logp, bint approx):
-    ka = np.asarray(k, dtype=np.int64)
-    results = np.empty(ka.shape, dtype=np.float64)
+cdef pbinom_vectorize_k(object k_obj, int64_t n, double p, bint complement, bint logp, bint approx):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    cdef int64_t [::1] kar = ka.ravel()
+    cdef uintptr_t kar_size = kar.size
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(kar_size, dtype=np.float64)
     cdef td_real_struct p_tdr = tdr_make1(p)
+    cdef uintptr_t idx
+    cdef int64_t ki
     cdef double result
-    for idx, ki in enumerate(ka.flat):
-        if approx:
-            result = PbinomApprox(ki, n, p_tdr, complement, 0, logp)
-        else:
-            result = Pbinom(ki, n, p_tdr, complement, logp)
-        results.flat[idx] = flush_if_denormal(result)
-    return results
+    with nogil:
+        for idx in range(kar_size):
+            ki = kar[idx]
+            if approx:
+                result = PbinomApprox(ki, n, p_tdr, complement, 0, logp)
+            else:
+                result = Pbinom(ki, n, p_tdr, complement, logp)
+            results[idx] = flush_if_denormal(result)
+    return np.reshape(results, ka.shape)
 
-cdef pbinom_v_internal(object k, int64_t n, double p, bint complement, bint logp, bint approx):
+cdef pbinom_v_internal(object k_obj, int64_t n, double p, bint complement, bint logp, bint approx):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     if p < 0.0 or not p <= 1.0:
         raise RuntimeError("p must be in [0, 1].")
     cdef int64_t ki
     try:
-        ki = k
+        ki = k_obj
     except TypeError:
-        return pbinom_vectorize_k(k, n, p, complement, logp, approx)
+        return pbinom_vectorize_k(k_obj, n, p, complement, logp, approx)
     cdef td_real_struct p_tdr = tdr_make1(p)
     if approx:
         return flush_if_denormal(PbinomApprox(ki, n, p_tdr, complement, 0, logp))
     return flush_if_denormal(Pbinom(ki, n, p_tdr, complement, logp))
 
-cdef pbinom_vectorize_nonk(object k, object n, object p, bint complement, bint logp, bint approx):
-    ka = np.asarray(k, dtype=np.int64)
-    na = np.asarray(n, dtype=np.int64)
-    pa = np.asarray(p, dtype=np.float64)
+cdef pbinom_vectorize_nonk(object k_obj, object n_obj, object p_obj, bint complement, bint logp, bint approx):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    pa = np.asarray(p_obj, dtype=np.float64)
     it = np.nditer([ka, na, pa], flags=['c_index'])
-    results = np.empty(it.shape, dtype=np.float64)
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef int64_t ni
+    cdef double pd
     cdef double result
     for ki, ni, pd in it:
         if ni < 0 or ni >= (1LL << 52):
@@ -299,18 +338,18 @@ cdef pbinom_vectorize_nonk(object k, object n, object p, bint complement, bint l
             result = PbinomApprox(ki, ni, tdr_make1(pd), complement, 0, logp)
         else:
             result = Pbinom(ki, ni, tdr_make1(pd), complement, logp)
-        results.flat[it.index] = flush_if_denormal(result)
-    return results
+        results[it.index] = flush_if_denormal(result)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape, pa.shape))
 
-cdef pbinom_vv_internal(object k, object n, object p, bint complement, bint logp, bint approx):
+cdef pbinom_vv_internal(object k_obj, object n_obj, object p_obj, bint complement, bint logp, bint approx):
     cdef int64_t ni
     cdef double pd
     try:
-        ni = n
-        pd = p
+        ni = n_obj
+        pd = p_obj
     except TypeError:
-        return pbinom_vectorize_nonk(k, n, p, complement, logp, approx)
-    return pbinom_v_internal(k, ni, pd, complement, logp, approx)
+        return pbinom_vectorize_nonk(k_obj, n_obj, p_obj, complement, logp, approx)
+    return pbinom_v_internal(k_obj, ni, pd, complement, logp, approx)
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
 #
@@ -322,12 +361,17 @@ def pbinom(object k, int64_t n, double p=0.5, bint complement=0, bint logp=0, bi
     return pbinom_v_internal(k, n, p, complement, logp, approx)
 
 
-cdef qbinom_vectorize_targetp(object targetP, int64_t n, double succP, bint invert, bint logTarget):
-    qa = np.asarray(targetP, dtype=np.float64)
-    results = np.empty(qa.shape, dtype=np.float64)
+cdef qbinom_vectorize_targetp(object targetP_obj, int64_t n, double succP, bint invert, bint logTarget):
+    qa = np.asarray(targetP_obj, dtype=np.float64)
+    cdef double [::1] qar = qa.ravel()
+    cdef uintptr_t qar_size = qar.size
+    cdef cnp.ndarray[cnp.int64_t,mode="c",ndim=1] results = np.empty(qar_size, dtype=np.int64)
+    cdef uintptr_t idx
+    cdef double qd
     cdef dd_real_struct q_or_lnq_ddr
     cdef double result
-    for idx, qd in enumerate(qa.flat):
+    for idx in range(qar_size):
+        qd = qar[idx]
         if invert:
             q_or_lnq_ddr = ddr_add2d(1.0, -qd)
         else:
@@ -338,19 +382,19 @@ cdef qbinom_vectorize_targetp(object targetP, int64_t n, double succP, bint inve
         else:
             if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
                 raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-        results.flat[idx] = QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
-    return results
+        results[idx] = QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+    return np.reshape(results, qa.shape)
 
-cdef qbinom_v_internal(object targetP, int64_t n, double succP, bint invert, bint logTarget):
+cdef qbinom_v_internal(object targetP_obj, int64_t n, double succP, bint invert, bint logTarget):
     if n < 0 or n >= (1LL << 52):
         raise RuntimeError("n must be in [0, 2^52).")
     if succP < 0.0 or not succP <= 1.0:
         raise RuntimeError("succP must be in [0, 1].")
     cdef double qd
     try:
-        qd = targetP
+        qd = targetP_obj
     except TypeError:
-        return qbinom_vectorize_targetp(targetP, n, succP, invert, logTarget)
+        return qbinom_vectorize_targetp(targetP_obj, n, succP, invert, logTarget)
     cdef dd_real_struct q_or_lnq_ddr
     if invert:
         q_or_lnq_ddr = ddr_add2d(1.0, -qd)
@@ -364,14 +408,17 @@ cdef qbinom_v_internal(object targetP, int64_t n, double succP, bint invert, bin
             raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
     return QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
 
-cdef qbinom_vectorize_non_targetp(object targetP, object n, object succP, bint invert, bint logTarget):
-    qa = np.asarray(targetP, dtype=np.float64)
-    na = np.asarray(n, dtype=np.int64)
-    pa = np.asarray(succP, dtype=np.float64)
+cdef qbinom_vectorize_non_targetp(object targetP_obj, object n_obj, object succP_obj, bint invert, bint logTarget):
+    qa = np.asarray(targetP_obj, dtype=np.float64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    pa = np.asarray(succP_obj, dtype=np.float64)
     it = np.nditer([qa, na, pa], flags=['c_index'])
-    results = np.empty(it.shape, dtype=np.float64)
-    cdef double result
+    cdef cnp.ndarray[cnp.int64_t,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.int64)
+    cdef double qd
+    cdef int64_t ni
+    cdef double pd
     cdef dd_real_struct q_or_lnq_ddr
+    cdef double result
     for qd, ni, pd in it:
         if invert:
             q_or_lnq_ddr = ddr_add2d(1.0, -qd)
@@ -383,18 +430,18 @@ cdef qbinom_vectorize_non_targetp(object targetP, object n, object succP, bint i
         else:
             if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
                 raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-        results.flat[it.index] = QbinomHalfUlp(q_or_lnq_ddr, ni, tdr_make1(pd), logTarget)
-    return results
+        results[it.index] = QbinomHalfUlp(q_or_lnq_ddr, ni, tdr_make1(pd), logTarget)
+    return np.reshape(results, np.broadcast_shapes(qa.shape, na.shape, pa.shape))
 
-cdef qbinom_vv_internal(object targetP, object n, object succP, bint invert, bint logTarget):
+cdef qbinom_vv_internal(object targetP_obj, object n_obj, object succP_obj, bint invert, bint logTarget):
     cdef int64_t ni
     cdef double pd
     try:
-        ni = n
-        pd = succP
+        ni = n_obj
+        pd = succP_obj
     except TypeError:
-        return qbinom_vectorize_non_targetp(targetP, n, succP, invert, logTarget)
-    return qbinom_v_internal(targetP, ni, pd, invert, logTarget)
+        return qbinom_vectorize_non_targetp(targetP_obj, n_obj, succP_obj, invert, logTarget)
+    return qbinom_v_internal(targetP_obj, ni, pd, invert, logTarget)
 
 # Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
 # is False, and cdf(k) >= exp(targetP) if logTarget is True.
