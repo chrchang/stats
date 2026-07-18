@@ -106,7 +106,7 @@ def test_dbinom():
     # broadcast tests
     assert exact_tests.dbinom([1, 2], 4) == pytest.approx(np.array([0.25, 0.375]), rel=1e-15, abs=0)
     assert exact_tests.binom.pmf(2, 4, [0, 0.5]) == pytest.approx(np.array([0, 0.375]), rel=1e-15, abs=0)
-    assert exact_tests.binom.pmf([1, 2], 4, [[0], [0.5]]) == pytest.approx(np.array([[0, 0], [0.25, 0.375]]), rel=1e-15, abs=0)
+    assert exact_tests.binom.pmf([1, 4], 4, [[0], [1]]) == pytest.approx(np.array([[0, 0], [0, 1]]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
