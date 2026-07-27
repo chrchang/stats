@@ -147,7 +147,7 @@ double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lf
     tdrs[3] = tdr_muld(lnp_tdr, k);
     tdrs[4] = tdr_muld(lnq_tdr, n-k);
   }
-  td_real lnresult_tdr = tdr_sort_and_add(5 - p_is_half, tdrs);
+  const td_real lnresult_tdr = tdr_sort_and_add(5 - p_is_half, tdrs);
   return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
 }
 

@@ -55,11 +55,62 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// dhyper
+NumericVector dhyper(NumericVector x, double m, double n, double k, bool log);
+RcppExport SEXP _exactr_dhyper(SEXP xSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP logSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< double >::type m(mSEXP);
+    Rcpp::traits::input_parameter< double >::type n(nSEXP);
+    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< bool >::type log(logSEXP);
+    rcpp_result_gen = Rcpp::wrap(dhyper(x, m, n, k, log));
+    return rcpp_result_gen;
+END_RCPP
+}
+// phyper_cpp
+NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool approx);
+RcppExport SEXP _exactr_phyper_cpp(SEXP qSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP approxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type q(qSEXP);
+    Rcpp::traits::input_parameter< double >::type m(mSEXP);
+    Rcpp::traits::input_parameter< double >::type n(nSEXP);
+    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    Rcpp::traits::input_parameter< bool >::type approx(approxSEXP);
+    rcpp_result_gen = Rcpp::wrap(phyper_cpp(q, m, n, k, lower_tail, log_p, approx));
+    return rcpp_result_gen;
+END_RCPP
+}
+// qhyper_cpp
+NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail, bool log_p);
+RcppExport SEXP _exactr_qhyper_cpp(SEXP pSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
+    Rcpp::traits::input_parameter< double >::type m(mSEXP);
+    Rcpp::traits::input_parameter< double >::type n(nSEXP);
+    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(qhyper_cpp(p, m, n, k, lower_tail, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_exactr_dbinom", (DL_FUNC) &_exactr_dbinom, 4},
     {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 6},
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
+    {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
+    {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 7},
+    {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
     {NULL, NULL, 0}
 };
 

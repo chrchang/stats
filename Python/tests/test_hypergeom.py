@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import exact_tests
 import math
+import numpy as np
 import pytest
 import sys
 
@@ -74,6 +75,10 @@ def test_dhyper():
     assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149436094e-08, rel=1e-15, abs=0)
     assert exact_tests.dhyper(0, 0, 0, 0) == 1.0
     assert exact_tests.dhyper(2, 2, 2, 4) == 1.0
+    # broadcast tests
+    assert exact_tests.dhyper([[[0, 1, 2], [3, 4, 5]]], 11, 12, 10) == pytest.approx(np.array([[[5.7688979481952964e-05, 0.002115262581004942, 0.0237967040363056], [0.11422417937426686, 0.2665230852066227, 0.3198277022479472]]]), rel=1e-15, abs=0)
+    assert exact_tests.hypergeom.pmf([0, 1, 2], [[4], [5]], 2, 2) == pytest.approx(np.array([[0.16666666666666666, 0.6666666666666666, 0.16666666666666666], [0.3, 0.6, 0.1]]), rel=1e-15, abs=0)
+    assert exact_tests.hypergeom.pmf([0, 1, 2], [4, 5, 6], 2, 2) == pytest.approx(np.array([0.16666666666666666, 0.6, 0.06666666666666667]), rel=1e-15, abs=0)
     # todo: test exception-throwing cases
 
 
@@ -98,6 +103,10 @@ def test_phyper():
         assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=approx) == pytest.approx(9.686381892010733e-05, rel=tol, abs=0)
         assert exact_tests.phyper(0, 0, 0, 0, approx=approx) == 1.0
         assert exact_tests.phyper(2, 2, 2, 4, approx=approx) == 1.0
+        # broadcast tests
+        assert exact_tests.phyper([[[0, 1, 2], [3, 4, 5]]], 11, 12, 10) == pytest.approx(np.array([[[5.7688979481952964e-05, 0.002172951560486895, 0.02596965559679249], [0.14019383497105936, 0.4067169201776821, 0.7265446224256293]]]), rel=tol, abs=0)
+        assert exact_tests.hypergeom.cdf([0, 1, 2], [[4], [5]], 2, 2) == pytest.approx(np.array([[0.16666666666666666, 0.8333333333333334, 1], [0.3, 0.9, 1]]), rel=tol, abs=0)
+        assert exact_tests.hypergeom.cdf([0, 1, 2], [4, 5, 6], 2, 2) == pytest.approx(np.array([0.16666666666666666, 0.9, 1]), rel=tol, abs=0)
         # todo: test exception-throwing cases
 
 
@@ -132,3 +141,7 @@ def test_qhyper():
     assert exact_tests.qhyper(1, 2, 2, 4) == 2
     assert exact_tests.qhyper(0, 1, 1, 1, logp=True) == 1
     assert exact_tests.qhyper(-0.1, 1, 1, 1, logp=True) == 1
+    # broadcast tests
+    np.testing.assert_array_equal(exact_tests.qhyper([[[0, 0.2, 0.4], [0.6, 0.8, 1]]], 13, 13, 13), np.array([[[0, 5, 6], [7, 8, 13]]]))
+    np.testing.assert_array_equal(exact_tests.hypergeom.ppf([0, 0.5, 1], 27, 13, [[12], [13]]), np.array([[0, 6, 12], [0, 6, 13]]))
+    np.testing.assert_array_equal(exact_tests.hypergeom.ppf([0.1, 0.5, 0.9], [25, 27, 29], 13, [[12], [13]]), np.array([[5, 6, 7], [5, 6, 8]]))

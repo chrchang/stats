@@ -275,4 +275,10 @@ def test_binomtest():
     assert exact_tests.binomtest(5550, 9999, 0.37, alternative="less", logp=True) == pytest.approx(0.0, abs=DBL_MIN)
 
     assert exact_tests.binomtest(9998, 9999, alternative="less", logp=True) == 0.0
+
+    # broadcast tests
+    assert exact_tests.binomtest([[[0, 1, 2], [3, 4, 5]]], 10) == pytest.approx(np.array([[[0.001953125, 0.021484375, 0.109375], [0.34375, 0.75390625, 1]]]), rel=1e-13, abs=0)
+    assert exact_tests.binomtest([0, 1, 2], 4, [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 0, 0], [0.578125, 1, 0.26171875], [0.125, 0.625, 1], [0, 0, 0]]), rel=1e-13, abs=0)
+    assert exact_tests.binomtest([0, 1, 2], [2, 3, 4], [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 0, 0], [1, 1, 0.26171875], [0.5, 1, 1], [0, 0, 0]]), rel=1e-13, abs=0)
+
     # todo: test exception-throwing cases

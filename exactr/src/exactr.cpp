@@ -1,8 +1,10 @@
 #include <math.h>
 
 #include "include/binom.h"
+#include "include/binom_detail.h"
 #include "include/fisher.h"
 #include "include/hypergeom.h"
+#include "include/hypergeom_detail.h"
 #include "include/plink2_base.h"
 #include "include/plink2_float.h"
 #include "include/plink2_highprec.h"
@@ -54,9 +56,11 @@ NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log =
   }
   const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
   const int64_t n = static_cast<int64_t>(size_round);
-  // todo: avoid repeating log(n!), log(p), log(1-p) computations when x_len >
-  // 1.  BinomMassShared() can compute those values, then BinomMassFinish() can
-  // compute the final value given k and those precomputed values.
+  uint32_t p_is_half;
+  plink2::td_real lfact_n_tdr;
+  plink2::td_real lnp_tdr;
+  plink2::td_real lnq_tdr;
+  plink2::BinomMassMultiKPrecomp(n, prob_tdr, &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr);
   // possible todo: use parallel-for from RcppParallel for large x_len.
   // possible todo: when len(x) > max(x) - min(x) + 1 (so there is at least one
   // repeat value), memoize.  (how often does this come up?)
@@ -73,7 +77,7 @@ NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log =
       results[idx] = log? (0.0 / 0.0) : 0.0;
       continue;
     }
-    results[idx] = plink2::BinomMass(static_cast<int64_t>(k_round), n, prob_tdr, log);
+    results[idx] = plink2::BinomMassJustK(static_cast<int64_t>(k_round), n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, log);
   }
   results.attr("dim") = x.attr("dim");
   return results;
@@ -173,15 +177,236 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob = 0.5, bool l
       }
     }
     plink2::dd_real p_ddr = plink2::ddr_maked(p_float);
+    bool cur_log = log_p;
     if (!lower_tail) {
       if (log_p) {
-        // ugh
-        p_ddr = plink2::ddr_log(plink2::ddr_negate(plink2::ddr_addd(plink2::ddr_exp(p_ddr), -1)));
+        p_ddr = plink2::ddr_negate(plink2::ddr_addd(plink2::ddr_exp(p_ddr), -1));
+        cur_log = false;
       } else {
         p_ddr = plink2::ddr_negate(plink2::ddr_add2d(p_float, -1));
       }
     }
-    results[idx] = plink2::QbinomHalfUlp(p_ddr, n, prob_tdr, log_p);
+    results[idx] = plink2::QbinomHalfUlp(p_ddr, n, prob_tdr, cur_log);
+  }
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  results.attr("dim") = p.attr("dim");
+  return results;
+}
+
+//' Hypergeometric distribution pmf
+//'
+//' Mass function for hypergeometric distribution with parameters `m`, `n`, and
+//' `k`.  Implementation is based on log-factorial functions utilizing the QD
+//' high-precision library.
+//'
+//' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+//'   precision floating point arithmetic.  Proceedings of the 15th IEEE
+//'   Symposium on Computer Arithmetic.
+//'
+//' @param x vector which can be interpreted as numbers of white balls drawn
+//'   without replacement from an urn which contains both black and white
+//'   balls.
+//' @param m the number of white balls in the urn.
+//' @param n the number of black balls in the urn.
+//' @param k the number of balls drawn from the urn, must be in \[0, m+n\].
+//' @param log logical; if TRUE, probabilities are returned as logarithms.
+//' @return pmf(x).
+//' @export
+// [[Rcpp::export]]
+NumericVector dhyper(NumericVector x, double m, double n, double k, bool log = false) {
+  const double m_round = round(m);
+  const double n_round = round(n);
+  const double k_round = round(k);
+  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
+    stop("m is not in [0, 2^52 - 1]");
+  }
+  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
+    stop("n is not in [0, 2^52 - 1]");
+  }
+  const int64_t mi = static_cast<int64_t>(m_round);
+  const int64_t ni = static_cast<int64_t>(n_round);
+  const int64_t total = mi + ni;
+  if (total >= (1LL << 52)) {
+    stop("m+n is not in [0, 2^52 - 1]");
+  }
+
+  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
+    stop("k is not in [0, m+n]");
+  }
+  const int64_t ki = static_cast<int64_t>(k_round);
+  if (ki > total) {
+    stop("k is not in [0, m+n]");
+  }
+
+  const double x_min = MAXV(0, k_round - n_round);
+  const double x_max = MINV(m_round, k_round);
+  plink2::td_real lfact_m1x_tdr;
+  plink2::td_real lfact_m2x_tdr;
+  plink2::td_real lfact_mx1_tdr;
+  plink2::td_real lfact_mx2_tdr;
+  plink2::td_real lfact_mxx_tdr;
+  plink2::HypergeomMassMultiKPrecomp(total, ki, mi, &lfact_m1x_tdr, &lfact_m2x_tdr, &lfact_mx1_tdr, &lfact_mx2_tdr, &lfact_mxx_tdr);
+  const uint32_t x_len = x.size();
+  NumericVector results = NumericVector(x_len);
+  for (uint32_t idx = 0; idx < x_len; ++idx) {
+    const double x_float = x[idx];
+    if (isnan(x_float)) {
+      results[idx] = x_float;
+      continue;
+    }
+    const double x_round = round(x_float);
+    if ((x_round < x_min) || (!(x_round <= x_max)) || nonint_warn(x_float, x_round)) {
+      results[idx] = log? (0.0 / 0.0) : 0.0;
+      continue;
+    }
+    results[idx] = plink2::HypergeomMassJustK(static_cast<int64_t>(x_round), total, ki, mi, lfact_m1x_tdr, lfact_m2x_tdr, lfact_mx1_tdr, lfact_mx2_tdr, lfact_mxx_tdr, log);
+  }
+  results.attr("dim") = x.attr("dim");
+  return results;
+}
+
+//' @title Hypergeometric distribution cmf
+//' @description Backend for phyper(), separated since dots aren't permitted in
+//'   C++ parameter names.
+//' @noRd
+// [[Rcpp::export]]
+NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail = true, bool log_p = false, bool approx = false) {
+  const double m_round = round(m);
+  const double n_round = round(n);
+  const double k_round = round(k);
+  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
+    stop("m is not in [0, 2^52 - 1]");
+  }
+  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
+    stop("n is not in [0, 2^52 - 1]");
+  }
+  const int64_t ac = static_cast<int64_t>(m_round);
+  const int64_t bd = static_cast<int64_t>(n_round);
+  const int64_t total = ac + bd;
+  if (total >= (1LL << 52)) {
+    stop("m+n is not in [0, 2^52 - 1]");
+  }
+
+  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
+    stop("k is not in [0, m+n]");
+  }
+  const int64_t ab = static_cast<int64_t>(k_round);
+  if (ab > total) {
+    stop("k is not in [0, m+n]");
+  }
+
+  const double a_min = MAXV(0, k_round - n_round);
+  const double a_max = MINV(m_round, k_round);
+
+  const uint32_t q_len = q.size();
+  NumericVector results = NumericVector(q_len);
+  for (uint32_t idx = 0; idx < q_len; ++idx) {
+    const double a_float = q[idx];
+    if (isnan(a_float)) {
+      results[idx] = a_float;
+      continue;
+    }
+    // Imitate R phyper().
+    const double a_floor = floor(a_float + 1e-7);
+    double result;
+    if ((a_floor < a_min) || (a_floor > a_max)) {
+      if ((a_floor < a_min) == lower_tail) {
+        result = log_p? (0.0 / 0.0) : 0.0;
+      } else {
+        result = log_p? 0.0 : 1.0;
+      }
+    } else {
+      int64_t a = static_cast<int64_t>(a_floor);
+      int64_t b = ab - a;
+      int64_t c = ac - a;
+      int64_t d = bd - b;
+      if (!lower_tail) {
+        plink2::swap_i64(&a, &b);
+        plink2::swap_i64(&c, &d);
+        a -= 1;
+        b += 1;
+        c += 1;
+        d -= 1;
+      }
+      if ((a < 0) || (d < 0)) {
+        result = log_p? (0.0 / 0.0) : 0.0;
+      } else if (approx) {
+        result = plink2::PhyperApprox(a, b, c, d, 0, 0, log_p);
+      } else {
+        result = plink2::Phyper(a, b, c, d, log_p);
+      }
+    }
+    results[idx] = result;
+  }
+  results.attr("dim") = q.attr("dim");
+  return results;
+}
+
+//' @title Hypergeometric distribution ppf
+//' @description Backend for qbinom(), separated since dots aren't permitted in
+//'   C++ parameter names.
+//' @noRd
+// [[Rcpp::export]]
+NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail = true, bool log_p = false) {
+  const double m_round = round(m);
+  const double n_round = round(n);
+  const double k_round = round(k);
+  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
+    stop("m is not in [0, 2^52 - 1]");
+  }
+  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
+    stop("n is not in [0, 2^52 - 1]");
+  }
+  const int64_t ac = static_cast<int64_t>(m_round);
+  const int64_t bd = static_cast<int64_t>(n_round);
+  const int64_t total = ac + bd;
+  if (total >= (1LL << 52)) {
+    stop("m+n is not in [0, 2^52 - 1]");
+  }
+
+  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
+    stop("k is not in [0, m+n]");
+  }
+  const int64_t ab = static_cast<int64_t>(k_round);
+  if (ab > total) {
+    stop("k is not in [0, m+n]");
+  }
+
+  const uint32_t p_len = p.size();
+  NumericVector results = NumericVector(p_len);
+  uint32_t nans_produced = 0;
+  for (uint32_t idx = 0; idx < p_len; ++idx) {
+    const double p_float = p[idx];
+    if (isnan(p_float)) {
+      nans_produced = 1;
+      results[idx] = p_float;
+      continue;
+    }
+    if (log_p) {
+      if (p_float > 0.0) {
+        nans_produced = 1;
+        results[idx] = 0.0 / 0.0;
+        continue;
+      }
+    } else {
+      if ((p_float < 0.0) || (p_float > 1.0)) {
+        nans_produced = 1;
+        results[idx] = 0.0 / 0.0;
+      }
+    }
+    plink2::dd_real p_ddr = plink2::ddr_maked(p_float);
+    bool cur_log = log_p;
+    if (!lower_tail) {
+      if (log_p) {
+        p_ddr = plink2::ddr_negate(plink2::ddr_addd(plink2::ddr_exp(p_ddr), -1));
+        cur_log = false;
+      } else {
+        p_ddr = plink2::ddr_negate(plink2::ddr_add2d(p_float, -1));
+      }
+    }
+    results[idx] = plink2::QhyperHalfUlp(p_ddr, ac, bd, ab, cur_log);
   }
   if (nans_produced) {
     warning("NaNs produced");

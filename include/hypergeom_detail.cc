@@ -52,6 +52,55 @@ dd_real hypergeom_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_
   }
 }
 
+void HypergeomMassMultiKPrecomp(int64_t mxx, int64_t m1x, int64_t mx1, td_real* lfact_m1x_tdr_ptr, td_real* lfact_m2x_tdr_ptr, td_real* lfact_mx1_tdr_ptr, td_real* lfact_mx2_tdr_ptr, td_real* lfact_mxx_tdr_ptr) {
+  const int64_t m2x = mxx - m1x;
+  const int64_t mx2 = mxx - mx1;
+  if (!use_tdr_for_hypergeom_lnprob(mxx)) {
+    *lfact_m1x_tdr_ptr = tdr_make_dd(ddr_lfact(m1x));
+    *lfact_m2x_tdr_ptr = tdr_make_dd(ddr_lfact(m2x));
+    *lfact_mx1_tdr_ptr = tdr_make_dd(ddr_lfact(mx1));
+    *lfact_mx2_tdr_ptr = tdr_make_dd(ddr_lfact(mx2));
+    *lfact_mxx_tdr_ptr = tdr_make_dd(ddr_lfact(mxx));
+    return;
+  }
+  *lfact_m1x_tdr_ptr = tdr_lfact(m1x);
+  *lfact_m2x_tdr_ptr = tdr_lfact(m2x);
+  *lfact_mx1_tdr_ptr = tdr_lfact(mx1);
+  *lfact_mx2_tdr_ptr = tdr_lfact(mx2);
+  *lfact_mxx_tdr_ptr = tdr_lfact(mxx);
+}
+
+double HypergeomMassJustK(int64_t m11, int64_t mxx, int64_t m1x, int64_t mx1, const td_real lfact_m1x_tdr, const td_real lfact_m2x_tdr, const td_real lfact_mx1_tdr, const td_real lfact_mx2_tdr, const td_real lfact_mxx_tdr, uint32_t logp) {
+  const int64_t mx2 = mxx - mx1;
+  const int64_t m12 = m1x - m11;
+  const int64_t m21 = mx1 - m11;
+  const int64_t m22 = mx2 - m12;
+  if (!use_tdr_for_hypergeom_lnprob(mxx)) {
+    dd_real ddrs[8];
+    ddrs[0] = ddr_make_td(lfact_m1x_tdr);
+    ddrs[1] = ddr_make_td(lfact_m2x_tdr);
+    ddrs[2] = ddr_make_td(lfact_mx1_tdr);
+    ddrs[3] = ddr_make_td(lfact_mx2_tdr);
+    ddrs[4] = ddr_negate(ddr_lfact(m11));
+    ddrs[5] = ddr_negate(ddr_lfact(m12));
+    ddrs[6] = ddr_negate(ddr_lfact(m21));
+    ddrs[7] = ddr_negate(ddr_lfact(m22));
+    const dd_real lnresult_ddr = ddr_sub(ddr_sort_and_add(8, ddrs), ddr_lfact(mxx));
+    return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
+  }
+  td_real tdrs[8];
+  tdrs[0] = lfact_m1x_tdr;
+  tdrs[1] = lfact_m2x_tdr;
+  tdrs[2] = lfact_mx1_tdr;
+  tdrs[3] = lfact_mx2_tdr;
+  tdrs[4] = tdr_negate(tdr_lfact(m11));
+  tdrs[5] = tdr_negate(tdr_lfact(m12));
+  tdrs[6] = tdr_negate(tdr_lfact(m21));
+  tdrs[7] = tdr_negate(tdr_lfact(m22));
+  const td_real lnresult_tdr = tdr_sub(tdr_sort_and_add(8, tdrs), tdr_lfact(mxx));
+  return logp? lnresult_tdr.x[0] : tdr_exp(lnresult_tdr).x[0];
+}
+
 intptr_t HypergeomCompare(uint64_t obs_m11, uint64_t obs_m12, uint64_t obs_m21, uint64_t obs_m22, int64_t m22_incr, td_real* neg_numer_tdr_ptr, double* dbl_ptr) {
   // Likelihood ratio of interest is
   //

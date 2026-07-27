@@ -545,6 +545,10 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
     // underflow in the rest of this function
     return QbinomExtremeSuccP(targetp_or_lnp_ddr, n, succp_tdr, log_target);
   }
+  // possible todo: treat median as a special case since we can often return
+  // round(np) immediately, and otherwise we just need to check
+  // pbinom(floor(np)).
+
   // If targetp > 0.5, invert.
   const uint32_t inv = ((!log_target) && (targetp_or_lnp_ddr.x[0] > 0.5)) || (log_target && (targetp_or_lnp_ddr.x[0] > _ddr_log05.x[0]));
   dd_real succp_ddr = ddr_make_td(succp_tdr);

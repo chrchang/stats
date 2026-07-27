@@ -37,3 +37,42 @@ qbinom_cpp <- function(p, size, prob = 0.5, lower_tail = TRUE, log_p = FALSE) {
     .Call(`_exactr_qbinom_cpp`, p, size, prob, lower_tail, log_p)
 }
 
+#' Hypergeometric distribution pmf
+#'
+#' Mass function for hypergeometric distribution with parameters `m`, `n`, and
+#' `k`.  Implementation is based on log-factorial functions utilizing the QD
+#' high-precision library.
+#'
+#' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+#'   precision floating point arithmetic.  Proceedings of the 15th IEEE
+#'   Symposium on Computer Arithmetic.
+#'
+#' @param x vector which can be interpreted as numbers of white balls drawn
+#'   without replacement from an urn which contains both black and white
+#'   balls.
+#' @param m the number of white balls in the urn.
+#' @param n the number of black balls in the urn.
+#' @param k the number of balls drawn from the urn, must be in \[0, m+n\].
+#' @param log logical; if TRUE, probabilities are returned as logarithms.
+#' @return pmf(x).
+#' @export
+dhyper <- function(x, m, n, k, log = FALSE) {
+    .Call(`_exactr_dhyper`, x, m, n, k, log)
+}
+
+#' @title Hypergeometric distribution cmf
+#' @description Backend for phyper(), separated since dots aren't permitted in
+#'   C++ parameter names.
+#' @noRd
+phyper_cpp <- function(q, m, n, k, lower_tail = TRUE, log_p = FALSE, approx = FALSE) {
+    .Call(`_exactr_phyper_cpp`, q, m, n, k, lower_tail, log_p, approx)
+}
+
+#' @title Hypergeometric distribution ppf
+#' @description Backend for qbinom(), separated since dots aren't permitted in
+#'   C++ parameter names.
+#' @noRd
+qhyper_cpp <- function(p, m, n, k, lower_tail = TRUE, log_p = FALSE) {
+    .Call(`_exactr_qhyper_cpp`, p, m, n, k, lower_tail, log_p)
+}
+

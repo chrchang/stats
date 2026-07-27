@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.8.5"
+__version__ = "0.8.6"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -15,13 +15,19 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
         double x[2]
 
 
+    dd_real_struct ddr_negate(const dd_real_struct a) nogil
+
     dd_real_struct ddr_add2d(double a, double b) nogil
+
+    dd_real_struct ddr_addd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_ltd(const dd_real_struct a, double b) nogil
 
     int32_t ddr_leqd(const dd_real_struct a, double b) nogil
 
     dd_real_struct ddr_maked(const double a) nogil
+
+    dd_real_struct ddr_exp(const dd_real_struct a) nogil
 
     td_real_struct tdr_make1(const double a) nogil
 
@@ -50,6 +56,12 @@ cdef extern from "../include/binom.h" namespace "plink2":
     int64_t QbinomHalfUlp(dd_real_struct targetp_or_lnp_ddr, int64_t n, td_real_struct distp_tdr, uint32_t log_targetp) nogil
 
     double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, td_real_struct p_tdr, int32_t midp, uint32_t logp) nogil
+
+
+cdef extern from "../include/hypergeom_detail.h" namespace "plink2":
+    void HypergeomMassMultiKPrecomp(int64_t mxx, int64_t m1x, int64_t mx1, td_real_struct* lfact_m1x_tdr_ptr, td_real_struct* lfact_m2x_tdr_ptr, td_real_struct* lfact_mx1_tdr_ptr, td_real_struct* lfact_mx2_tdr_ptr, td_real_struct* lfact_mxx_tdr_ptr) nogil
+
+    double HypergeomMassJustK(int64_t m11, int64_t mxx, int64_t m1x, int64_t mx1, const td_real_struct lfact_m1x_tdr, const td_real_struct lfact_m2x_tdr, const td_real_struct lfact_mx1_tdr, const td_real_struct lfact_mx2_tdr, const td_real_struct lfact_mxx_tdr, uint32_t logp) nogil
 
 
 cdef extern from "../include/hypergeom.h" namespace "plink2":
@@ -100,20 +112,15 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
 # a td_real.
 #
 # For now, this capability is only exposed in the Python API by the binomtest()
-# function.  It has extra value there because the alternative (for the default
-# two-sided test) is to have a wide tie-detection epsilon, which is
-# incompatible with accurate handling of large cases: see e.g. the n=21000000
-# test cases where it's just taken for granted that R sometimes has relative
-# error >1e-4.
+# function.  It has extra value there because the usual alternative (for the
+# default two-sided test) is to have a wide tie-detection epsilon, which makes
+# it impossible to handle some large cases accurately.
 cdef td_real_struct TdrMake(object p):
-    cdef td_real_struct p_tdr
     if isinstance(p, (float, np.float64, np.float32)):
-        p_tdr.x[0] = p
-        p_tdr.x[1] = 0.0
-        p_tdr.x[2] = 0.0
-        return p_tdr
+        return tdr_make1(p)
     if not isinstance(p, fractions.Fraction):
         p = fractions.Fraction(p)
+    cdef td_real_struct p_tdr
     p_tdr.x[0] = float(p)
     rem1 = p - fractions.Fraction(p_tdr.x[0])
     p_tdr.x[1] = float(rem1)
@@ -128,6 +135,18 @@ cdef double zeroval(bint logp) nogil:
 cdef double oneval(bint logp) nogil:
     return 1.0 - logp
 
+
+cdef double dbinom_internal(int64_t k, int64_t n, double p, bint logp) nogil:
+    if k < 0 or k > n:
+        if logp:
+            return NAN
+        else:
+            return 0.0
+    if p == 0.0 or p == 1.0:
+        if (p == 0.0 and k == 0) or (k == n and p == 1.0):
+            return oneval(logp)
+        return zeroval(logp)
+    return flush_if_denormal(BinomMass(k, n, tdr_make1(p), logp))
 
 cdef dbinom_vectorize_k(object k_obj, int64_t n, double p, bint logp):
     ka = np.asarray(k_obj, dtype=np.int64)
@@ -177,16 +196,7 @@ cdef dbinom_v_internal(object k_obj, int64_t n, double p, bint logp):
         ki = k_obj
     except TypeError:
         return dbinom_vectorize_k(k_obj, n, p, logp)
-    if ki < 0 or ki > n:
-        if logp:
-            return NAN
-        else:
-            return 0.0
-    if p == 0.0 or p == 1.0:
-        if (p == 0.0 and ki == 0) or (ki == n and p == 1.0):
-            return oneval(logp)
-        return zeroval(logp)
-    return flush_if_denormal(BinomMass(ki, n, tdr_make1(p), logp))
+    return dbinom_internal(ki, n, p, logp)
 
 cdef dbinom_vectorize_all(object k_obj, object n_obj, object p_obj, bint logp):
     ka = np.asarray(k_obj, dtype=np.int64)
@@ -194,31 +204,14 @@ cdef dbinom_vectorize_all(object k_obj, object n_obj, object p_obj, bint logp):
     pa = np.asarray(p_obj, dtype=np.float64)
     it = np.nditer([ka, na, pa], flags=['c_index'])
     cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
-    cdef double out_of_support_result
-    if logp:
-        out_of_support_result = NAN
-    else:
-        out_of_support_result = 0.0
     # important to declare these types, otherwise loops are a lot slower
     cdef int64_t ki
     cdef int64_t ni
     cdef double pd
-    cdef double result
     for ki, ni, pd in it:
         if ni < 0 or ni >= (1LL << 52):
             raise RuntimeError("n must be in [0, 2^52).")
-        if pd < 0.0 or not pd <= 1.0:
-            raise RuntimeError("p must be in [0, 1].")
-        if ki < 0 or ki > ni:
-            result = out_of_support_result
-        elif pd == 0.0 or pd == 1.0:
-            if (pd == 0.0 and ki == 0) or (ki == ni and pd == 1.0):
-                result = oneval(logp)
-            else:
-                result = zeroval(logp)
-        else:
-            result = flush_if_denormal(BinomMass(ki, ni, tdr_make1(pd), logp))
-        results[it.index] = result
+        results[it.index] = dbinom_internal(ki, ni, pd, logp)
     return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape, pa.shape))
 
 cdef dbinom_vectorize_kp(object k_obj, int64_t n, object p_obj, bint logp):
@@ -285,6 +278,14 @@ def dbinom(object k, int64_t n, double p=0.5, bint logp=0):
     return dbinom_v_internal(k, n, p, logp)
 
 
+cdef double pbinom_internal(int64_t k, int64_t n, td_real_struct p_tdr, bint complement, bint logp, bint approx) nogil:
+    cdef double result
+    if approx:
+        result = PbinomApprox(k, n, p_tdr, complement, 0, logp)
+    else:
+        result = Pbinom(k, n, p_tdr, complement, logp)
+    return flush_if_denormal(result)
+
 cdef pbinom_vectorize_k(object k_obj, int64_t n, double p, bint complement, bint logp, bint approx):
     ka = np.asarray(k_obj, dtype=np.int64)
     cdef int64_t [::1] kar = ka.ravel()
@@ -293,15 +294,10 @@ cdef pbinom_vectorize_k(object k_obj, int64_t n, double p, bint complement, bint
     cdef td_real_struct p_tdr = tdr_make1(p)
     cdef uintptr_t idx
     cdef int64_t ki
-    cdef double result
     with nogil:
         for idx in range(kar_size):
             ki = kar[idx]
-            if approx:
-                result = PbinomApprox(ki, n, p_tdr, complement, 0, logp)
-            else:
-                result = Pbinom(ki, n, p_tdr, complement, logp)
-            results[idx] = flush_if_denormal(result)
+            results[idx] = pbinom_internal(ki, n, p_tdr, complement, logp, approx)
     return np.reshape(results, ka.shape)
 
 cdef pbinom_v_internal(object k_obj, int64_t n, double p, bint complement, bint logp, bint approx):
@@ -314,12 +310,9 @@ cdef pbinom_v_internal(object k_obj, int64_t n, double p, bint complement, bint 
         ki = k_obj
     except TypeError:
         return pbinom_vectorize_k(k_obj, n, p, complement, logp, approx)
-    cdef td_real_struct p_tdr = tdr_make1(p)
-    if approx:
-        return flush_if_denormal(PbinomApprox(ki, n, p_tdr, complement, 0, logp))
-    return flush_if_denormal(Pbinom(ki, n, p_tdr, complement, logp))
+    return pbinom_internal(ki, n, tdr_make1(p), complement, logp, approx)
 
-cdef pbinom_vectorize_nonk(object k_obj, object n_obj, object p_obj, bint complement, bint logp, bint approx):
+cdef pbinom_vectorize_all(object k_obj, object n_obj, object p_obj, bint complement, bint logp, bint approx):
     ka = np.asarray(k_obj, dtype=np.int64)
     na = np.asarray(n_obj, dtype=np.int64)
     pa = np.asarray(p_obj, dtype=np.float64)
@@ -328,17 +321,12 @@ cdef pbinom_vectorize_nonk(object k_obj, object n_obj, object p_obj, bint comple
     cdef int64_t ki
     cdef int64_t ni
     cdef double pd
-    cdef double result
     for ki, ni, pd in it:
         if ni < 0 or ni >= (1LL << 52):
             raise RuntimeError("n must be in [0, 2^52).")
         if pd < 0.0 or not pd <= 1.0:
             raise RuntimeError("p must be in [0, 1].")
-        if approx:
-            result = PbinomApprox(ki, ni, tdr_make1(pd), complement, 0, logp)
-        else:
-            result = Pbinom(ki, ni, tdr_make1(pd), complement, logp)
-        results[it.index] = flush_if_denormal(result)
+        results[it.index] = pbinom_internal(ki, ni, tdr_make1(pd), complement, logp, approx)
     return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape, pa.shape))
 
 cdef pbinom_vv_internal(object k_obj, object n_obj, object p_obj, bint complement, bint logp, bint approx):
@@ -348,7 +336,7 @@ cdef pbinom_vv_internal(object k_obj, object n_obj, object p_obj, bint complemen
         ni = n_obj
         pd = p_obj
     except TypeError:
-        return pbinom_vectorize_nonk(k_obj, n_obj, p_obj, complement, logp, approx)
+        return pbinom_vectorize_all(k_obj, n_obj, p_obj, complement, logp, approx)
     return pbinom_v_internal(k_obj, ni, pd, complement, logp, approx)
 
 # Returns cumulative mass function, e.g. pbinom(n, n) is 1.
@@ -361,6 +349,24 @@ def pbinom(object k, int64_t n, double p=0.5, bint complement=0, bint logp=0, bi
     return pbinom_v_internal(k, n, p, complement, logp, approx)
 
 
+cdef int64_t qbinom_internal(double q, int64_t n, double succP, bint invert, bint logTarget) except? -1:
+    cdef dd_real_struct q_or_lnq_ddr
+    if invert:
+        if logTarget:
+            q_or_lnq_ddr = ddr_addd(ddr_negate(ddr_exp(ddr_maked(q))), 1.0)
+            logTarget = False
+        else:
+            q_or_lnq_ddr = ddr_add2d(1.0, -q)
+    else:
+        q_or_lnq_ddr = ddr_maked(q)
+    if logTarget:
+        if not ddr_leqd(q_or_lnq_ddr, 0.0):
+            raise RuntimeError("targetP must be <= 0 when logTarget is True.")
+    else:
+        if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
+            raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
+    return QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+
 cdef qbinom_vectorize_targetp(object targetP_obj, int64_t n, double succP, bint invert, bint logTarget):
     qa = np.asarray(targetP_obj, dtype=np.float64)
     cdef double [::1] qar = qa.ravel()
@@ -368,21 +374,9 @@ cdef qbinom_vectorize_targetp(object targetP_obj, int64_t n, double succP, bint 
     cdef cnp.ndarray[cnp.int64_t,mode="c",ndim=1] results = np.empty(qar_size, dtype=np.int64)
     cdef uintptr_t idx
     cdef double qd
-    cdef dd_real_struct q_or_lnq_ddr
-    cdef double result
     for idx in range(qar_size):
         qd = qar[idx]
-        if invert:
-            q_or_lnq_ddr = ddr_add2d(1.0, -qd)
-        else:
-            q_or_lnq_ddr = ddr_maked(qd)
-        if logTarget:
-            if not ddr_leqd(q_or_lnq_ddr, 0.0):
-                raise RuntimeError("targetP must be <= 0 when logTarget is True.")
-        else:
-            if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
-                raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-        results[idx] = QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+        results[idx] = qbinom_internal(qd, n, succP, invert, logTarget)
     return np.reshape(results, qa.shape)
 
 cdef qbinom_v_internal(object targetP_obj, int64_t n, double succP, bint invert, bint logTarget):
@@ -395,20 +389,9 @@ cdef qbinom_v_internal(object targetP_obj, int64_t n, double succP, bint invert,
         qd = targetP_obj
     except TypeError:
         return qbinom_vectorize_targetp(targetP_obj, n, succP, invert, logTarget)
-    cdef dd_real_struct q_or_lnq_ddr
-    if invert:
-        q_or_lnq_ddr = ddr_add2d(1.0, -qd)
-    else:
-        q_or_lnq_ddr = ddr_maked(qd)
-    if logTarget:
-        if not ddr_leqd(q_or_lnq_ddr, 0.0):
-            raise RuntimeError("targetP must be <= 0 when logTarget is True.")
-    else:
-        if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
-            raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-    return QbinomHalfUlp(q_or_lnq_ddr, n, tdr_make1(succP), logTarget)
+    return qbinom_internal(qd, n, succP, invert, logTarget)
 
-cdef qbinom_vectorize_non_targetp(object targetP_obj, object n_obj, object succP_obj, bint invert, bint logTarget):
+cdef qbinom_vectorize_all(object targetP_obj, object n_obj, object succP_obj, bint invert, bint logTarget):
     qa = np.asarray(targetP_obj, dtype=np.float64)
     na = np.asarray(n_obj, dtype=np.int64)
     pa = np.asarray(succP_obj, dtype=np.float64)
@@ -417,20 +400,12 @@ cdef qbinom_vectorize_non_targetp(object targetP_obj, object n_obj, object succP
     cdef double qd
     cdef int64_t ni
     cdef double pd
-    cdef dd_real_struct q_or_lnq_ddr
-    cdef double result
     for qd, ni, pd in it:
-        if invert:
-            q_or_lnq_ddr = ddr_add2d(1.0, -qd)
-        else:
-            q_or_lnq_ddr = ddr_maked(qd)
-        if logTarget:
-            if not ddr_leqd(q_or_lnq_ddr, 0.0):
-                raise RuntimeError("targetP must be <= 0 when logTarget is True.")
-        else:
-            if ddr_ltd(q_or_lnq_ddr, 0.0) or not ddr_leqd(q_or_lnq_ddr, 1.0):
-                raise RuntimeError("targetP must be in [0, 1] when logTarget is False.")
-        results[it.index] = QbinomHalfUlp(q_or_lnq_ddr, ni, tdr_make1(pd), logTarget)
+        if ni < 0 or ni >= (1LL << 52):
+            raise RuntimeError("n must be in [0, 2^52).")
+        if pd < 0.0 or not pd <= 1.0:
+            raise RuntimeError("succP must be in [0, 1].")
+        results[it.index] = qbinom_internal(qd, ni, pd, invert, logTarget)
     return np.reshape(results, np.broadcast_shapes(qa.shape, na.shape, pa.shape))
 
 cdef qbinom_vv_internal(object targetP_obj, object n_obj, object succP_obj, bint invert, bint logTarget):
@@ -440,7 +415,7 @@ cdef qbinom_vv_internal(object targetP_obj, object n_obj, object succP_obj, bint
         ni = n_obj
         pd = succP_obj
     except TypeError:
-        return qbinom_vectorize_non_targetp(targetP_obj, n_obj, succP_obj, invert, logTarget)
+        return qbinom_vectorize_all(targetP_obj, n_obj, succP_obj, invert, logTarget)
     return qbinom_v_internal(targetP_obj, ni, pd, invert, logTarget)
 
 # Returns smallest nonnegative k for which cdf(k) >= targetP if logTarget is
@@ -457,7 +432,7 @@ def qbinom(object targetP, int64_t n, double succP=0.5, bint logTarget=0):
     return qbinom_v_internal(targetP, n, succP, False, logTarget)
 
 
-# scipy-style interface.  Straightforward to fill in the missing methods (e.g.
+# scipy-style interfaces.  Straightforward to fill in the missing methods (e.g.
 # .stats()) if it matters.
 class _BinomDist:
     @staticmethod
@@ -499,96 +474,374 @@ class _BinomDist:
 
 binom = _BinomDist()
 
+cdef class Binomial:
+    cdef object n
+    cdef object p
+    cdef bint _approx
+    # further optimizations possible: can special-case scalar n and p, cache
+    # lfact_n_tdr / lnp_tdr / lnq_tdr, call n.ravel() and p.ravel() during
+    # initialization and split them into cython memoryview + shape-tuple, etc.
 
-# n must be in [0, 2^52), k must be in [0, n], p must be in [0, 1].
-#
-# If p is a fractions.Fraction(), it's expanded to a "triple-double" with ~159
-# bit accuracy.  This enables very accurate handling of near-ties.
-def binomtest(int64_t k, int64_t n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
+    def __cinit__(self, n, p, **kwargs):
+        # Straightforward (though a bit tedious) to improve 'tol' support by
+        # adding parallel functions that opportunistically stop using
+        # dd_real/td_real.
+        # Validation seems cheap enough that 'validation_policy' probably isn't
+        # worth implementing.
+        # Could suppory 'cache_policy' by imitating scipy caching behavior for
+        # the slower functions.
+        if 'tol' in kwargs:
+            # possible todo: prove an upper bound for PbinomApprox()'s relative
+            # error and make that the threshold; 2^{-32} is just a guess based
+            # on utils/pbinom_accuracy.py results I've seen
+            self._approx = (kwargs['tol'] >= (0.5 ** 32))
+        else:
+            self._approx = False
+        self.n = np.asarray(n, dtype=np.int64)
+        self.p = np.asarray(p, dtype=np.float64)
+
+    def ccdf(self, k):
+        return pbinom_vv_internal(k, self.n, self.p, complement=True, logp=False, approx=self._approx)
+
+    def cdf(self, k):
+        return pbinom_vv_internal(k, self.n, self.p, complement=False, logp=False, approx=self._approx)
+
+    def iccdf(self, q):
+        return qbinom_vv_internal(q, self.n, self.p, invert=True, logTarget=False)
+
+    def icdf(self, q):
+        return qbinom_vv_internal(q, self.n, self.p, invert=False, logTarget=False)
+
+    def ilogccdf(self, q):
+        return qbinom_vv_internal(q, self.n, self.p, invert=True, logTarget=True)
+
+    def ilogcdf(self, q):
+        return qbinom_vv_internal(q, self.n, self.p, invert=False, logTarget=True)
+
+    def logccdf(self, k):
+        return pbinom_vv_internal(k, self.n, self.p, complement=True, logp=True, approx=self._approx)
+
+    def logcdf(self, k):
+        return pbinom_vv_internal(k, self.n, self.p, complement=False, logp=True, approx=self._approx)
+
+    def logpmf(self, k):
+        return dbinom_vv_internal(k, self.n, self.p, logp=True)
+
+    def median(self):
+        return qbinom_vv_internal(0.5, self.n, self.p, invert=False, logTarget=False)
+
+    def pmf(self, k):
+        return dbinom_vv_internal(k, self.n, self.p, logp=False)
+
+
+# doesn't check whether p is in [0, 1]
+cdef double binomtest_internal(int64_t k, int64_t n, td_real_struct p_tdr, bint twosided, bint complement, bint midp, bint logp) except? 2.0:
     if k < 0 or k > n:
         raise RuntimeError("k must be nonnegative and <= n.")
     if n >= (1LL << 52):
         raise RuntimeError("n must be less than 2^52.")
-    cdef bint complement = (alternative == "greater")
-    if alternative != "two-sided" and alternative != "less" and not complement:
-        raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
     if complement and (not midp):
         k -= 1
-    cdef td_real_struct p_tdr = TdrMake(p)
+    cdef double result
+    if twosided:
+        result = BinomTwoSidedP(k, n, p_tdr, midp, logp)
+    else:
+        result = PbinomApprox(k, n, p_tdr, complement, midp, logp)
+    return flush_if_denormal(result)
+
+cdef binomtest_vectorize_all(object k_obj, object n_obj, object pa, bint twosided, bint complement, bint midp, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    it = np.nditer([ka, na, pa], flags=['c_index', 'refs_ok'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef int64_t ni
+    cdef object poa
+    cdef td_real_struct p_tdr
+    for ki, ni, poa in it:
+        p_tdr = TdrMake(poa.item(0))
+        if tdr_ltd(p_tdr, 0) or not tdr_leqd(p_tdr, 1):
+            raise RuntimeError("p must be in [0, 1].")
+        results[it.index] = binomtest_internal(ki, ni, p_tdr, twosided, complement, midp, logp)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape, pa.shape))
+
+cdef binomtest_vectorize_kn(object k_obj, object n_obj, td_real_struct p_tdr, bint twosided, bint complement, bint midp, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    it = np.nditer([ka, na], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef int64_t ni
+    for ki, ni in it:
+        results[it.index] = binomtest_internal(ki, ni, p_tdr, twosided, complement, midp, logp)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, na.shape))
+
+# n must be in [0, 2^52), k must be in [0, n], p must be in [0, 1].
+#
+# If p is a fractions.Fraction(), it's expanded to a "triple-double" with ~159
+# bit accuracy.  This option lets us justify use of a very small tie-detection
+# epsilon: we aren't effectively forced to treat p=0.30000000000000004 as if
+# the user may have intended p=3/10, because the user has a proper way to
+# specify the latter when they care about the difference.  Which, in turn, is
+# actually a hard prerequisite for handling some large cases accurately: see
+# e.g. the n=21000000 test cases where it has been taken for granted for
+# decades that R sometimes has relative error >1e-4.
+cpdef binomtest(object k, object n, object p=0.5, str alternative="two-sided", bint midp=0, bint logp=0):
+    cdef bint twosided = (alternative == "two-sided")
+    cdef bint complement = (alternative == "greater")
+    if alternative != "less" and not (twosided or complement):
+        raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
+    cdef td_real_struct p_tdr
+    if isinstance(p, (float, np.float32, np.float64)):
+        p_tdr = tdr_make1(p)
+    else:
+        pa = np.asarray(p)
+        if pa.size != 1:
+            return binomtest_vectorize_all(k, n, pa, twosided, complement, midp, logp)
+        p_tdr = TdrMake(pa.item(0))
     if tdr_ltd(p_tdr, 0) or not tdr_leqd(p_tdr, 1):
         raise RuntimeError("p must be in [0, 1].")
-    if alternative == "two-sided":
-        return flush_if_denormal(BinomTwoSidedP(k, n, p_tdr, midp, logp))
-    return flush_if_denormal(PbinomApprox(k, n, p_tdr, complement, midp, logp))
+    cdef int64_t ki
+    cdef int64_t ni
+    try:
+        ki = k
+        ni = n
+    except TypeError:
+        return binomtest_vectorize_kn(k, n, p_tdr, twosided, complement, midp, logp)
+    return binomtest_internal(ki, ni, p_tdr, twosided, complement, midp, logp)
 
 
-cdef double dhyper_internal(int64_t x, int64_t m, int64_t n, int64_t k, bint logp) except? 2.0:
-    if x < 0 or m < 0 or n < 0 or k < 0 or x >= (1LL << 52) or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
-        raise RuntimeError("Parameters must be in [0, 2^52).")
-    cdef int64_t b = k - x
-    cdef int64_t c = m - x
-    cdef int64_t d = n - b
+# scipy and R don't use the same parameters for the hypergeometric
+# distribution:
+#   R (m, n, k) = (a+c, b+d, a+b)
+#   scipy (M, n, N) = (a+b+c+d, a+b, a+c)
+#                   = (m+n, k, m) from R
+# After trying a few possibilities, I think the least-bad internal
+# parameterization is scipy's, since that naturally supports R-entry-point
+# vectorization while the reverse isn't true.
+cdef double hypergeom_pmf_internal(int64_t k, int64_t M, int64_t n, int64_t N, bint logp) except? 2.0:
+    if k < 0 or k >= (1LL << 52):
+        raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+    cdef int64_t b = n - k
+    cdef int64_t c = N - k
+    cdef int64_t d = M - n - N + k
     if b < 0 or c < 0 or d < 0:
-        raise RuntimeError("(k-x), (m-x), and (n-(k-x)) must be nonnegative.")
-    if m + n >= (1LL << 52):
-        raise RuntimeError("m+n must be <2^52.")
-    return flush_if_denormal(HypergeomMass(x, b, c, d, logp))
+        raise RuntimeError("Observation is outside of distribution support.")
+    return flush_if_denormal(HypergeomMass(k, b, c, d, logp))
 
-# This mirrors R dhyper()'s parameters.
-# Fisher's exact test correspondence:
-#   x -> a
-#   m -> a+c
-#   n -> b+d
-#   k -> a+b
-def dhyper(int64_t x, int64_t m, int64_t n, int64_t k, bint logp=0):
-    return dhyper_internal(x, m, n, k, logp)
+cdef hypergeom_pmf_vectorize_k(object k_obj, int64_t M, int64_t n, int64_t N, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    cdef int64_t [::1] kar = ka.ravel()
+    cdef uintptr_t kar_size = kar.size
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(kar_size, dtype=np.float64)
+    cdef td_real_struct lfact_m1x_tdr
+    cdef td_real_struct lfact_m2x_tdr
+    cdef td_real_struct lfact_mx1_tdr
+    cdef td_real_struct lfact_mx2_tdr
+    cdef td_real_struct lfact_mxx_tdr
+    cdef uintptr_t idx
+    cdef int64_t ki
+    with nogil:
+        HypergeomMassMultiKPrecomp(M, n, N, &lfact_m1x_tdr, &lfact_m2x_tdr, &lfact_mx1_tdr, &lfact_mx2_tdr, &lfact_mxx_tdr)
+        for idx in range(kar_size):
+            ki = kar[idx]
+            results[idx] = HypergeomMassJustK(ki, M, n, N, lfact_m1x_tdr, lfact_m2x_tdr, lfact_mx1_tdr, lfact_mx2_tdr, lfact_mxx_tdr, logp)
+    return np.reshape(results, ka.shape)
+
+cdef hypergeom_pmf_v_internal(object k_obj, int64_t M, int64_t n, int64_t N, bint logp):
+    if M < 0 or n < 0 or N < 0 or M >= (1LL << 52) or n > M or N > M:
+        raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+    cdef int64_t ki
+    try:
+        ki = k_obj
+    except TypeError:
+        return hypergeom_pmf_vectorize_k(k_obj, M, n, N, logp)
+    return hypergeom_pmf_internal(ki, M, n, N, logp)
+
+cdef hypergeom_pmf_vectorize_all(object k_obj, object M_obj, object n_obj, object N_obj, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    Ma = np.asarray(M_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    Na = np.asarray(N_obj, dtype=np.int64)
+    it = np.nditer([ka, Ma, na, Na], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    for ki, Mi, ni, Ni in it:
+        if Mi < 0 or ni < 0 or Ni < 0 or Mi >= (1LL << 52) or ni > Mi or Ni > Mi:
+            raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+        results[it.index] = hypergeom_pmf_internal(ki, Mi, ni, Ni, logp)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, Ma.shape, na.shape, Na.shape))
+
+cdef hypergeom_pmf_vv_internal(object k_obj, object M_obj, object n_obj, object N_obj, bint logp):
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    try:
+        Mi = M_obj
+        ni = n_obj
+        Ni = N_obj
+    except TypeError:
+        return hypergeom_pmf_vectorize_all(k_obj, M_obj, n_obj, N_obj, logp)
+    return hypergeom_pmf_v_internal(k_obj, Mi, ni, Ni, logp)
+
+def dhyper(object x, int64_t m, int64_t n, int64_t k, bint logp=0):
+    return hypergeom_pmf_v_internal(x, m+n, k, m, logp)
 
 
-cdef double phyper_internal(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail, bint logp, bint approx) except? 2.0:
-    if x < 0 or m < 0 or n < 0 or k < 0 or x >= (1LL << 52) or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
+cdef double hypergeom_cdf_internal(int64_t k, int64_t M, int64_t n, int64_t N, bint lowertail, bint logp, bint approx) except? 2.0:
+    if k < 0 or k >= (1LL << 52):
         # Unlike pbinom(), we don't bother with returning NAN/0/1 in some of
         # these cases.
-        raise RuntimeError("Parameters must be in [0, 2^52).")
-    cdef int64_t b = k - x
-    cdef int64_t c = m - x
-    cdef int64_t d = n - b
+        raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+    cdef int64_t b = n - k
+    cdef int64_t c = N - k
+    cdef int64_t d = M - n - N + k
     if b < 0 or c < 0 or d < 0:
-        raise RuntimeError("(k-x), (m-x), and (n-(k-x)) must be nonnegative.")
-    if m + n >= (1LL << 52):
-        raise RuntimeError("m+n must be <2^52.")
+        raise RuntimeError("Observation is outside of distribution support.")
     if not lowertail:
-        x, b = b, x
+        k, b = b, k
         c, d = d, c
-        if x == 0 or d == 0:
+        if k == 0 or d == 0:
             if logp:
                 return NAN
             return 0
-        x -= 1
+        k -= 1
         b += 1
         c += 1
         d -= 1
+    cdef double result
     if approx:
-        return flush_if_denormal(PhyperApprox(x, b, c, d, 0, 0, logp))
-    return flush_if_denormal(Phyper(x, b, c, d, logp))
+        result = PhyperApprox(k, b, c, d, 0, 0, logp)
+    else:
+        result = Phyper(k, b, c, d, logp)
+    return flush_if_denormal(result)
 
-def phyper(int64_t x, int64_t m, int64_t n, int64_t k, bint lowertail=1, bint logp=0, bint approx=0):
-    return phyper_internal(x, m, n, k, lowertail, logp, approx)
+cdef hypergeom_cdf_vectorize_k(object k_obj, int64_t M, int64_t n, int64_t N, bint lowertail, bint logp, bint approx):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    cdef int64_t [::1] kar = ka.ravel()
+    cdef uintptr_t kar_size = kar.size
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(kar_size, dtype=np.float64)
+    cdef uintptr_t idx
+    cdef int64_t ki
+    for idx in range(kar_size):
+        ki = kar[idx]
+        results[idx] = hypergeom_cdf_internal(ki, M, n, N, lowertail, logp, approx)
+    return np.reshape(results, ka.shape)
+
+cdef hypergeom_cdf_v_internal(object k_obj, int64_t M, int64_t n, int64_t N, bint lowertail, bint logp, bint approx):
+    if M < 0 or n < 0 or N < 0 or M >= (1LL << 52) or n > M or N > M:
+        raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+    cdef int64_t ki
+    try:
+        ki = k_obj
+    except TypeError:
+        return hypergeom_cdf_vectorize_k(k_obj, M, n, N, lowertail, logp, approx)
+    return hypergeom_cdf_internal(ki, M, n, N, lowertail, logp, approx)
+
+cdef hypergeom_cdf_vectorize_all(object k_obj, object M_obj, object n_obj, object N_obj, bint lowertail, bint logp, bint approx):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    Ma = np.asarray(M_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    Na = np.asarray(N_obj, dtype=np.int64)
+    it = np.nditer([ka, Ma, na, Na], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    for ki, Mi, ni, Ni in it:
+        if Mi < 0 or ni < 0 or Ni < 0 or Mi >= (1LL << 52) or ni > Mi or Ni > Mi:
+            raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+        results[it.index] = hypergeom_cdf_internal(ki, Mi, ni, Ni, lowertail, logp, approx)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, Ma.shape, na.shape, Na.shape))
+
+cdef hypergeom_cdf_vv_internal(object k_obj, object M_obj, object n_obj, object N_obj, bint lowertail, bint logp, bint approx):
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    try:
+        Mi = M_obj
+        ni = n_obj
+        Ni = N_obj
+    except TypeError:
+        return hypergeom_cdf_vectorize_all(k_obj, M_obj, n_obj, N_obj, lowertail, logp, approx)
+    return hypergeom_cdf_v_internal(k_obj, Mi, ni, Ni, lowertail, logp, approx)
+
+def phyper(object x, int64_t m, int64_t n, int64_t k, bint lowertail=1, bint logp=0, bint approx=0):
+    return hypergeom_cdf_v_internal(x, m+n, k, m, lowertail, logp, approx)
 
 
-cdef int64_t qhyper_internal(dd_real_struct p_ddr, int64_t m, int64_t n, int64_t k, bint logp) except? -1:
-    if m < 0 or n < 0 or k < 0 or m >= (1LL << 52) or n >= (1LL << 52) or k >= (1LL << 52):
-        raise RuntimeError("m, n, and k must be in [0, 2^52).")
-    if m + n >= (1LL << 52):
-        raise RuntimeError("m+n must be <2^52.")
-    if k > m + n:
-        raise RuntimeError("k must be <= m+n.")
+cdef int64_t hypergeom_ppf_internal(double p, int64_t M, int64_t n, int64_t N, bint invert, bint logp) except? -1:
+    cdef dd_real_struct p_ddr
+    if invert:
+        if logp:
+            p_ddr = ddr_addd(ddr_negate(ddr_exp(ddr_maked(p))), 1.0)
+            logp = False
+        else:
+            p_ddr = ddr_add2d(1.0, -p)
+    else:
+        p_ddr = ddr_maked(p)
     if logp:
         if not ddr_leqd(p_ddr, 0.0):
             raise RuntimeError("p must be <= 0 when logp is True.")
     else:
         if ddr_ltd(p_ddr, 0.0) or not ddr_leqd(p_ddr, 1.0):
             raise RuntimeError("p must be in [0, 1] when logp is False.")
-    return QhyperHalfUlp(p_ddr, m, n, k, logp)
+    return QhyperHalfUlp(p_ddr, N, M-N, n, logp)
+
+cdef hypergeom_ppf_vectorize_p(object p_obj, int64_t M, int64_t n, int64_t N, bint invert, bint logp):
+    pa = np.asarray(p_obj, dtype=np.float64)
+    cdef double [::1] par = pa.ravel()
+    cdef uintptr_t par_size = par.size
+    cdef cnp.ndarray[cnp.int64_t,mode="c",ndim=1] results = np.empty(par_size, dtype=np.int64)
+    cdef uintptr_t idx
+    cdef double pd
+    for idx in range(par_size):
+        pd = par[idx]
+        results[idx] = hypergeom_ppf_internal(pd, M, n, N, invert, logp)
+    return np.reshape(results, pa.shape)
+
+cdef hypergeom_ppf_v_internal(object p_obj, int64_t M, int64_t n, int64_t N, bint invert, bint logp):
+    if M < 0 or n < 0 or N < 0 or M >= (1LL << 52) or n > M or N > M:
+        raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+    cdef double pd
+    try:
+        pd = p_obj
+    except TypeError:
+        return hypergeom_ppf_vectorize_p(p_obj, M, n, N, invert, logp)
+    return hypergeom_ppf_internal(pd, M, n, N, invert, logp)
+
+cdef hypergeom_ppf_vectorize_all(object p_obj, object M_obj, object n_obj, object N_obj, bint invert, bint logp):
+    pa = np.asarray(p_obj, dtype=np.float64)
+    Ma = np.asarray(M_obj, dtype=np.int64)
+    na = np.asarray(n_obj, dtype=np.int64)
+    Na = np.asarray(N_obj, dtype=np.int64)
+    it = np.nditer([pa, Ma, na, Na], flags=['c_index'])
+    cdef cnp.ndarray[cnp.int64_t,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.int64)
+    cdef double pd
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    for pd, Mi, ni, Ni in it:
+        if Mi < 0 or ni < 0 or Ni < 0 or Mi >= (1LL << 52) or ni > Mi or Ni > Mi:
+            raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
+        results[it.index] = hypergeom_ppf_internal(pd, Mi, ni, Ni, invert, logp)
+    return np.reshape(results, np.broadcast_shapes(pa.shape, Ma.shape, na.shape, Na.shape))
+
+cdef hypergeom_ppf_vv_internal(object p_obj, object M_obj, object n_obj, object N_obj, bint invert, bint logp):
+    cdef int64_t Mi
+    cdef int64_t ni
+    cdef int64_t Ni
+    try:
+        Mi = M_obj
+        ni = n_obj
+        Ni = N_obj
+    except TypeError:
+        return hypergeom_ppf_vectorize_all(p_obj, M_obj, n_obj, N_obj, invert, logp)
+    return hypergeom_ppf_v_internal(p_obj, Mi, ni, Ni, invert, logp)
 
 # Returns smallest x in the distribution support for which cdf(x) >= p.
 #
@@ -599,51 +852,48 @@ cdef int64_t qhyper_internal(dd_real_struct p_ddr, int64_t m, int64_t n, int64_t
 # - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
 #   and achieves <0.5 ULP the vast majority of the time.
 # - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
-def qhyper(double p, int64_t m, int64_t n, int64_t k, bint logp=0):
-    return qhyper_internal(ddr_maked(p), m, n, k, logp)
+def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
+    return hypergeom_ppf_v_internal(p, m+n, k, m, False, logp)
 
 
 # scipy-style interface.  Straightforward to fill in the missing methods (e.g.
 # .stats()) if it matters.
-#   scipy (M, n, N) = (a+b+c+d, a+b, a+c)
-#   R (m, n, k) = (a+c, b+d, a+b)
-#               = (N, M-N, n) given scipy params
 class _HypergeomDist:
     @staticmethod
-    def cdf(int64_t k, int64_t M, int64_t n, int64_t N, bint approx=False):
-        return phyper_internal(k, N, M-N, n, lowertail=True, logp=False, approx=approx)
+    def cdf(object k, object M, object n, object N, bint approx=False):
+        return hypergeom_cdf_vv_internal(k, M, n, N, lowertail=True, logp=False, approx=approx)
 
     @staticmethod
-    def isf(double q, int64_t M, int64_t n, int64_t N):
-        return qhyper_internal(ddr_add2d(1.0, -q), N, M-N, n, logp=False)
+    def isf(object q, object M, object n, object N):
+        return hypergeom_ppf_vv_internal(q, M, n, N, invert=True, logp=False)
 
     @staticmethod
-    def logcdf(int64_t k, int64_t M, int64_t n, int64_t N, bint approx=False):
-        return phyper_internal(k, N, M-N, n, lowertail=True, logp=True, approx=approx)
+    def logcdf(object k, object M, object n, object N, bint approx=False):
+        return hypergeom_cdf_vv_internal(k, M, n, N, lowertail=True, logp=True, approx=approx)
 
     @staticmethod
-    def logpmf(int64_t k, int64_t M, int64_t n, int64_t N):
-        return dhyper_internal(k, N, M-N, n, logp=True)
+    def logpmf(object k, object M, object n, object N):
+        return hypergeom_pmf_vv_internal(k, M, n, N, logp=True)
 
     @staticmethod
-    def logsf(int64_t k, int64_t M, int64_t n, int64_t N, bint approx=False):
-        return phyper_internal(k, N, M-N, n, lowertail=False, logp=True, approx=approx)
+    def logsf(object k, object M, object n, object N, bint approx=False):
+        return hypergeom_cdf_vv_internal(k, M, n, N, lowertail=False, logp=True, approx=approx)
 
     @staticmethod
-    def median(int64_t M, int64_t n, int64_t N):
-        return qhyper_internal(ddr_maked(0.5), N, M-N, n, logp=False)
+    def median(object M, object n, object N):
+        return hypergeom_ppf_vv_internal(0.5, M, n, N, invert=False, logp=False)
 
     @staticmethod
-    def pmf(int64_t k, int64_t M, int64_t n, int64_t N):
-        return dhyper_internal(k, N, M-N, n, logp=False)
+    def pmf(object k, object M, object n, object N):
+        return hypergeom_pmf_vv_internal(k, M, n, N, logp=False)
 
     @staticmethod
-    def ppf(double q, int64_t M, int64_t n, int64_t N):
-        return qhyper_internal(ddr_maked(q), N, M-N, n, logp=False)
+    def ppf(object q, object M, object n, object N):
+        return hypergeom_ppf_vv_internal(q, M, n, N, invert=False, logp=False)
 
     @staticmethod
-    def sf(int64_t k, int64_t M, int64_t n, int64_t N, bint approx=False):
-        return phyper(k, N, M-N, n, lowertail=False, logp=False, approx=approx)
+    def sf(object k, object M, object n, object N, bint approx=False):
+        return hypergeom_cdf_vv_internal(k, M, n, N, lowertail=False, logp=False, approx=approx)
 
 hypergeom = _HypergeomDist()
 

@@ -20,7 +20,7 @@ otherwise, P[X > x].}
 
 \item{approx}{logical; if TRUE, faster algorithm which doesn't aim for
 bit-exact results is used.  (This fast mode is still more accurate than R
-4.6.0 pbinom() and scipy 1.18 stats.binom.cdf().)}
+4.6.1 pbinom() and scipy 1.18 stats.binom.cdf().)}
 }
 \value{
 cmf(q).
