@@ -718,7 +718,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
   return inv? (n - S_CAST(int64_t, k)) : S_CAST(int64_t, k);
 }
 
-// Assumes 0 <= obs_succ <= obs_tot < 2^52 and 2^{-960} < p < 1.
+// Assumes 0 <= obs_succ <= obs_tot < 2^52.
 //
 // Note that this can be written in terms of dbinom() and pbinom():
 // 1. Calculate mode, determine which tail obs_succ is on.  Early-exit if we're

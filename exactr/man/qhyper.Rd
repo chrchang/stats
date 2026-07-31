@@ -25,6 +25,9 @@ ppf(p).
 }
 \description{
 Probability point function for hypergeometric distribution with parameters
-\code{m}, \code{n}, and \code{k}.  Starts with CLT-based initial guess, follows with Newton
-iteration to find a close-enough pmf value before evaluating cmf.
+\code{m}, \code{n}, and \code{k}.
+}
+\details{
+Starts with CLT-based initial guess, follows with Newton iteration
+to find a close-enough pmf value before evaluating cmf.
 }

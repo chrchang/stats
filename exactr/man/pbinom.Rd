@@ -18,18 +18,20 @@ otherwise, P[X > x].}
 
 \item{log.p}{logical; if TRUE, probabilities p are given as log(p).}
 
-\item{approx}{logical; if TRUE, faster algorithm which doesn't aim for
-bit-exact results is used.  (This fast mode is still more accurate than R
-4.6.1 pbinom() and scipy 1.18 stats.binom.cdf().)}
+\item{approx}{logical; if FALSE (the default), aim for bit-exact results,
+otherwise use a faster algorithm (which is still more accurate than R
+4.6.1 pbinom() and scipy 1.18 stats.binom.cdf()).}
 }
 \value{
 cmf(q).
 }
 \description{
 Cumulative mass function for binomial distribution with parameters
-\code{size} and \code{prob}.  Based on the BFRAC component of Boost's TOMS 708
-implementation, and the QD high-precision library.  The default (\code{approx} =
-FALSE) mode aims for bit-exact results.
+\code{size} and \code{prob}.
+}
+\details{
+Based on the BFRAC component of Boost's TOMS 708 implementation,
+and the QD high-precision library.
 }
 \references{
 DiDonato AR, Morris AH (1992) Algorithm 708: Significant digit

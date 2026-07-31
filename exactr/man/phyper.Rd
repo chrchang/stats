@@ -21,17 +21,19 @@ otherwise, P[X > x].}
 
 \item{log.p}{logical; if TRUE, probabilities p are given as log(p).}
 
-\item{approx}{logical; if TRUE, faster algorithm which doesn't aim for
-bit-exact results is used.  (This fast mode is still more accurate than R
-4.6.1 phyper() and scipy 1.18 stats.hypergeom.cdf().)}
+\item{approx}{logical; if FALSE (the default), aim for bit-exact results,
+otherwise use a faster algorithm (which is still more accurate than R
+4.6.1 phyper() and scipy 1.18 stats.hypergeom.cdf()).}
 }
 \value{
 cmf(q).
 }
 \description{
 Cumulative mass function for hypergeometric distribution with parameters
-\code{m}, \code{n}, and \code{k}.  Based on the QD high-precision library.  The default
-(\code{approx} = FALSE) mode aims for bit-exact results.
+\code{m}, \code{n}, and \code{k}.
+}
+\details{
+Based on the QD high-precision library.
 }
 \references{
 Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double

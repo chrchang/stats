@@ -25,8 +25,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // pbinom_cpp
-NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_tail, bool log_p, bool approx);
-RcppExport SEXP _exactr_pbinom_cpp(SEXP qSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP approxSEXP) {
+NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom);
+RcppExport SEXP _exactr_pbinom_cpp(SEXP qSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP, SEXP approxSEXP, SEXP prob_denomSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -35,8 +35,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type prob(probSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
     Rcpp::traits::input_parameter< bool >::type approx(approxSEXP);
-    rcpp_result_gen = Rcpp::wrap(pbinom_cpp(q, size, prob, lower_tail, log_p, approx));
+    Rcpp::traits::input_parameter< double >::type prob_denom(prob_denomSEXP);
+    rcpp_result_gen = Rcpp::wrap(pbinom_cpp(q, size, prob, lower_tail, log_p, midp, approx, prob_denom));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -52,6 +54,21 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     rcpp_result_gen = Rcpp::wrap(qbinom_cpp(p, size, prob, lower_tail, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// binom_test_lnpval
+double binom_test_lnpval(double x_round, double size_round, double prob, bool midp, double prob_denom);
+RcppExport SEXP _exactr_binom_test_lnpval(SEXP x_roundSEXP, SEXP size_roundSEXP, SEXP probSEXP, SEXP midpSEXP, SEXP prob_denomSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_round(x_roundSEXP);
+    Rcpp::traits::input_parameter< double >::type size_round(size_roundSEXP);
+    Rcpp::traits::input_parameter< double >::type prob(probSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< double >::type prob_denom(prob_denomSEXP);
+    rcpp_result_gen = Rcpp::wrap(binom_test_lnpval(x_round, size_round, prob, midp, prob_denom));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -106,8 +123,9 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_exactr_dbinom", (DL_FUNC) &_exactr_dbinom, 4},
-    {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 6},
+    {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 8},
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
+    {"_exactr_binom_test_lnpval", (DL_FUNC) &_exactr_binom_test_lnpval, 5},
     {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
     {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 7},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},

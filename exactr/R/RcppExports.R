@@ -25,16 +25,24 @@ dbinom <- function(x, size, prob = 0.5, log = FALSE) {
 #' @description Backend for pbinom(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-pbinom_cpp <- function(q, size, prob = 0.5, lower_tail = TRUE, log_p = FALSE, approx = FALSE) {
-    .Call(`_exactr_pbinom_cpp`, q, size, prob, lower_tail, log_p, approx)
+pbinom_cpp <- function(q, size, prob, lower_tail, log_p, midp, approx, prob_denom) {
+    .Call(`_exactr_pbinom_cpp`, q, size, prob, lower_tail, log_p, midp, approx, prob_denom)
 }
 
 #' @title Binomial distribution ppf
 #' @description Backend for qbinom(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-qbinom_cpp <- function(p, size, prob = 0.5, lower_tail = TRUE, log_p = FALSE) {
+qbinom_cpp <- function(p, size, prob, lower_tail, log_p) {
     .Call(`_exactr_qbinom_cpp`, p, size, prob, lower_tail, log_p)
+}
+
+#' @title Exact binomial test log-p-value
+#' @description Implements main log-p-value calculation for 2-sided
+#'   binom.test().
+#' @noRd
+binom_test_lnpval <- function(x_round, size_round, prob, midp, prob_denom) {
+    .Call(`_exactr_binom_test_lnpval`, x_round, size_round, prob, midp, prob_denom)
 }
 
 #' Hypergeometric distribution pmf
@@ -64,7 +72,7 @@ dhyper <- function(x, m, n, k, log = FALSE) {
 #' @description Backend for phyper(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-phyper_cpp <- function(q, m, n, k, lower_tail = TRUE, log_p = FALSE, approx = FALSE) {
+phyper_cpp <- function(q, m, n, k, lower_tail, log_p, approx) {
     .Call(`_exactr_phyper_cpp`, q, m, n, k, lower_tail, log_p, approx)
 }
 

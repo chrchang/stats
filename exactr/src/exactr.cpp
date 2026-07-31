@@ -88,12 +88,12 @@ NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log =
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector pbinom_cpp(NumericVector q, double size, double prob = 0.5, bool lower_tail = true, bool log_p = false, bool approx = false) {
+NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom) {
   const double size_round = round(size);
   if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
     stop("size is not in [0, 2^52 - 1]");
   }
-  const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
+  const plink2::td_real prob_tdr = make_prob_tdr(prob, prob_denom);
   const int64_t n = static_cast<int64_t>(size_round);
   // Unfortunately, can't take advantage of some vectorization opportunities
   // without potentially changing the last bit of some results, so I won't plan
@@ -122,7 +122,7 @@ NumericVector pbinom_cpp(NumericVector q, double size, double prob = 0.5, bool l
     }
     double result;
     if (approx) {
-      result = plink2::PbinomApprox(k, n, prob_tdr, !lower_tail, 0, log_p);
+      result = plink2::PbinomApprox(k, n, prob_tdr, !lower_tail, midp, log_p);
     } else {
       result = plink2::Pbinom(k, n, prob_tdr, !lower_tail, log_p);
     }
@@ -137,7 +137,7 @@ NumericVector pbinom_cpp(NumericVector q, double size, double prob = 0.5, bool l
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector qbinom_cpp(NumericVector p, double size, double prob = 0.5, bool lower_tail = true, bool log_p = false) {
+NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_tail, bool log_p) {
   const double size_round = round(size);
   if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
     stop("size is not in [0, 2^52 - 1]");
@@ -193,6 +193,22 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob = 0.5, bool l
   }
   results.attr("dim") = p.attr("dim");
   return results;
+}
+
+//' @title Exact binomial test log-p-value
+//' @description Implements main log-p-value calculation for 2-sided
+//'   binom.test().
+//' @noRd
+// [[Rcpp::export]]
+double binom_test_lnpval(double x_round, double size_round, double prob, bool midp, double prob_denom) {
+  // size_round >= 1 checked by caller
+  if (!(size_round < (1LL << 52))) {
+    stop("size is not in [1, 2^52 - 1]");
+  }
+  const plink2::td_real prob_tdr = make_prob_tdr(prob, prob_denom);
+  const int64_t x = static_cast<int64_t>(x_round);
+  const int64_t n = static_cast<int64_t>(size_round);
+  return BinomTwoSidedP(x, n, prob_tdr, midp, 1);
 }
 
 //' Hypergeometric distribution pmf
@@ -272,7 +288,7 @@ NumericVector dhyper(NumericVector x, double m, double n, double k, bool log = f
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail = true, bool log_p = false, bool approx = false) {
+NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool approx) {
   const double m_round = round(m);
   const double n_round = round(n);
   const double k_round = round(k);
