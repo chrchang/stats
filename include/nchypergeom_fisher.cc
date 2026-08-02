@@ -52,6 +52,10 @@ int64_t ApproxModeFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
   return S_CAST(int64_t, ddr_addd(sqrt_discrim_ddr, -bb).x[0] / (2 * aa) + 0.5);
 }
 
+// Separating the mean and variance calculations breaks down for very large n
+// when (mean_ddr - mode) is only known to <53-bit accuracy; using td_real
+// within VarianceFNCHypergeoFromMean doesn't work there.
+/*
 dd_real MeanFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds) {
   // Start from ~mode, sum outward in both directions.
   // Don't need intermediate dd_reals to reach our accuracy target.  However,
@@ -149,6 +153,88 @@ double VarianceFNCHypergeoFromMean(int64_t m1, int64_t m2, int64_t n, double odd
   const td_real first_term_tdr = tdr_accurate_div(tdr_sub(tdr_muld(tdr_make_dd(ddr_mul2d(m1d, nd)), odds), tdr_muld(mean_tdr, total)), tdr_make_dd(ddr_add2d(1, -odds)));
   const td_real second_term_tdr = tdr_mul(tdr_subd(mean_tdr, m1d + nd), mean_tdr);
   return tdr_sub(first_term_tdr, second_term_tdr).x[0];
+}
+*/
+
+void MeanAndVarianceFNCHypergeo(int64_t m1, int64_t m2, int64_t n, double odds, dd_real* mean_ddr_ptr, double* variance_ptr) {
+  // Start from ~mode, sum outward in both directions.
+  // Don't need intermediate dd_reals to reach our accuracy target.  However,
+  // when n is very large, we do need to return mean as a dd_real just to
+  // *represent* the final mean with sufficient accuracy.
+  const int64_t mode = ApproxModeFNCHypergeo(m1, m2, n, odds);
+  double lik = 1.0;
+  double m11 = mode;
+  // We never need the value of m12 in isolation.  We can get away with one
+  // less multiply in the main loops if we just update (m12*odds) instead of
+  // m12.  This speedup usually comes with a hit to accuracy, but given that
+  // we're only using this function in the context of ~float32-precision
+  // root-finding, that tradeoff is acceptable.
+  double m12_odds = (m1 - mode) * odds;
+  double m21 = n - mode;
+  double m22 = m2 - m21;
+
+  // Iterate rightward until convergence.
+  double rnumer = 0.0;
+  double rnumer2 = 0.0;
+  double rdenom = 1.0;
+  // Numerator is sum((m11-mode)*p) instead of sum(m11*p), then we add mode
+  // back at the end.
+  double m11_minus_mode = 0;
+  while (1) {
+    m11 += 1;
+    m22 += 1;
+    lik *= (m12_odds * m21) / (m11 * m22);
+    m12_odds -= odds;
+    m21 -= 1;
+    // rnumer2 converges more slowly than rnumer and rdenom, so we only need to
+    // check the former for convergence.
+    m11_minus_mode += 1;
+    const double rnumer_incr = lik * m11_minus_mode;
+    const double preadd = rnumer2;
+    rnumer2 = prefer_fma(rnumer_incr, m11_minus_mode, rnumer2);
+    // Since m12_odds can become slightly inaccurate, we're not guaranteed to
+    // exit when m12_odds is supposed to hit zero.  Ensure we exit when
+    // m12_odds is negative (or m21 hits zero).
+    if (rnumer2 <= preadd) {
+      rnumer2 = preadd;
+      break;
+    }
+    rnumer += rnumer_incr;
+    rdenom += lik;
+  }
+  // Jump back to mode, and then iterate leftward until left-sums converge.
+  lik = 1.0;
+  m11 = mode;
+  m12_odds = (m1 - mode) * odds;
+  m21 = n - mode;
+  m22 = m2 - m21;
+  double lnumer = 0.0;
+  double lnumer2 = 0.0;
+  double ldenom = 0.0;
+  m11_minus_mode = 0.0;
+  while (1) {
+    m12_odds += odds;
+    m21 += 1;
+    lik *= (m11 * m22) / (m12_odds * m21);
+    m11 -= 1;
+    m22 -= 1;
+    // ldenom converges more slowly than lnumer and lnumer2.
+    const double preadd = ldenom;
+    ldenom += lik;
+    if (ldenom == preadd) {
+      break;
+    }
+    m11_minus_mode -= 1;
+    const double lnumer_incr = lik * m11_minus_mode;
+    lnumer += lnumer_incr;
+    lnumer2 = prefer_fma(lnumer_incr, m11_minus_mode, lnumer2);
+  }
+  const double numer = lnumer + rnumer;
+  const double denom = ldenom + rdenom;
+  const double shifted_mean = numer / denom;
+  const double shifted_ssq = (lnumer2 + rnumer2) / denom;
+  *mean_ddr_ptr = ddr_add2d(shifted_mean, mode);
+  *variance_ptr = MAXV(0, shifted_ssq - shifted_mean * shifted_mean);
 }
 
 void P_FNCHypergeoTwoOdds(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double odds1, double odds2, double* result1p, double* result2p) {

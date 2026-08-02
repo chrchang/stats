@@ -370,12 +370,16 @@ double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
   // float32-level accuracy (relative error < 2^{-24}).
   double odds = S_CAST(double, obs_m11) * S_CAST(double, obs_m22) / (S_CAST(double, obs_m12) * S_CAST(double, obs_m21));
   while (1) {
-    const dd_real mean_ddr = MeanFNCHypergeo(m1, m2, n, odds);
+    dd_real mean_ddr;
+    double variance;
+    MeanAndVarianceFNCHypergeo(m1, m2, n, odds, &mean_ddr, &variance);
+    if (variance == 0.0) {
+      // defensive, this shouldn't actually happen?
+      return odds;
+    }
     const double mean_delta = -ddr_subd(mean_ddr, m11d).x[0];
-    const double mean_deriv_odds = MeanFNCHypergeoDerivOdds(m1, m2, n, odds, mean_ddr);
-    assert(mean_deriv_odds > 0.0);
-    const double odds_incr = mean_delta / mean_deriv_odds;
-    // printf("%.17g: %.17g %.17g %.17g\n", odds, mean_delta, mean_deriv_odds, odds_incr);
+    const double odds_incr = mean_delta * odds / variance;
+    // printf("%.17g: %.17g %.17g %.17g\n", odds, mean_delta, variance, odds_incr);
     odds += odds_incr;
     if (fabs(odds_incr) < odds * k2m24) {
       return odds;

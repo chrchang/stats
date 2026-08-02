@@ -88,8 +88,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // phyper_cpp
-NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool approx);
-RcppExport SEXP _exactr_phyper_cpp(SEXP qSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP approxSEXP) {
+NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool midp, bool approx);
+RcppExport SEXP _exactr_phyper_cpp(SEXP qSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP, SEXP approxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -99,8 +99,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type k(kSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
     Rcpp::traits::input_parameter< bool >::type approx(approxSEXP);
-    rcpp_result_gen = Rcpp::wrap(phyper_cpp(q, m, n, k, lower_tail, log_p, approx));
+    rcpp_result_gen = Rcpp::wrap(phyper_cpp(q, m, n, k, lower_tail, log_p, midp, approx));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -120,6 +121,63 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fisher23_test_lnpval
+double fisher23_test_lnpval(IntegerMatrix x, bool midp);
+RcppExport SEXP _exactr_fisher23_test_lnpval(SEXP xSEXP, SEXP midpSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher23_test_lnpval(x, midp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fisher22_test_lnpval
+double fisher22_test_lnpval(double x11, double x12, double x21, double x22, int32_t midp);
+RcppExport SEXP _exactr_fisher22_test_lnpval(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP, SEXP midpSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x11(x11SEXP);
+    Rcpp::traits::input_parameter< double >::type x12(x12SEXP);
+    Rcpp::traits::input_parameter< double >::type x21(x21SEXP);
+    Rcpp::traits::input_parameter< double >::type x22(x22SEXP);
+    Rcpp::traits::input_parameter< int32_t >::type midp(midpSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher22_test_lnpval(x11, x12, x21, x22, midp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// odds_ratio_22
+double odds_ratio_22(double x11, double x12, double x21, double x22);
+RcppExport SEXP _exactr_odds_ratio_22(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x11(x11SEXP);
+    Rcpp::traits::input_parameter< double >::type x12(x12SEXP);
+    Rcpp::traits::input_parameter< double >::type x21(x21SEXP);
+    Rcpp::traits::input_parameter< double >::type x22(x22SEXP);
+    rcpp_result_gen = Rcpp::wrap(odds_ratio_22(x11, x12, x21, x22));
+    return rcpp_result_gen;
+END_RCPP
+}
+// odds_ratio_ci_22
+NumericVector odds_ratio_ci_22(double x11, double x12, double x21, double x22, double low, double high);
+RcppExport SEXP _exactr_odds_ratio_ci_22(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP, SEXP lowSEXP, SEXP highSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x11(x11SEXP);
+    Rcpp::traits::input_parameter< double >::type x12(x12SEXP);
+    Rcpp::traits::input_parameter< double >::type x21(x21SEXP);
+    Rcpp::traits::input_parameter< double >::type x22(x22SEXP);
+    Rcpp::traits::input_parameter< double >::type low(lowSEXP);
+    Rcpp::traits::input_parameter< double >::type high(highSEXP);
+    rcpp_result_gen = Rcpp::wrap(odds_ratio_ci_22(x11, x12, x21, x22, low, high));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_exactr_dbinom", (DL_FUNC) &_exactr_dbinom, 4},
@@ -127,8 +185,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
     {"_exactr_binom_test_lnpval", (DL_FUNC) &_exactr_binom_test_lnpval, 5},
     {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
-    {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 7},
+    {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 8},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
+    {"_exactr_fisher23_test_lnpval", (DL_FUNC) &_exactr_fisher23_test_lnpval, 2},
+    {"_exactr_fisher22_test_lnpval", (DL_FUNC) &_exactr_fisher22_test_lnpval, 5},
+    {"_exactr_odds_ratio_22", (DL_FUNC) &_exactr_odds_ratio_22, 4},
+    {"_exactr_odds_ratio_ci_22", (DL_FUNC) &_exactr_odds_ratio_ci_22, 6},
     {NULL, NULL, 0}
 };
 

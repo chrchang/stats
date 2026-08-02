@@ -72,8 +72,8 @@ dhyper <- function(x, m, n, k, log = FALSE) {
 #' @description Backend for phyper(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-phyper_cpp <- function(q, m, n, k, lower_tail, log_p, approx) {
-    .Call(`_exactr_phyper_cpp`, q, m, n, k, lower_tail, log_p, approx)
+phyper_cpp <- function(q, m, n, k, lower_tail, log_p, midp, approx) {
+    .Call(`_exactr_phyper_cpp`, q, m, n, k, lower_tail, log_p, midp, approx)
 }
 
 #' @title Hypergeometric distribution ppf
@@ -82,5 +82,34 @@ phyper_cpp <- function(q, m, n, k, lower_tail, log_p, approx) {
 #' @noRd
 qhyper_cpp <- function(p, m, n, k, lower_tail = TRUE, log_p = FALSE) {
     .Call(`_exactr_qhyper_cpp`, p, m, n, k, lower_tail, log_p)
+}
+
+#' @title Fisher 2x3 test log-p-value
+#' @description Implements main log-p-value calculation for 2x3 tables.
+#' @noRd
+fisher23_test_lnpval <- function(x, midp) {
+    .Call(`_exactr_fisher23_test_lnpval`, x, midp)
+}
+
+#' @title Fisher 2x2 test log-p-value
+#' @description Implements main log-p-value calculation for 2x2 tables.
+#' @noRd
+fisher22_test_lnpval <- function(x11, x12, x21, x22, midp) {
+    .Call(`_exactr_fisher22_test_lnpval`, x11, x12, x21, x22, midp)
+}
+
+#' @title Odds ratio, 2x2 table
+#' @description Implements odds ratio point-estimate for 2x2 tables.
+#' @noRd
+odds_ratio_22 <- function(x11, x12, x21, x22) {
+    .Call(`_exactr_odds_ratio_22`, x11, x12, x21, x22)
+}
+
+#' @title Odds ratio confidence interval, 2x2 table
+#' @description Implements odds ratio confidence-interval calculation for 2x2
+#'   tables.
+#' @noRd
+odds_ratio_ci_22 <- function(x11, x12, x21, x22, low, high) {
+    .Call(`_exactr_odds_ratio_ci_22`, x11, x12, x21, x22, low, high)
 }
 

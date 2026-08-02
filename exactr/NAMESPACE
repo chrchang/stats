@@ -3,6 +3,7 @@
 export(binom.test)
 export(dbinom)
 export(dhyper)
+export(fisher.test)
 export(pbinom)
 export(phyper)
 export(qbinom)

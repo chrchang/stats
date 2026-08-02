@@ -137,17 +137,19 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   \item{method}{the character string "`Exact binomial test`" or "`Exact binomial test (midp)`".}
 #'   \item{data.name}{a character string giving the names of the data.}
 #' @export
-binom.test <- function(x, n, p=0.5, alternative=c("two.sided", "less", "greater"), conf.level=0.95, midp=FALSE, p.denom=1) {
-  # Wrapper code is mostly identical to (R 4.6.0) binom.test.R since this is
-  # designed to be a drop-in replacement.
-  #
-  # If p.denom is judged to be an inadequate solution to the small-case
-  # tie-recognition problem, an alternative is to define e.g. snap.max=1e6 and
-  # snap.eps=1e-14, and snap p to "exactly" (up to the internal ~48 digit
-  # td_real precision) Fraction.limit_denominator(snap.max) when that
-  # corresponds to relative error <= snap.eps.  This would be friendlier to
-  # some students, but I don't like it because it distorts results in a
-  # nonobvious way across the board.
+binom.test <- function(x, n, p=0.5,
+                       alternative=c("two.sided", "less", "greater"),
+                       conf.level=0.95, midp=FALSE, p.denom=1) {
+  ## This closely follows the GPL-2.0-or-later binom.test.R from R 4.6.0, since
+  ## it is designed to be a drop-in replacement.
+  ##
+  ## If p.denom is judged to be an inadequate solution to the small-case
+  ## tie-recognition problem, an alternative is to define e.g. snap.max=1e6 and
+  ## snap.eps=1e-14, and snap p to "exactly" (up to the internal ~48 digit
+  ## td_real precision) Fraction.limit_denominator(snap.max) when that
+  ## corresponds to relative error <= snap.eps.  This would be friendlier to
+  ## some students, but I don't like it because it distorts results in a
+  ## nonobvious way across the board.
   DNAME <- deparse1(substitute(x))
   xr <- round(x)
 
@@ -226,12 +228,12 @@ binom.test <- function(x, n, p=0.5, alternative=c("two.sided", "less", "greater"
 
   METHOD <- "Exact binomial test"
   if (midp) {
-    METHOD <- "Exact binomial test (midp)"
+    METHOD <- paste(METHOD, "(midp)")
   }
 
   structure(list(statistic = x,
                  parameter = n,
-                 p.value = PVAL,
+                 p.value = exp(LNPVAL),
                  log.p.value = LNPVAL,
                  conf.int = CINT,
                  estimate = ESTIMATE,
@@ -289,7 +291,7 @@ phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.boolean(approx)) {
     stop("'approx' must be a single boolean value.")
   }
-  result <- phyper_cpp(q, m, n, k, lower.tail, log.p, approx)
+  result <- phyper_cpp(q, m, n, k, lower.tail, log.p, FALSE, approx)
   return(result)
 }
 
@@ -332,4 +334,283 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
   }
   result <- qhyper_cpp(p, m, n, k, lower.tail, log.p)
   return(result)
+}
+
+#' Fisher's Exact Test for Count Data
+#'
+#' Performs Fisher's exact test for testing the null of independence of rows
+#' and columns in a contingency table with fixed marginals.
+#'
+#' @param x either a two-dimensional contingency table in matrix form, or a
+#'   factor object.
+#' @param y a factor object; ignored if `x` is a matrix.
+#' @param workspace an integer specifying the size of the workspace used in the
+#'   network algorithm.  In units of 4 bytes.  Only used for non-simulated
+#'   p-values on larger-than-2x3 tables.  This also increases the internal
+#'   stack size which allows larger problems to be solved, sometimes needing
+#'   hours.  In such cases, `simulate.p.values = TRUE` may be more reasonable.
+#' @param hybrid a logical.  Only used for larger-than-2x3 tables, in which
+#'   cases it indicates whether the exact probabilities (default) or a hybrid
+#'   approximation thereof should be computed.
+#' @param hybridPars a numeric vector of length 3, by default describing
+#'   "Cochran's conditions" for the validity of the chi-squared approximation,
+#'   see 'Details'.
+#' @param control a list with named components for low-level algorithm control.
+#'   At present the only one used is "`mult`", a positive integer >= 2 with
+#'   default 30 used only for larger-than-2x3 tables.  This says how many times
+#'   as much space should be allocated to paths as to keys: see file
+#'   '`fexact.c`' in the base R stats source code.
+#' @param or the hypothesized odds ratio.  Only used in the 2x2 case.
+#' @param alternative indicates the alternative hypothesis and must be one of
+#'   "`two.sided`", "`greater`" or "`less`".  You can specify just the initial
+#'   letter.  Only used in the 2x2 case.
+#' @param conf.int logical indicating if a confidence interval for the odds
+#'   ratio in a 2x2 table should be computed (and returned).
+#' @param conf.level confidence level for the returned confidence interval.
+#'   Only used in the 2x2 case and if `conf.int = TRUE`.
+#' @param simulate.p.value a logical indicating whether to compute p-values by
+#'   Monte Carlo simulation, in larger-than-2x3 tables.
+#' @param B an integer specifying the number of replicates used in the Monte
+#'   Carlo test when `simulate.p.value` is true.
+#' @param midp logical; if TRUE, midp-value is returned in place of p-value.
+#'   Not yet supported for larger-than-2x3 tables or `or` unequal to 1.
+#'
+#' @details If `x` is a matrix, it is taken as a two-dimensional contingency
+#'   table, and hence its entries should be nonnegative integers.  Otherwise,
+#'   both `x` and `y` must be vectors or factors of the same length.
+#'   Incomplete cases are removed, vectors are coerced into factor objects, and
+#'   the contingency table is computed from these.
+#'
+#'   For `or=1` two-sided tests on 2x2 tables, and 2x3 tables, computations are
+#'   based on the algorithm described in Chang et al. (2015).  For other tests
+#'   on 2x2 tables, p-values are obtained directly using the (central or
+#'   non-central) hypergeometric distribution.
+#'
+#'   For larger tables, computations are based on a C version of the FORTRAN
+#'   subroutine `FEXACT` which implements the network developed by Mehta and
+#'   Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
+#'   FORTRAN code can be obtained from <https://netlib.org/toms/643>.  Note the
+#'   latter fails (with an error message) when the entries of the table are too
+#'   large.  (It transposes the table if necessary so it has no more rows than
+#'   columns.  One constraint is that the product of the row marginals be less
+#'   than (2^31 - 1).)
+#'
+#'   For 2x2 tables, the null of conditional independence is equivalent to the
+#'   hypothesis that the odds ratio equals one.  'Exact' inference can be based
+#"   on observing that in general, given all marginal totals fixed, the first
+#'   element of the contingency table has a non-central hypergeometric
+#'   distribution with non-centrality parameter given by the odds ratio
+#'   (Fisher, 1935).  The alternative for a one-sided test is based on the odds
+#'   ratio, so `alternative = greater` is a test of the odds ratio being bigger
+#'   than `or`.  Two-sided tests are based on the probabilities of the tables,
+#'   and take as "more extreme" all tables with probabilities less than or
+#'   equal to that of the observed table, the p-value being the sum of such
+#'   probabilities.
+#'
+#'   For larger-than-2x3 tables and `hybrid = TRUE`, asymptotic chi-squared
+#'   probabilities are only used of the 'Cochran conditions' (or modified
+#'   version thereof) specified by
+#'   `hybridPars = c(expect = 5, percent = 80, Emin = 1)` are satisfied, that
+#'   is if no cell has expected counts less than 1 (`= Emin`) and more than 80%
+#'   (`= percent`) of the cells have expected counts at least 5 (`= expect`),
+#'   otherwise the exact calculation is used.  A corresponding `if()` decision
+#'   is made for all sub-tables considered.
+#'
+#'   In the `r`x`c` case with `r`\>2 or `c`\>2, internal tables can be too
+#'   large for the exact test in which case an error is signalled.  Apart from
+#'   increasing `workspace` sufficiently, which then may lead to very long
+#'   running times, using `simulate.p.value = TRUE` may then often be
+#'   sufficient and hence advisable.
+#'
+#'   Simulation is done conditional on the row and column marginals, and works
+#'   only if the marginals are strictly positive.  (A C translation of the
+#'   algorithm of Patefield (1981) is used.)  Note that the default number of
+#'   replicates (`B = 2000`) implies a minimum p-value of about 0.0005
+#'   (1/(`B`+1)).
+#'
+#' @references Fisher RA (1935) The logic of inductive inference.  Journal of
+#'   the Royal Statistical Society Series A, 98.
+#'   <https://doi.org/10.2307/2342435>.
+#'
+#' @references Chang CC, Chow CC, Tellier LCAM, Vattikuti S, Purcell SM, Lee JJ
+#'   (2015) Second-generation PLINK: rising to the challenge of larger and
+#'   richer datasets.  GigaScience, 4.
+#'   <https://doi.org/10.1186/s13742-015-0047-8>.
+#'
+#' @references Mehta CR and Patel NR (1983) A network algorithm for performing
+#'   Fisher's exact test in `r`x`c` contingency tables.  Journal of the
+#'   American Statistical Association, 78.
+#'   <https://doi.org/10.1080/01621459.1983.10477989>.
+#'
+#' @references Mehta CR and Patel NR (1986) Algorithm 643: FEXACT, a FORTRAN
+#'   subroutine for Fisher's exact test on unordered `r`x`c` contingency
+#'   tables.  ACM Transactions on Mathematical Software, 12.
+#'   <https://doi.org/10.1145/6497.214326>.
+#'
+#' @references Clarkson DB, Fan Y, Joe H (1993) A Remark on Algorithm 643:
+#'   FEXACT: An Algorithm for Performing Fisher's Exact Test in `r`x`c`
+#'   Contingency Tables.  ACM Transactions on Mathematical Software, 19.
+#'   <https://doi.org/10.1145/168173.168412>.
+#'
+#' @references Patefield WM (1981) Algorithm AS 159: An efficient method of
+#'   generating `r`x`c` tables with given row and column totals.  Applied
+#'   Statistics, 30.  <https://doi.org/10.2307/2346669>.
+#'
+#' @return A list with class "`htest`" containing the following components:
+#'   \item{p.value}{the p- or midp-value of the test.}
+#'   \item{log.p.value}{the log-p- or log-midp-value of the test.}
+#'   \item{conf.int}{a confidence interval for the odds ratio.  Only present in the 2x2 case and if argument `conf.int = TRUE`.}
+#'   \item{estimate}{an estimate of the odds ratio.  Note that the _conditional_ Maximum Likelihood Estimate (MLE) rather than the unconditional MLE (the sample odds ratio) is used.  Only present in the 2x2 case.}
+#'   \item{null.value}{the odds ratio under the null, `or`.  Only present in the 2x2 case.}
+#'   \item{alternative}{a character string describing the alternative hypothesis.}
+#'   \item{method}{character string starting with "`Fisher's Exact Test for Count Data`".}
+#'   \item{data.name}{a character string giving the name(s) of the data.}
+#' @export
+fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
+                        hybridPars = c(expect = 5, percent = 80, Emin = 1),
+                        control = list(), or = 1, alternative = "two.sided",
+                        conf.int = TRUE, conf.level = 0.95,
+                        simulate.p.value = FALSE, B = 2000, midp = FALSE) {
+  ## This closely follows parts of the GPL-2.0-or-later fisher.test.R from R
+  ## 4.6.0, since it is designed to be a drop-in replacement.
+  ##
+  ## Start with check for conditions that currently require us to rely on the
+  ## stats::fisher.test() fallback.  Specifically, if either:
+  ##   nr + nc > 5
+  ##   nr == 2, nc == 2, and or != 1
+  ## we just forward to stats::fisher.test().
+
+  expr.x <- substitute(x)
+  expr.y <- substitute(y)
+  ## preserve original x and y until we know we aren't falling back on
+  ## stats::fisher.test()
+  xmat <- x
+  if (is.data.frame(xmat)) {
+    xmat <- as.matrix(xmat)
+  }
+  was.matrix <- is.matrix(xmat)
+  if (!was.matrix) {
+    if (is.null(y)) {
+      stop("if 'x' is not a matrix, 'y' must be given")
+    }
+    if (length(xmat) != length(y)) {
+      stop("'x' and 'y' must have the same length")
+    }
+    OK <- complete.cases(xmat, y)
+    ## use as.factor rather than factor here to be consistent with
+    ## pre-tabulated data
+    xf <- as.factor(xmat[OK])
+    yf <- as.factor(y[OK])
+    if ((nlevels(xf) < 2L) || (nlevels(yf) < 2L)) {
+      stop("'x' and 'y' must have at least 2 levels")
+    }
+    xmat <- table(xf, yf)
+  }
+
+  nr <- nrow(xmat)
+  nc <- ncol(xmat)
+  have.2x2 <- (nr == 2) && (nc == 2)
+  if (have.2x2) {
+    if (!missing(or) && (length(or) > 1L || is.na(or) || or < 0)) {
+      stop("'or' must be a single number between 0 and Inf")
+    }
+  }
+  if (nr + nc > 5 || (have.2x2 && or != 1)) {
+    if (midp) {
+      stop("'midp = TRUE' not yet supported in this case")
+    }
+    RET <- eval(substitute(stats::fisher.test(ex, ey, workspace, hybrid,
+                                              hybridPars, control, or,
+                                              alternative, conf.int,
+                                              conf.level, simulate.p.value, B),
+                           list(ex = expr.x, ey = expr.y)))
+    RET$log.p.value <- log(RET$p.value)
+    return(RET)
+  }
+
+  DNAME <- deparse1(expr.x)
+  x <- xmat
+  METHOD <- "Fisher's Exact Test for Count Data"
+  if (was.matrix) {
+    if (nr < 2L || nc < 2L) {
+      stop("'x' must have at least 2 rows and columns")
+    }
+    if (!is.numeric(x) || any(x < 0) || anyNA(x)) {
+      stop("all entries of 'x' must be nonnegative and finite")
+    }
+    if (!is.integer(x)) {
+      xo <- x
+      x <- round(x)
+      if (!identical(TRUE, (ax <- all.equal(xo, x)))) {
+        warning(gettextf("'x' has been rounded to integer: %s", ax), domain = NA)
+      }
+      ## R integers are 32-bit; we support "53-bit" integers in the 2x2 case.
+      if (nr > 2L || nc > 2L) {
+        if (any(x > .Machine$integer.max)) {
+          stop("'x' has entries too large to be integer")
+        }
+        storage.mode(x) <- "integer"
+      }
+    }
+  } else {
+    DNAME <- paste(DNAME, "and", deparse1(expr.y))
+  }
+
+  if (have.2x2) {
+    alternative <- char.expand(alternative,
+                               c("two.sided", "less", "greater"))
+    if (length(alternative) > 1L || is.na(alternative)) {
+      stop("alternative must be \"two.sided\", \"less\", or \"greater\"")
+    }
+    if (!((length(conf.level) == 1L) && (conf.level >= 0.5**23) &&
+          (!(conf.level > 1 - 0.5**23)))) {
+      stop("'conf.level' must be a single number in [2^{-23}, 1 - 2^{-23}]")
+    }
+  }
+
+  if (hybrid) {
+    warning("'hybrid' is ignored for 2x2 and 2x3 tables")
+  }
+  if (midp) {
+    METHOD <- paste(METHOD, "(midp)")
+  }
+
+  RVAL <- NULL
+  if (!have.2x2) {
+    ## 2x3 case, otherwise we would have forwarded to stats::fisher.test().
+    LNPVAL <- fisher23_test_lnpval(x, midp)
+    RVAL <- list(p.value = exp(LNPVAL),
+                 log.p.value = LNPVAL)
+  } else {
+    x11 <- x[1, 1]
+    x12 <- x[1, 2]
+    x21 <- x[2, 1]
+    x22 <- x[2, 2]
+    NVAL <- c("odds ratio" = or)
+
+    # obvious todo: support or!=1 here
+    LNPVAL <- switch(alternative,
+                     less = phyper_cpp(x11, x11+x21, x12+x22, x11+x12, TRUE, TRUE, midp, TRUE),
+                     greater = phyper_cpp(x11-1, x11+x21, x12+x22, x11+x12, FALSE, TRUE, midp, TRUE),
+                     two.sided = fisher22_test_lnpval(x11, x12, x21, x22, midp))
+    ESTIMATE <- c("odds ratio" = odds_ratio_22(x11, x12, x21, x22))
+    if (conf.int) {
+      CINT <- switch(alternative,
+                     less = odds_ratio_ci_22(x11, x12, x21, x22, 0, conf.level),
+                     greater = odds_ratio_ci_22(x11, x12, x21, x22, 1 - conf.level, 1),
+                     two.sided = odds_ratio_ci_22(x11, x12, x21, x22, (1 - conf.level) / 2, (1 + conf.level) / 2))
+      attr(CINT, "conf.level") <- conf.level
+    }
+    RVAL <- list(p.value = exp(LNPVAL),
+                 log.p.value = LNPVAL,
+                 conf.int = if (conf.int) CINT,
+                 estimate = ESTIMATE,
+                 null.value = NVAL)
+  }
+
+  structure(c(RVAL,
+              alternative = alternative,
+              method = METHOD,
+              data.name = DNAME),
+            class = "htest")
 }

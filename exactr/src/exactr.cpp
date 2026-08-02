@@ -288,7 +288,7 @@ NumericVector dhyper(NumericVector x, double m, double n, double k, bool log = f
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool approx) {
+NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool midp, bool approx) {
   const double m_round = round(m);
   const double n_round = round(n);
   const double k_round = round(k);
@@ -349,7 +349,7 @@ NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool low
       if ((a < 0) || (d < 0)) {
         result = log_p? (0.0 / 0.0) : 0.0;
       } else if (approx) {
-        result = plink2::PhyperApprox(a, b, c, d, 0, 0, log_p);
+        result = plink2::PhyperApprox(a, b, c, d, 0, midp, log_p);
       } else {
         result = plink2::Phyper(a, b, c, d, log_p);
       }
@@ -431,4 +431,69 @@ NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool low
   return results;
 }
 
-// ...more functions coming...
+//' @title Fisher 2x3 test log-p-value
+//' @description Implements main log-p-value calculation for 2x3 tables.
+//' @noRd
+// [[Rcpp::export]]
+double fisher23_test_lnpval(IntegerMatrix x, bool midp) {
+  const int64_t m11 = x(0, 0);
+  int64_t m12;
+  int64_t m13;
+  int64_t m21;
+  const int64_t m22 = x(1, 1);
+  int64_t m23;
+  if (x.nrow() == 2) {
+    m12 = x(0, 1);
+    m13 = x(0, 2);
+    m21 = x(1, 0);
+    m23 = x(1, 2);
+  } else {
+    m12 = x(1, 0);
+    m13 = x(2, 0);
+    m21 = x(0, 1);
+    m23 = x(2, 1);
+  }
+  if (m11 + m12 + m13 + m21 + m22 + m23 >= (1LL << 31)) {
+    stop("problem instance too large (2x3 table entries must sum to less than 2^31)");
+  }
+  return plink2::Fisher23LnP(m11, m12, m13, m21, m22, m23, midp);
+}
+
+//' @title Fisher 2x2 test log-p-value
+//' @description Implements main log-p-value calculation for 2x2 tables.
+//' @noRd
+// [[Rcpp::export]]
+double fisher22_test_lnpval(double x11, double x12, double x21, double x22, int32_t midp) {
+  // Assumes {x11,x12,x21,x22} are nonnegative integers.
+  if (x11 + x12 + x21 + x22 >= (1LL << 52)) {
+    stop("problem instance too large (2x2 table entries must sum to less than 2^52)");
+  }
+  return plink2::Fisher22TwoSidedP(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), midp, 1);
+}
+
+//' @title Odds ratio, 2x2 table
+//' @description Implements odds ratio point-estimate for 2x2 tables.
+//' @noRd
+// [[Rcpp::export]]
+double odds_ratio_22(double x11, double x12, double x21, double x22) {
+  // Assumes parameters have been validated.
+  return plink2::Fisher22OddsRatio(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22));
+}
+
+//' @title Odds ratio confidence interval, 2x2 table
+//' @description Implements odds ratio confidence-interval calculation for 2x2
+//'   tables.
+//' @noRd
+// [[Rcpp::export]]
+NumericVector odds_ratio_ci_22(double x11, double x12, double x21, double x22, double low, double high) {
+  // Assumes parameters have been validated to be in-range.  (In particular, we
+  // currently enforce conf.level in [2^{-23}, 1 - 2^{-23}] to stay within
+  // Fisher22OddsRatioCI()'s domain.)
+  NumericVector result(2);
+  double low_result;
+  double high_result;
+  plink2::Fisher22OddsRatioCI(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), low, high, &low_result, &high_result);
+  result[0] = low_result;
+  result[1] = high_result;
+  return result;
+}
