@@ -11,6 +11,7 @@ binom.test(
   alternative = c("two.sided", "less", "greater"),
   conf.level = 0.95,
   midp = FALSE,
+  log.p = FALSE,
   p.denom = 1
 )
 }
@@ -31,6 +32,10 @@ letter.}
 
 \item{midp}{logical; if TRUE, midp-value is returned in place of p-value.}
 
+\item{log.p}{logical; if TRUE, log.p.value is calculated and returned.
+(p.value is still returned.)  log.p.value remains accurate when p.value
+underflows to zero.}
+
 \item{p.denom}{optional denominator of hypothesized success probability.}
 }
 \value{
@@ -38,7 +43,7 @@ A list with class "\code{htest}" containing the following components:
 \item{statistic}{the number of successes.}
 \item{parameter}{the number of trials.}
 \item{p.value}{the p- or midp-value of the test.}
-\item{log.p.value}{the log-p- or log-midp-value of the test.}
+\item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument \code{log.p = TRUE}.}
 \item{conf.int}{a confidence interval for the probability of success.}
 \item{estimate}{the estimated probability of success.}
 \item{null.value}{the probability of success under the null, \code{p}.}

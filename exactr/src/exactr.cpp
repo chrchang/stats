@@ -196,11 +196,10 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_t
 }
 
 //' @title Exact binomial test log-p-value
-//' @description Implements main log-p-value calculation for 2-sided
-//'   binom.test().
+//' @description Implements main p-value calculation for 2-sided binom.test().
 //' @noRd
 // [[Rcpp::export]]
-double binom_test_lnpval(double x_round, double size_round, double prob, bool midp, double prob_denom) {
+double binom_test_pval(double x_round, double size_round, double prob, bool midp, bool log_p, double prob_denom) {
   // size_round >= 1 checked by caller
   if (!(size_round < (1LL << 52))) {
     stop("size is not in [1, 2^52 - 1]");
@@ -208,7 +207,7 @@ double binom_test_lnpval(double x_round, double size_round, double prob, bool mi
   const plink2::td_real prob_tdr = make_prob_tdr(prob, prob_denom);
   const int64_t x = static_cast<int64_t>(x_round);
   const int64_t n = static_cast<int64_t>(size_round);
-  return BinomTwoSidedP(x, n, prob_tdr, midp, 1);
+  return BinomTwoSidedP(x, n, prob_tdr, midp, log_p);
 }
 
 //' Hypergeometric distribution pmf
@@ -432,10 +431,10 @@ NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool low
 }
 
 //' @title Fisher 2x3 test log-p-value
-//' @description Implements main log-p-value calculation for 2x3 tables.
+//' @description Implements main p-value calculation for 2x3 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher23_test_lnpval(IntegerMatrix x, bool midp) {
+double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p) {
   const int64_t m11 = x(0, 0);
   int64_t m12;
   int64_t m13;
@@ -456,19 +455,23 @@ double fisher23_test_lnpval(IntegerMatrix x, bool midp) {
   if (m11 + m12 + m13 + m21 + m22 + m23 >= (1LL << 31)) {
     stop("problem instance too large (2x3 table entries must sum to less than 2^31)");
   }
-  return plink2::Fisher23LnP(m11, m12, m13, m21, m22, m23, midp);
+  const double ln_pval = plink2::Fisher23LnP(m11, m12, m13, m21, m22, m23, midp);
+  if (log_p) {
+    return ln_pval;
+  }
+  return exp(ln_pval);
 }
 
 //' @title Fisher 2x2 test log-p-value
 //' @description Implements main log-p-value calculation for 2x2 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher22_test_lnpval(double x11, double x12, double x21, double x22, int32_t midp) {
+double fisher22_test_pval(double x11, double x12, double x21, double x22, bool midp, bool log_p) {
   // Assumes {x11,x12,x21,x22} are nonnegative integers.
   if (x11 + x12 + x21 + x22 >= (1LL << 52)) {
     stop("problem instance too large (2x2 table entries must sum to less than 2^52)");
   }
-  return plink2::Fisher22TwoSidedP(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), midp, 1);
+  return plink2::Fisher22TwoSidedP(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), midp, log_p);
 }
 
 //' @title Odds ratio, 2x2 table

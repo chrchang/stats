@@ -57,9 +57,9 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// binom_test_lnpval
-double binom_test_lnpval(double x_round, double size_round, double prob, bool midp, double prob_denom);
-RcppExport SEXP _exactr_binom_test_lnpval(SEXP x_roundSEXP, SEXP size_roundSEXP, SEXP probSEXP, SEXP midpSEXP, SEXP prob_denomSEXP) {
+// binom_test_pval
+double binom_test_pval(double x_round, double size_round, double prob, bool midp, bool log_p, double prob_denom);
+RcppExport SEXP _exactr_binom_test_pval(SEXP x_roundSEXP, SEXP size_roundSEXP, SEXP probSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP prob_denomSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -67,8 +67,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type size_round(size_roundSEXP);
     Rcpp::traits::input_parameter< double >::type prob(probSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< double >::type prob_denom(prob_denomSEXP);
-    rcpp_result_gen = Rcpp::wrap(binom_test_lnpval(x_round, size_round, prob, midp, prob_denom));
+    rcpp_result_gen = Rcpp::wrap(binom_test_pval(x_round, size_round, prob, midp, log_p, prob_denom));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -121,21 +122,22 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// fisher23_test_lnpval
-double fisher23_test_lnpval(IntegerMatrix x, bool midp);
-RcppExport SEXP _exactr_fisher23_test_lnpval(SEXP xSEXP, SEXP midpSEXP) {
+// fisher23_test_pval
+double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p);
+RcppExport SEXP _exactr_fisher23_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
-    rcpp_result_gen = Rcpp::wrap(fisher23_test_lnpval(x, midp));
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher23_test_pval(x, midp, log_p));
     return rcpp_result_gen;
 END_RCPP
 }
-// fisher22_test_lnpval
-double fisher22_test_lnpval(double x11, double x12, double x21, double x22, int32_t midp);
-RcppExport SEXP _exactr_fisher22_test_lnpval(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP, SEXP midpSEXP) {
+// fisher22_test_pval
+double fisher22_test_pval(double x11, double x12, double x21, double x22, bool midp, bool log_p);
+RcppExport SEXP _exactr_fisher22_test_pval(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP, SEXP midpSEXP, SEXP log_pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -143,8 +145,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type x12(x12SEXP);
     Rcpp::traits::input_parameter< double >::type x21(x21SEXP);
     Rcpp::traits::input_parameter< double >::type x22(x22SEXP);
-    Rcpp::traits::input_parameter< int32_t >::type midp(midpSEXP);
-    rcpp_result_gen = Rcpp::wrap(fisher22_test_lnpval(x11, x12, x21, x22, midp));
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher22_test_pval(x11, x12, x21, x22, midp, log_p));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -183,12 +186,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_dbinom", (DL_FUNC) &_exactr_dbinom, 4},
     {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 8},
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
-    {"_exactr_binom_test_lnpval", (DL_FUNC) &_exactr_binom_test_lnpval, 5},
+    {"_exactr_binom_test_pval", (DL_FUNC) &_exactr_binom_test_pval, 6},
     {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
     {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 8},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
-    {"_exactr_fisher23_test_lnpval", (DL_FUNC) &_exactr_fisher23_test_lnpval, 2},
-    {"_exactr_fisher22_test_lnpval", (DL_FUNC) &_exactr_fisher22_test_lnpval, 5},
+    {"_exactr_fisher23_test_pval", (DL_FUNC) &_exactr_fisher23_test_pval, 3},
+    {"_exactr_fisher22_test_pval", (DL_FUNC) &_exactr_fisher22_test_pval, 6},
     {"_exactr_odds_ratio_22", (DL_FUNC) &_exactr_odds_ratio_22, 4},
     {"_exactr_odds_ratio_ci_22", (DL_FUNC) &_exactr_odds_ratio_ci_22, 6},
     {NULL, NULL, 0}

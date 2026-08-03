@@ -32,22 +32,22 @@ is.boolean <- function(x) {
 #' @export
 pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
-    stop("'q' must be a numeric vector.")
+    stop("'q' must be a numeric vector")
   }
   if (!is.numeric(size) || length(size) != 1) {
-    stop("'size' must be a single numeric value.")
+    stop("'size' must be a single numeric value")
   }
   if (!is.numeric(prob) || length(prob) != 1) {
-    stop("'prob' must be a single numeric value.")
+    stop("'prob' must be a single numeric value")
   }
   if (!is.boolean(lower.tail)) {
-    stop("'lower.tail' must be a single boolean value.")
+    stop("'lower.tail' must be a single boolean value")
   }
   if (!is.boolean(log.p)) {
-    stop("'log.p' must be a single boolean value.")
+    stop("'log.p' must be a single boolean value")
   }
   if (!is.boolean(approx)) {
-    stop("'approx' must be a single boolean value.")
+    stop("'approx' must be a single boolean value")
   }
   result <- pbinom_cpp(q, size, prob, lower.tail, log.p, FALSE, approx, 1.0)
   return(result)
@@ -72,19 +72,19 @@ pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE
 #' @export
 qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
-    stop("'p' must be a numeric vector.")
+    stop("'p' must be a numeric vector")
   }
   if (!is.numeric(size) || length(size) != 1) {
-    stop("'size' must be a single numeric value.")
+    stop("'size' must be a single numeric value")
   }
   if (!is.numeric(prob) || length(prob) != 1) {
-    stop("'prob' must be a single numeric value.")
+    stop("'prob' must be a single numeric value")
   }
   if (!is.boolean(lower.tail)) {
-    stop("'lower.tail' must be a single boolean value.")
+    stop("'lower.tail' must be a single boolean value")
   }
   if (!is.boolean(log.p)) {
-    stop("'log.p' must be a single boolean value.")
+    stop("'log.p' must be a single boolean value")
   }
   result <- qbinom_cpp(p, size, prob, lower.tail, log.p)
   return(result)
@@ -105,6 +105,9 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   letter.
 #' @param conf.level confidence level for the returned confidence interval.
 #' @param midp logical; if TRUE, midp-value is returned in place of p-value.
+#' @param log.p logical; if TRUE, log.p.value is calculated and returned.
+#'   (p.value is still returned.)  log.p.value remains accurate when p.value
+#'   underflows to zero.
 #' @param p.denom optional denominator of hypothesized success probability.
 #'
 #' @details Confidence intervals are obtained by a procedure first given in
@@ -129,7 +132,7 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   \item{statistic}{the number of successes.}
 #'   \item{parameter}{the number of trials.}
 #'   \item{p.value}{the p- or midp-value of the test.}
-#'   \item{log.p.value}{the log-p- or log-midp-value of the test.}
+#'   \item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument `log.p = TRUE`.}
 #'   \item{conf.int}{a confidence interval for the probability of success.}
 #'   \item{estimate}{the estimated probability of success.}
 #'   \item{null.value}{the probability of success under the null, `p`.}
@@ -139,7 +142,7 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #' @export
 binom.test <- function(x, n, p=0.5,
                        alternative=c("two.sided", "less", "greater"),
-                       conf.level=0.95, midp=FALSE, p.denom=1) {
+                       conf.level=0.95, midp=FALSE, log.p=FALSE, p.denom=1) {
   ## This closely follows the GPL-2.0-or-later binom.test.R from R 4.6.0, since
   ## it is designed to be a drop-in replacement.
   ##
@@ -185,15 +188,13 @@ binom.test <- function(x, n, p=0.5,
   }
 
   if (!is.boolean(midp)) {
-    stop("'midp' must be a single boolean value.")
+    stop("'midp' must be a single boolean value")
   }
 
-  # todo: fill in two.sided stub
-  LNPVAL <- switch(alternative,
-                   less = pbinom_cpp(x, n, p, TRUE, TRUE, midp, TRUE, p.denom),
-                   greater = pbinom_cpp(x - 1, n, p, FALSE, TRUE, midp, TRUE, p.denom),
-                   two.sided = binom_test_lnpval(x, n, p, midp, p.denom))
-  PVAL <- exp(LNPVAL)
+  P_OR_LNPVAL <- switch(alternative,
+                        less = pbinom_cpp(x, n, p, TRUE, log.p, midp, TRUE, p.denom),
+                        greater = pbinom_cpp(x - 1, n, p, FALSE, log.p, midp, TRUE, p.denom),
+                        two.sided = binom_test_pval(x, n, p, midp, log.p, p.denom))
 
   p.L <- function(x, alpha) {
     if (x == 0) {  # No solution
@@ -231,16 +232,19 @@ binom.test <- function(x, n, p=0.5,
     METHOD <- paste(METHOD, "(midp)")
   }
 
-  structure(list(statistic = x,
-                 parameter = n,
-                 p.value = exp(LNPVAL),
-                 log.p.value = LNPVAL,
-                 conf.int = CINT,
-                 estimate = ESTIMATE,
-                 null.value = p,
-                 alternative = alternative,
-                 method = METHOD,
-                 data.name = DNAME),
+  RVAL <- list(statistic = x, parameter = n)
+  if (log.p) {
+    RVAL <- c(RVAL, p.value = exp(P_OR_LNPVAL), log.p.value = P_OR_LNPVAL)
+  } else {
+    RVAL <- c(RVAL, p.value = P_OR_LNPVAL)
+  }
+  structure(c(RVAL,
+              conf.int = CINT,
+              estimate = ESTIMATE,
+              null.value = p,
+              alternative = alternative,
+              method = METHOD,
+              data.name = DNAME),
             class = "htest")
 }
 
@@ -271,25 +275,25 @@ binom.test <- function(x, n, p=0.5,
 #' @export
 phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
-    stop("'q' must be a numeric vector.")
+    stop("'q' must be a numeric vector")
   }
   if (!is.numeric(m) || length(m) != 1) {
-    stop("'m' must be a single numeric value.")
+    stop("'m' must be a single numeric value")
   }
   if (!is.numeric(n) || length(n) != 1) {
-    stop("'n' must be a single numeric value.")
+    stop("'n' must be a single numeric value")
   }
   if (!is.numeric(k) || length(k) != 1) {
-    stop("'k' must be a single numeric value.")
+    stop("'k' must be a single numeric value")
   }
   if (!is.boolean(lower.tail)) {
-    stop("'lower.tail' must be a single boolean value.")
+    stop("'lower.tail' must be a single boolean value")
   }
   if (!is.boolean(log.p)) {
-    stop("'log.p' must be a single boolean value.")
+    stop("'log.p' must be a single boolean value")
   }
   if (!is.boolean(approx)) {
-    stop("'approx' must be a single boolean value.")
+    stop("'approx' must be a single boolean value")
   }
   result <- phyper_cpp(q, m, n, k, lower.tail, log.p, FALSE, approx)
   return(result)
@@ -315,22 +319,22 @@ phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
 #' @export
 qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
-    stop("'p' must be a numeric vector.")
+    stop("'p' must be a numeric vector")
   }
   if (!is.numeric(m) || length(m) != 1) {
-    stop("'m' must be a single numeric value.")
+    stop("'m' must be a single numeric value")
   }
   if (!is.numeric(n) || length(n) != 1) {
-    stop("'n' must be a single numeric value.")
+    stop("'n' must be a single numeric value")
   }
   if (!is.numeric(k) || length(k) != 1) {
-    stop("'k' must be a single numeric value.")
+    stop("'k' must be a single numeric value")
   }
   if (!is.boolean(lower.tail)) {
-    stop("'lower.tail' must be a single boolean value.")
+    stop("'lower.tail' must be a single boolean value")
   }
   if (!is.boolean(log.p)) {
-    stop("'log.p' must be a single boolean value.")
+    stop("'log.p' must be a single boolean value")
   }
   result <- qhyper_cpp(p, m, n, k, lower.tail, log.p)
   return(result)
@@ -374,6 +378,10 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   Carlo test when `simulate.p.value` is true.
 #' @param midp logical; if TRUE, midp-value is returned in place of p-value.
 #'   Not yet supported for larger-than-2x3 tables or `or` unequal to 1.
+#' @param log.p logical; if TRUE, log.p.value is calculated and returned.
+#'   (p.value is still returned.)  log.p.value usually remains accurate when
+#'   p.value underflows to zero; a warning is printed when that is not the
+#'   case.
 #'
 #' @details If `x` is a matrix, it is taken as a two-dimensional contingency
 #'   table, and hence its entries should be nonnegative integers.  Otherwise,
@@ -416,7 +424,7 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   otherwise the exact calculation is used.  A corresponding `if()` decision
 #'   is made for all sub-tables considered.
 #'
-#'   In the `r`x`c` case with `r`\>2 or `c`\>2, internal tables can be too
+#'   In the `r`x`c` case with `r>2` or `c>2`, internal tables can be too
 #'   large for the exact test in which case an error is signalled.  Apart from
 #'   increasing `workspace` sufficiently, which then may lead to very long
 #'   running times, using `simulate.p.value = TRUE` may then often be
@@ -458,7 +466,7 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'
 #' @return A list with class "`htest`" containing the following components:
 #'   \item{p.value}{the p- or midp-value of the test.}
-#'   \item{log.p.value}{the log-p- or log-midp-value of the test.}
+#'   \item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument `log.p = TRUE`.}
 #'   \item{conf.int}{a confidence interval for the odds ratio.  Only present in the 2x2 case and if argument `conf.int = TRUE`.}
 #'   \item{estimate}{an estimate of the odds ratio.  Note that the _conditional_ Maximum Likelihood Estimate (MLE) rather than the unconditional MLE (the sample odds ratio) is used.  Only present in the 2x2 case.}
 #'   \item{null.value}{the odds ratio under the null, `or`.  Only present in the 2x2 case.}
@@ -470,7 +478,8 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                         hybridPars = c(expect = 5, percent = 80, Emin = 1),
                         control = list(), or = 1, alternative = "two.sided",
                         conf.int = TRUE, conf.level = 0.95,
-                        simulate.p.value = FALSE, B = 2000, midp = FALSE) {
+                        simulate.p.value = FALSE, B = 2000, midp = FALSE,
+                        log.p = FALSE) {
   ## This closely follows parts of the GPL-2.0-or-later fisher.test.R from R
   ## 4.6.0, since it is designed to be a drop-in replacement.
   ##
@@ -515,6 +524,9 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
       stop("'or' must be a single number between 0 and Inf")
     }
   }
+  if (!is.boolean(log.p)) {
+    stop("'log.p' must be a single boolean value")
+  }
   if (nr + nc > 5 || (have.2x2 && or != 1)) {
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
@@ -524,7 +536,14 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                                               alternative, conf.int,
                                               conf.level, simulate.p.value, B),
                            list(ex = expr.x, ey = expr.y)))
-    RET$log.p.value <- log(RET$p.value)
+    if (log.p) {
+      if (RET$p.value <= 0.0) {
+        warning("p.value underflowed to zero, and direct calculation of log.p.value not yet supported in this case; setting log.p.value to -Inf")
+        RET$log.p.value <- -Inf
+      } else {
+        RET$log.p.value <- log(RET$p.value)
+      }
+    }
     return(RET)
   }
 
@@ -578,9 +597,13 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   RVAL <- NULL
   if (!have.2x2) {
     ## 2x3 case, otherwise we would have forwarded to stats::fisher.test().
-    LNPVAL <- fisher23_test_lnpval(x, midp)
-    RVAL <- list(p.value = exp(LNPVAL),
-                 log.p.value = LNPVAL)
+    P_OR_LNPVAL <- fisher23_test_pval(x, midp, log.p)
+    if (log.p) {
+      RVAL <- list(p.value = exp(P_OR_LNPVAL),
+                   log.p.value = P_OR_LNPVAL)
+    } else {
+      RVAL <- list(p.value = P_OR_LNPVAL)
+    }
   } else {
     x11 <- x[1, 1]
     x12 <- x[1, 2]
@@ -589,10 +612,10 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
     NVAL <- c("odds ratio" = or)
 
     # obvious todo: support or!=1 here
-    LNPVAL <- switch(alternative,
-                     less = phyper_cpp(x11, x11+x21, x12+x22, x11+x12, TRUE, TRUE, midp, TRUE),
-                     greater = phyper_cpp(x11-1, x11+x21, x12+x22, x11+x12, FALSE, TRUE, midp, TRUE),
-                     two.sided = fisher22_test_lnpval(x11, x12, x21, x22, midp))
+    P_OR_LNPVAL <- switch(alternative,
+                          less = phyper_cpp(x11, x11+x21, x12+x22, x11+x12, TRUE, log.p, midp, TRUE),
+                          greater = phyper_cpp(x11-1, x11+x21, x12+x22, x11+x12, FALSE, log.p, midp, TRUE),
+                          two.sided = fisher22_test_pval(x11, x12, x21, x22, midp, log.p))
     ESTIMATE <- c("odds ratio" = odds_ratio_22(x11, x12, x21, x22))
     if (conf.int) {
       CINT <- switch(alternative,
@@ -601,11 +624,16 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                      two.sided = odds_ratio_ci_22(x11, x12, x21, x22, (1 - conf.level) / 2, (1 + conf.level) / 2))
       attr(CINT, "conf.level") <- conf.level
     }
-    RVAL <- list(p.value = exp(LNPVAL),
-                 log.p.value = LNPVAL,
-                 conf.int = if (conf.int) CINT,
-                 estimate = ESTIMATE,
-                 null.value = NVAL)
+    if (log.p) {
+      RVAL <- list(p.value = exp(P_OR_LNPVAL),
+                   log.p.value = P_OR_LNPVAL)
+    } else {
+      RVAL <- list(p.value = P_OR_LNPVAL)
+    }
+    RVAL <- c(RVAL,
+              conf.int = if (conf.int) CINT,
+              estimate = ESTIMATE,
+              null.value = NVAL)
   }
 
   structure(c(RVAL,

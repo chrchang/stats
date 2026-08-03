@@ -38,11 +38,10 @@ qbinom_cpp <- function(p, size, prob, lower_tail, log_p) {
 }
 
 #' @title Exact binomial test log-p-value
-#' @description Implements main log-p-value calculation for 2-sided
-#'   binom.test().
+#' @description Implements main p-value calculation for 2-sided binom.test().
 #' @noRd
-binom_test_lnpval <- function(x_round, size_round, prob, midp, prob_denom) {
-    .Call(`_exactr_binom_test_lnpval`, x_round, size_round, prob, midp, prob_denom)
+binom_test_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom) {
+    .Call(`_exactr_binom_test_pval`, x_round, size_round, prob, midp, log_p, prob_denom)
 }
 
 #' Hypergeometric distribution pmf
@@ -85,17 +84,17 @@ qhyper_cpp <- function(p, m, n, k, lower_tail = TRUE, log_p = FALSE) {
 }
 
 #' @title Fisher 2x3 test log-p-value
-#' @description Implements main log-p-value calculation for 2x3 tables.
+#' @description Implements main p-value calculation for 2x3 tables.
 #' @noRd
-fisher23_test_lnpval <- function(x, midp) {
-    .Call(`_exactr_fisher23_test_lnpval`, x, midp)
+fisher23_test_pval <- function(x, midp, log_p) {
+    .Call(`_exactr_fisher23_test_pval`, x, midp, log_p)
 }
 
 #' @title Fisher 2x2 test log-p-value
 #' @description Implements main log-p-value calculation for 2x2 tables.
 #' @noRd
-fisher22_test_lnpval <- function(x11, x12, x21, x22, midp) {
-    .Call(`_exactr_fisher22_test_lnpval`, x11, x12, x21, x22, midp)
+fisher22_test_pval <- function(x11, x12, x21, x22, midp, log_p) {
+    .Call(`_exactr_fisher22_test_pval`, x11, x12, x21, x22, midp, log_p)
 }
 
 #' @title Odds ratio, 2x2 table

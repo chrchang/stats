@@ -17,7 +17,8 @@ fisher.test(
   conf.level = 0.95,
   simulate.p.value = FALSE,
   B = 2000,
-  midp = FALSE
+  midp = FALSE,
+  log.p = FALSE
 )
 }
 \arguments{
@@ -66,11 +67,16 @@ Carlo test when \code{simulate.p.value} is true.}
 
 \item{midp}{logical; if TRUE, midp-value is returned in place of p-value.
 Not yet supported for larger-than-2x3 tables or \code{or} unequal to 1.}
+
+\item{log.p}{logical; if TRUE, log.p.value is calculated and returned.
+(p.value is still returned.)  log.p.value usually remains accurate when
+p.value underflows to zero; a warning is printed when that is not the
+case.}
 }
 \value{
 A list with class "\code{htest}" containing the following components:
 \item{p.value}{the p- or midp-value of the test.}
-\item{log.p.value}{the log-p- or log-midp-value of the test.}
+\item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument \code{log.p = TRUE}.}
 \item{conf.int}{a confidence interval for the odds ratio.  Only present in the 2x2 case and if argument \code{conf.int = TRUE}.}
 \item{estimate}{an estimate of the odds ratio.  Note that the \emph{conditional} Maximum Likelihood Estimate (MLE) rather than the unconditional MLE (the sample odds ratio) is used.  Only present in the 2x2 case.}
 \item{null.value}{the odds ratio under the null, \code{or}.  Only present in the 2x2 case.}
@@ -123,7 +129,7 @@ is if no cell has expected counts less than 1 (\verb{= Emin}) and more than 80\%
 otherwise the exact calculation is used.  A corresponding \verb{if()} decision
 is made for all sub-tables considered.
 
-In the \code{r}x\code{c} case with \code{r}\>2 or \code{c}\>2, internal tables can be too
+In the \code{r}x\code{c} case with \code{r>2} or \code{c>2}, internal tables can be too
 large for the exact test in which case an error is signalled.  Apart from
 increasing \code{workspace} sufficiently, which then may lead to very long
 running times, using \code{simulate.p.value = TRUE} may then often be
