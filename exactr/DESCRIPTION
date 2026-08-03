@@ -2,7 +2,7 @@ Package: exactr
 Type: Package
 Title: Accurate and Efficient Exact Tests and Distributions
 Version: 0.1.0
-Date: 2026-06-xx
+Date: 2026-08-xx
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),
