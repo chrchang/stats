@@ -18,7 +18,8 @@ fisher.test(
   simulate.p.value = FALSE,
   B = 2000,
   midp = FALSE,
-  log.p = FALSE
+  log.p = FALSE,
+  or.denom = 1
 )
 }
 \arguments{
@@ -47,7 +48,8 @@ default 30 used only for larger-than-2x3 tables.  This says how many times
 as much space should be allocated to paths as to keys: see file
 '\code{fexact.c}' in the base R stats source code.}
 
-\item{or}{the hypothesized odds ratio.  Only used in the 2x2 case.}
+\item{or}{the hypothesized odds ratio; or numerator if or.denom specified.
+Only used in the 2x2 case.}
 
 \item{alternative}{indicates the alternative hypothesis and must be one of
 "\code{two.sided}", "\code{greater}" or "\code{less}".  You can specify just the initial
@@ -66,12 +68,14 @@ Monte Carlo simulation, in larger-than-2x3 tables.}
 Carlo test when \code{simulate.p.value} is true.}
 
 \item{midp}{logical; if TRUE, midp-value is returned in place of p-value.
-Not yet supported for larger-than-2x3 tables or \code{or} unequal to 1.}
+Not yet supported for larger-than-2x3 tables.}
 
 \item{log.p}{logical; if TRUE, log.p.value is calculated and returned.
 (p.value is still returned.)  log.p.value usually remains accurate when
 p.value underflows to zero; a warning is printed when that is not the
 case.}
+
+\item{or.denom}{optional denominator of hypothesized odds ratio.}
 }
 \value{
 A list with class "\code{htest}" containing the following components:

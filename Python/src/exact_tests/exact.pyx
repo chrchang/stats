@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.8.7"
+__version__ = "0.8.8"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -899,8 +899,8 @@ hypergeom = _HypergeomDist()
 
 
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
-# lists.  For two-sided tests, values must be nonnegative integers which add up
-# to <2^31.  For one-sided tests, they must add up to <2^52.
+# lists.  For 2x2 tests, values must be nonnegative integers which add up
+# to <2^52.  For tests on larger tables, they must add up to <2^31.
 #
 # alternative must be one of the following:
 #   "two-sided": default, must be this if table is larger than 2x2.

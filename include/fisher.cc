@@ -36,7 +36,7 @@ namespace plink2 {
 // ratio) parameter.  This is straightforward for logp=False, and there should
 // be no practical need for logp=True (which isn't supported by R) there.
 double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) {
-  // Normalize: m11 >= m22, m12 >= m21, m11*m22 < m12*m21.
+  // Normalize: m11 >= m22, m12 >= m21, m11*m22 <= m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
   // spurious index differences between Fisher22 and Fisher23.
   if (obs_m11 < obs_m22) {
@@ -204,7 +204,7 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
   //   log((m12 + 1) * (m21 + 1) / (m11 * m22))
   // = log((m12_minus_m21 + 1) / (mx1 * m2x))
   double lnprobv_diff_min = log((m12_minus_m21 + 1) / (mx1 * m2x)) * (1 + kSmallEpsilon);
-  const uint32_t tdr_lnprobv_needed = use_tdr_for_hypergeom_lnprob(obs_m11 + obs_m12 + obs_m21 + obs_m22);
+  const uint32_t tdr_lnprobv_needed = use_tdr_for_hypergeom_lnprob(S_CAST(int64_t, mxx));
   td_real starting_lnprobv_tdr;
   dd_real starting_lnprob_ddr;
   if (!tdr_lnprobv_needed) {
@@ -278,16 +278,15 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
       if (lnprobv_diff > lnprobv_diff_min) {
         lik = exp(lnprobv_diff);
         break;
-      } else {
-        if (ll_deriv == DBL_MAX) {
-          ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
-        }
-        // Round down, to guarantee we don't overshoot.
-        // We're guaranteed to make progress because of how lnprobv_diff_min
-        // was set.
-        // m11 * m22 < exp(-lnprobv_diff_min), and (m12 + 1) * (m21 + 1) >= 1.
-        m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
       }
+      if (ll_deriv == DBL_MAX) {
+        ll_deriv = log((m12 + 1) * (m21 + 1) / (m11 * m22));
+      }
+      // Round down, to guarantee we don't overshoot.
+      // We're guaranteed to make progress because of how lnprobv_diff_min
+      // was set.
+      // m11 * m22 < exp(-lnprobv_diff_min), and (m12 + 1) * (m21 + 1) >= 1.
+      m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
     }
   }
   // Sum toward center, until lik >= 1.
@@ -305,6 +304,7 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
   const double tailenter_m22 = m22;
   while (1) {
     while (lik <= one_minus_scaled_eps) {
+    Fisher22TwoSidedP_rtail_instep:
       tail_sum += lik;
       m12 += 1;
       m21 += 1;
@@ -328,7 +328,8 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
       break;
     }
     one_minus_scaled_eps = 1 - 3 * k2m52;
-    // In very large cases, additional step(s) may be required?
+    // bugfix (8 Aug 2026): must take one step when lik in (1 - 3*2^{-52}, 1).
+    goto Fisher22TwoSidedP_rtail_instep;
   }
   // Sum away from center, until sums stop changing.
   lik = tailenter_lik;
@@ -340,6 +341,304 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
     m11 += 1;
     m22 += 1;
     lik *= m12 * m21 / (m11 * m22);
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
+      break;
+    }
+    m12 -= 1;
+    m21 -= 1;
+  }
+  return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+}
+
+// R or!=1 case.
+double Fisher22TwoSidedPEx(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, td_real odds_tdr, int32_t midp, uint32_t logp) {
+  // Normalize: m11 >= m22, m12 >= m21, m11*m22 <= m12*odds*m21
+  if (obs_m11 < obs_m22) {
+    swap_i64(&obs_m11, &obs_m22);
+  }
+  if (obs_m12 < obs_m21) {
+    swap_i64(&obs_m12, &obs_m21);
+  }
+  // Rounding error ok, just need pmf(m11 - 1) < pmf(m11) after this.
+  if (ddr_gt(ddr_mul2d(obs_m11, obs_m22), ddr_mul(ddr_mul2d(obs_m12, obs_m21), ddr_make_td(odds_tdr)))) {
+    swap_i64(&obs_m11, &obs_m12);
+    swap_i64(&obs_m21, &obs_m22);
+    odds_tdr = tdr_accurate_div(tdr_make1(1.0), odds_tdr);
+  }
+  const double odds = odds_tdr.x[0];
+  const double obs_m21d = obs_m21;
+  double m11 = obs_m11;
+  double m12 = obs_m12;
+  double m21 = obs_m21d;
+  double m22 = obs_m22;
+  const double first_inward_mult = (m12 * m21 * odds) / ((m11 + 1) * (m22 + 1));
+  if ((!midp) && (first_inward_mult <= 1 + 3 * k2m52)) {
+    // Fast path for p = 1, similar to that in BinomTwoSidedP().
+    if (first_inward_mult < 1 - 3 * k2m52) {
+      return logp? 0.0 : 1.0;
+    }
+    const td_real first_inward_mult_numer_tdr = tdr_mul(tdr_make_dd(ddr_mul2d(m12, m21)), odds_tdr);
+    const td_real first_inward_mult_denom_tdr = tdr_make_dd(ddr_mul2d(m11 + 1, m22 + 1));
+    if (tdr_leq(first_inward_mult_numer_tdr, tdr_mul(first_inward_mult_denom_tdr, tdr_make2(1, 8 * _tdr_eps)))) {
+      return logp? 0.0 : 1.0;
+    }
+    // don't need to update first_inward_mult
+  }
+
+  // Iterate outward to floating-point precision limit.
+  double lik = 1;
+  double tail_sum = 1 - 0.5 * midp;
+  while (1) {
+    m12 += 1;
+    m21 += 1;
+    lik *= (m11 * m22) / (m12 * m21 * odds);
+    m11 -= 1;
+    m22 -= 1;
+    const double preadd = tail_sum;
+    tail_sum += lik;
+    if (tail_sum == preadd) {
+      break;
+    }
+  }
+
+  const double m1x = obs_m11 + obs_m12;
+  const double m2x = obs_m21 + obs_m22;
+  const double mx1 = obs_m11 + obs_m21;
+  const int64_t modal_m11 = ModeFNCHypergeo(m1x, m2x, mx1, odds);
+  // If our starting contingency table is close enough to the mode to plausibly
+  // contribute to center_sum (instead of being lost to the precision limit),
+  // just jump back to the starting table and start summing inwards.
+  //
+  // For a nonnegative integer n < 2^52, we want to check if the upper-bound
+  //   r + r^2 + ... + r^n
+  // is <= ~2^106, since 2^53 corresponds to precision limit, and log(pmf(k))
+  // is asymptotically quadratic (so actual log(pmf(mode)) - log(pmf(obs_m11))
+  // approaches half the tangent-line upper bound).
+  // This is obviously true for r <= 1.  For r > 1,
+  //   r + r^2 + ... + r^n = r(1 - r^n)/(1-r) <= 2^106
+  //   r(r^n - 1)/(r-1) <= 2^106
+  //   r^n - 1 <= 2^106 * (r-1)/r
+  //   r^n <= 1 + 2^106 * (1 - 1/r)
+  //   n log r <= log(1 + 2^106 * (1 - 1/r))
+  if ((first_inward_mult <= 1) || (modal_m11 - obs_m11) * log(first_inward_mult) < log1p(((1.0 / k2m53) * (1.0 / k2m53)) * (1 - 1 / first_inward_mult))) {
+    lik = 1;
+    m11 = obs_m11;
+    m12 = obs_m12;
+    m21 = obs_m21d;
+    m22 = obs_m22;
+    double center_sum = 0.5 * midp;
+    double one_plus_scaled_eps = 1 + 4 * k2m52;
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lik *= (m12 * m21 * odds) / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      one_plus_scaled_eps += 3 * k2m52;
+      if (lik < one_plus_scaled_eps) {
+        if (lik <= 2 - one_plus_scaled_eps) {
+          tail_sum += lik;
+          break;
+        }
+        const int64_t m22_incr = S_CAST(int64_t, m22) - obs_m22;
+        td_real starting_lnprobv_tdr = tdr_make1(DBL_MAX);
+        td_real ln_odds_ratio_tdr = tdr_make1(DBL_MAX);
+        const intptr_t cmp_result = FNCHypergeoCompare(obs_m11, obs_m12, obs_m21, obs_m22, odds_tdr, m22_incr, &starting_lnprobv_tdr, &ln_odds_ratio_tdr, &lik);
+        if (cmp_result <= 0) {
+          tail_sum += lik;
+          if (midp && (cmp_result == 0)) {
+            tail_sum -= 0.5;
+            center_sum += 0.5;
+          }
+          break;
+        }
+      }
+      center_sum += lik;
+    }
+    // Ok if m12 or m21 is -1, lik is already 0 in that case
+    while (1) {
+      m11 += 1;
+      m22 += 1;
+      lik *= (m12 * m21 * odds) / (m11 * m22);
+      m12 -= 1;
+      m21 -= 1;
+      const double preadd = tail_sum;
+      tail_sum += lik;
+      if (tail_sum == preadd) {
+        break;
+      }
+    }
+    const double pval = tail_sum / (tail_sum + center_sum);
+    return logp? log(pval) : pval;
+  }
+
+  // First jump to the center and evaluate 1/pmf(mode).
+  // Then jump to the other tail, using the same approach as in
+  // Fisher22TwoSidedP().
+
+  // Save off first-tail m21 stopping point, since it hints at the location of
+  // the other tail.
+  const double m21_tail_prev = m21;
+
+  m11 = modal_m11;
+  m12 = m1x - m11;
+  m21 = mx1 - m11;
+  m22 = m2x - m21;
+  // This value (and consequently starting_lnprob_ddr) is not that accurate.
+  // But we can live with that since it isn't needed for near-tie handling, it
+  // only contributes to the final (mid)p-value.
+  const double mode_neg_log_pmf = log(CentralInvProbFNCHypergeo(m11, m12, m21, m22, odds));
+
+  const uint32_t tdr_lnprobv_needed = use_tdr_for_nchypergeom_lnprob(S_CAST(int64_t, m1x + m2x));
+  td_real starting_lnprobv_tdr;
+  td_real lnodds_tdr;
+  dd_real starting_lnprob_ddr;
+  if (!tdr_lnprobv_needed) {
+    const dd_real starting_neg_lnprobv_ddr = ddr_sort_and_add_4_lfacts(obs_m11, obs_m12, obs_m21d, obs_m22);
+    const dd_real lnodds_ddr = ddr_log(ddr_make_td(odds_tdr));
+    dd_real ddrs[5];
+    ddrs[0] = ddr_lfact(m11);
+    ddrs[1] = ddr_lfact(m12);
+    ddrs[2] = ddr_lfact(m21);
+    ddrs[3] = ddr_lfact(m22);
+    ddrs[4] = ddr_muld(lnodds_ddr, m21 - obs_m21d);
+    const dd_real mode_neg_lnprobv_ddr = ddr_sort_and_add(5, ddrs);
+    starting_lnprob_ddr = ddr_subd(ddr_sub(mode_neg_lnprobv_ddr, starting_neg_lnprobv_ddr), mode_neg_log_pmf);
+    starting_lnprobv_tdr = tdr_make_dd(ddr_negate(starting_neg_lnprobv_ddr));
+    lnodds_tdr = tdr_make_dd(lnodds_ddr);
+  } else {
+    td_real tdrs[5];
+    tdrs[0] = tdr_lfact(obs_m11);
+    tdrs[1] = tdr_lfact(obs_m12);
+    tdrs[2] = tdr_lfact(obs_m21d);
+    tdrs[3] = tdr_lfact(obs_m22);
+    starting_lnprobv_tdr = tdr_negate(tdr_sort_and_add(4, tdrs));
+    lnodds_tdr = tdr_log(odds_tdr);
+    tdrs[0] = tdr_lfact(m11);
+    tdrs[1] = tdr_lfact(m12);
+    tdrs[2] = tdr_lfact(m21);
+    tdrs[3] = tdr_lfact(m22);
+    tdrs[4] = tdr_muld(lnodds_tdr, m21 - obs_m21d);
+    const td_real mode_neg_lnprobv_tdr = tdr_sort_and_add(5, tdrs);
+    starting_lnprob_ddr = ddr_make_td(tdr_subd(tdr_add(mode_neg_lnprobv_tdr, starting_lnprobv_tdr), mode_neg_log_pmf));
+  }
+
+  {
+    const double modal_m21 = mx1 - modal_m11;
+    m21 = 2 * modal_m21 - (m21_tail_prev + obs_m21d) * 0.5;
+    m21 = S_CAST(int64_t, m21);
+    if (m21 < 0) {
+      m21 = 0;
+    }
+  }
+  // Extremal case: m11=mx1, m12=m12_minus_m21, m21=0, m22=m2x
+  //   log((m12 + 1) * (m21 + 1) * odds / (m11 * m22))
+  // = log((m12_minus_m21 + 1) * odds / (mx1 * m2x))
+  const double m12_minus_m21 = obs_m12 - obs_m21;
+  double lnprobv_diff_min = log((m12_minus_m21 + 1) * odds / (mx1 * m2x)) * (1 + kSmallEpsilon);
+  while (1) {
+    m11 = mx1 - m21;
+    m12 = m12_minus_m21 + m21;
+    m22 = m2x - m21;
+    double lnprobv_diff;
+    if (!tdr_lnprobv_needed) {
+      dd_real ddrs[5];
+      ddrs[0] = ddr_lfact(m11);
+      ddrs[1] = ddr_lfact(m12);
+      ddrs[2] = ddr_lfact(m21);
+      ddrs[3] = ddr_lfact(m22);
+      ddrs[4] = ddr_muld(ddr_make_td(lnodds_tdr), m21 - obs_m21d);
+      const dd_real neg_lnprobv_ddr = ddr_sort_and_add(5, ddrs);
+      lnprobv_diff = -ddr_add(ddr_make_td(starting_lnprobv_tdr), neg_lnprobv_ddr).x[0];
+    } else {
+      td_real tdrs[5];
+      tdrs[0] = tdr_lfact(m11);
+      tdrs[1] = tdr_lfact(m12);
+      tdrs[2] = tdr_lfact(m21);
+      tdrs[3] = tdr_lfact(m22);
+      tdrs[4] = tdr_muld(lnodds_tdr, m21 - obs_m21d);
+      const td_real neg_lnprobv_tdr = tdr_sort_and_add(5, tdrs);
+      lnprobv_diff = -tdr_add(starting_lnprobv_tdr, neg_lnprobv_tdr).x[0];
+    }
+    // Could tighten this threshold further.  But code is correct as long as
+    // we're guaranteed to enter the "lik < 2 - one_minus_scaled_eps" branch
+    // for positive lnprobv_diff.
+    if (lnprobv_diff >= k2m53) {
+      if (m21 == 0) {
+        // All tables on this tail have higher likelihood than the starting
+        // table.  Exit.
+        return join_log_and_nonlog(starting_lnprob_ddr, tail_sum, logp);
+      }
+      const double ll_deriv = log(m12 * m21 * odds / ((m11 + 1) * (m22 + 1)));
+      m21 -= ceil(-lnprobv_diff / ll_deriv);
+      if (m21 < 0) {
+        m21 = 0;
+      }
+    } else {
+      double ll_deriv = DBL_MAX;
+      if ((lnprobv_diff_min < -53 * kLn2) && (m21 > 0)) {
+        // Tighten this threshold if that lets us sum fewer terms later.
+        ll_deriv = log((m12 + 1) * (m21 + 1) * odds / (m11 * m22));
+        lnprobv_diff_min = ll_deriv * (1 + kSmallEpsilon);
+      }
+      if (lnprobv_diff > lnprobv_diff_min) {
+        lik = exp(lnprobv_diff);
+        break;
+      }
+      if (ll_deriv == DBL_MAX) {
+        ll_deriv = log((m12 + 1) * (m21 + 1) * odds / (m11 * m22));
+        m21 += S_CAST(int64_t, lnprobv_diff / ll_deriv);
+      }
+    }
+  }
+  // Sum toward center, until lik >= 1.
+  double one_minus_scaled_eps = 1 - 3 * k2m52;
+  const double tailenter_lik = lik;
+  const double tailenter_m11 = m11;
+  const double tailenter_m12 = m12;
+  const double tailenter_m21 = m21;
+  const double tailenter_m22 = m22;
+  while (1) {
+    while (lik <= one_minus_scaled_eps) {
+    Fisher22TwoSidedPEx_rtail_instep:
+      tail_sum += lik;
+      m12 += 1;
+      m21 += 1;
+      lik *= m11 * m22 / (m12 * m21 * odds);
+      m11 -= 1;
+      m22 -= 1;
+      one_minus_scaled_eps -= 3 * k2m52;
+    }
+    if (lik >= 2 - one_minus_scaled_eps) {
+      break;
+    }
+    const int64_t m22_incr = S_CAST(int64_t, m22) - obs_m22;
+    if (!tdr_lnprobv_needed) {
+      starting_lnprobv_tdr.x[2] = DBL_MAX;
+      lnodds_tdr.x[2] = DBL_MAX;
+    }
+    const intptr_t cmp_result = FNCHypergeoCompare(obs_m11, obs_m12, obs_m21, obs_m22, odds_tdr, m22_incr, &starting_lnprobv_tdr, &lnodds_tdr, &lik);
+    if (cmp_result >= 0) {
+      if (cmp_result == 0) {
+        tail_sum += 1 - 0.5 * midp;
+      }
+      break;
+    }
+    one_minus_scaled_eps = 1 - 3 * k2m52;
+    goto Fisher22TwoSidedPEx_rtail_instep;
+  }
+  // Sum away from center, until sums stop changing.
+  lik = tailenter_lik;
+  m11 = tailenter_m11;
+  m12 = tailenter_m12;
+  m21 = tailenter_m21;
+  m22 = tailenter_m22;
+  while (1) {
+    m11 += 1;
+    m22 += 1;
+    lik *= m12 * m21 * odds / (m11 * m22);
     const double preadd = tail_sum;
     tail_sum += lik;
     if (tail_sum == preadd) {

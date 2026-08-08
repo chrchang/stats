@@ -5,6 +5,7 @@
 #include "include/fisher.h"
 #include "include/hypergeom.h"
 #include "include/hypergeom_detail.h"
+#include "include/nchypergeom_fisher.h"
 #include "include/plink2_base.h"
 #include "include/plink2_float.h"
 #include "include/plink2_highprec.h"
@@ -195,11 +196,11 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_t
   return results;
 }
 
-//' @title Exact binomial test log-p-value
+//' @title Exact binomial two-sided test p-value
 //' @description Implements main p-value calculation for 2-sided binom.test().
 //' @noRd
 // [[Rcpp::export]]
-double binom_test_pval(double x_round, double size_round, double prob, bool midp, bool log_p, double prob_denom) {
+double binom_2sided_pval(double x_round, double size_round, double prob, bool midp, bool log_p, double prob_denom) {
   // size_round >= 1 checked by caller
   if (!(size_round < (1LL << 52))) {
     stop("size is not in [1, 2^52 - 1]");
@@ -364,7 +365,7 @@ NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool low
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail = true, bool log_p = false) {
+NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail, bool log_p) {
   const double m_round = round(m);
   const double n_round = round(n);
   const double k_round = round(k);
@@ -462,16 +463,46 @@ double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p) {
   return exp(ln_pval);
 }
 
-//' @title Fisher 2x2 test log-p-value
-//' @description Implements main log-p-value calculation for 2x2 tables.
+//' @title Fisher 2x2 two-sided test p-value
+//' @description Implements main two-sided p-value calculation for 2x2 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher22_test_pval(double x11, double x12, double x21, double x22, bool midp, bool log_p) {
+double fisher22_2sided_pval(double x11, double x12, double x21, double x22, bool midp, bool log_p) {
   // Assumes {x11,x12,x21,x22} are nonnegative integers.
   if (x11 + x12 + x21 + x22 >= (1LL << 52)) {
     stop("problem instance too large (2x2 table entries must sum to less than 2^52)");
   }
   return plink2::Fisher22TwoSidedP(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), midp, log_p);
+}
+
+//' @title Fisher 2x2 one-sided test p-value, nonstandard odds ratio
+//' @description This is equivalent to evaluation of the Fisher's noncentral
+//'   hypergeometric distribution cdf.
+//' @noRd
+// [[Rcpp::export]]
+double fisher22_1sided_pval_ex(double x11, double x12, double x21, double x22, double odds, bool lower_tail, bool midp, bool log_p) {
+  // Assumes {x11,x12,x21,x22} are nonnegative integers, and odds has already
+  // been verified to be in (2^{-400}, 2^400).
+  if (x11 + x12 + x21 + x22 >= (1LL << 52)) {
+    stop("problem instance too large (2x2 table entries must sum to less than 2^52)");
+  }
+  return plink2::P_FNCHypergeo(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), odds, !lower_tail, midp, log_p);
+}
+
+//' @title Fisher 2x2 two-sided test p-value, nonstandard odds ratio
+//' @description Implements main two-sided p-value calculation for 2x2 tables
+//'   with hypothesized odds!=1.
+//' @noRd
+// [[Rcpp::export]]
+double fisher22_2sided_pval_ex(double x11, double x12, double x21, double x22, double odds, bool midp, bool log_p, double odds_denom) {
+  if (x11 + x12 + x21 + x22 >= (1LL << 52)) {
+    stop("problem instance too large (2x2 table entries must sum to less than 2^52)");
+  }
+  plink2::td_real odds_tdr = plink2::tdr_make1(odds);
+  if (odds_denom != 1.0) {
+    odds_tdr = plink2::tdr_divd(odds_tdr, odds_denom);
+  }
+  return plink2::Fisher22TwoSidedPEx(static_cast<int64_t>(x11), static_cast<int64_t>(x12), static_cast<int64_t>(x21), static_cast<int64_t>(x22), odds_tdr, midp, log_p);
 }
 
 //' @title Odds ratio, 2x2 table

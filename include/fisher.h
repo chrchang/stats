@@ -17,6 +17,7 @@
 // along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "plink2_base.h"
+#include "plink2_highprec.h"
 
 // The main ideas behind these Fisher's Exact Test and hypergeometric-function
 // implementations are:
@@ -50,6 +51,8 @@ namespace plink2 {
 #endif
 
 double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp);
+
+double Fisher22TwoSidedPEx(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, td_real odds_tdr, int32_t midp, uint32_t logp);
 
 double Fisher22OddsRatio(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22);
 

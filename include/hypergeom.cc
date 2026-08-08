@@ -43,6 +43,10 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   // Flipping m11<->m12 and m21<->m22 also flips the direction of the
   // alternative hypothesis.  So we flip on m11-is-greater alternative
   // hypothesis here to allow the rest of the code to assume m11-is-less.
+  //
+  // Note that 'm11_is_greater_alt' isn't equivalent to 'complement': (if midp
+  // is false) it includes the starting table while 'complement' excludes it.
+  // Might want to change the interface.
   if (m11_is_greater_alt) {
     swap_i64(&obs_m11, &obs_m12);
     swap_i64(&obs_m21, &obs_m22);

@@ -37,11 +37,11 @@ qbinom_cpp <- function(p, size, prob, lower_tail, log_p) {
     .Call(`_exactr_qbinom_cpp`, p, size, prob, lower_tail, log_p)
 }
 
-#' @title Exact binomial test log-p-value
+#' @title Exact binomial two-sided test p-value
 #' @description Implements main p-value calculation for 2-sided binom.test().
 #' @noRd
-binom_test_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom) {
-    .Call(`_exactr_binom_test_pval`, x_round, size_round, prob, midp, log_p, prob_denom)
+binom_2sided_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom) {
+    .Call(`_exactr_binom_2sided_pval`, x_round, size_round, prob, midp, log_p, prob_denom)
 }
 
 #' Hypergeometric distribution pmf
@@ -79,7 +79,7 @@ phyper_cpp <- function(q, m, n, k, lower_tail, log_p, midp, approx) {
 #' @description Backend for qbinom(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-qhyper_cpp <- function(p, m, n, k, lower_tail = TRUE, log_p = FALSE) {
+qhyper_cpp <- function(p, m, n, k, lower_tail, log_p) {
     .Call(`_exactr_qhyper_cpp`, p, m, n, k, lower_tail, log_p)
 }
 
@@ -90,11 +90,27 @@ fisher23_test_pval <- function(x, midp, log_p) {
     .Call(`_exactr_fisher23_test_pval`, x, midp, log_p)
 }
 
-#' @title Fisher 2x2 test log-p-value
-#' @description Implements main log-p-value calculation for 2x2 tables.
+#' @title Fisher 2x2 two-sided test p-value
+#' @description Implements main two-sided p-value calculation for 2x2 tables.
 #' @noRd
-fisher22_test_pval <- function(x11, x12, x21, x22, midp, log_p) {
-    .Call(`_exactr_fisher22_test_pval`, x11, x12, x21, x22, midp, log_p)
+fisher22_2sided_pval <- function(x11, x12, x21, x22, midp, log_p) {
+    .Call(`_exactr_fisher22_2sided_pval`, x11, x12, x21, x22, midp, log_p)
+}
+
+#' @title Fisher 2x2 one-sided test p-value, nonstandard odds ratio
+#' @description This is equivalent to evaluation of the Fisher's noncentral
+#'   hypergeometric distribution cdf.
+#' @noRd
+fisher22_1sided_pval_ex <- function(x11, x12, x21, x22, odds, lower_tail, midp, log_p) {
+    .Call(`_exactr_fisher22_1sided_pval_ex`, x11, x12, x21, x22, odds, lower_tail, midp, log_p)
+}
+
+#' @title Fisher 2x2 two-sided test p-value, nonstandard odds ratio
+#' @description Implements main two-sided p-value calculation for 2x2 tables
+#'   with hypothesized odds!=1.
+#' @noRd
+fisher22_2sided_pval_ex <- function(x11, x12, x21, x22, odds, midp, log_p, odds_denom) {
+    .Call(`_exactr_fisher22_2sided_pval_ex`, x11, x12, x21, x22, odds, midp, log_p, odds_denom)
 }
 
 #' @title Odds ratio, 2x2 table

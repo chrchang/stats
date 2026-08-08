@@ -364,7 +364,8 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   default 30 used only for larger-than-2x3 tables.  This says how many times
 #'   as much space should be allocated to paths as to keys: see file
 #'   '`fexact.c`' in the base R stats source code.
-#' @param or the hypothesized odds ratio.  Only used in the 2x2 case.
+#' @param or the hypothesized odds ratio; or numerator if or.denom specified.
+#'   Only used in the 2x2 case.
 #' @param alternative indicates the alternative hypothesis and must be one of
 #'   "`two.sided`", "`greater`" or "`less`".  You can specify just the initial
 #'   letter.  Only used in the 2x2 case.
@@ -377,11 +378,12 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @param B an integer specifying the number of replicates used in the Monte
 #'   Carlo test when `simulate.p.value` is true.
 #' @param midp logical; if TRUE, midp-value is returned in place of p-value.
-#'   Not yet supported for larger-than-2x3 tables or `or` unequal to 1.
+#'   Not yet supported for larger-than-2x3 tables.
 #' @param log.p logical; if TRUE, log.p.value is calculated and returned.
 #'   (p.value is still returned.)  log.p.value usually remains accurate when
 #'   p.value underflows to zero; a warning is printed when that is not the
 #'   case.
+#' @param or.denom optional denominator of hypothesized odds ratio.
 #'
 #' @details If `x` is a matrix, it is taken as a two-dimensional contingency
 #'   table, and hence its entries should be nonnegative integers.  Otherwise,
@@ -479,7 +481,7 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                         control = list(), or = 1, alternative = "two.sided",
                         conf.int = TRUE, conf.level = 0.95,
                         simulate.p.value = FALSE, B = 2000, midp = FALSE,
-                        log.p = FALSE) {
+                        log.p = FALSE, or.denom = 1) {
   ## This closely follows parts of the GPL-2.0-or-later fisher.test.R from R
   ## 4.6.0, since it is designed to be a drop-in replacement.
   ##
@@ -518,16 +520,10 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
 
   nr <- nrow(xmat)
   nc <- ncol(xmat)
-  have.2x2 <- (nr == 2) && (nc == 2)
-  if (have.2x2) {
-    if (!missing(or) && (length(or) > 1L || is.na(or) || or < 0)) {
-      stop("'or' must be a single number between 0 and Inf")
-    }
-  }
   if (!is.boolean(log.p)) {
     stop("'log.p' must be a single boolean value")
   }
-  if (nr + nc > 5 || (have.2x2 && or != 1)) {
+  if (nr + nc > 5) {
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
     }
@@ -575,6 +571,7 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
     DNAME <- paste(DNAME, "and", deparse1(expr.y))
   }
 
+  have.2x2 <- (nr == 2) && (nc == 2)
   if (have.2x2) {
     alternative <- char.expand(alternative,
                                c("two.sided", "less", "greater"))
@@ -582,8 +579,11 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
       stop("alternative must be \"two.sided\", \"less\", or \"greater\"")
     }
     if (!((length(conf.level) == 1L) && (conf.level >= 0.5**23) &&
-          (!(conf.level > 1 - 0.5**23)))) {
+          (!(conf.level > 1 - 1.1920928955078125e-07)))) {
       stop("'conf.level' must be a single number in [2^{-23}, 1 - 2^{-23}]")
+    }
+    if ((!missing(or) || !missing(or.denom)) && (length(or) > 1L || is.na(or) || length(or.denom) > 1L || is.na(or.denom) || sign(or) != sign(or.denom) || abs(or) >= abs(or.denom) * 2.5822498780869086e+120 || abs(or.denom) >= abs(or) * 2.5822498780869086e+120)) {
+      stop("'or'/'or.denom' must be a single number in (2^{-400}, 2^400)")
     }
   }
 
@@ -611,11 +611,18 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
     x22 <- x[2, 2]
     NVAL <- c("odds ratio" = or)
 
-    # obvious todo: support or!=1 here
-    P_OR_LNPVAL <- switch(alternative,
-                          less = phyper_cpp(x11, x11+x21, x12+x22, x11+x12, TRUE, log.p, midp, TRUE),
-                          greater = phyper_cpp(x11-1, x11+x21, x12+x22, x11+x12, FALSE, log.p, midp, TRUE),
-                          two.sided = fisher22_test_pval(x11, x12, x21, x22, midp, log.p))
+    P_OR_LNPVAL <- NULL
+    if (or == 1) {
+      P_OR_LNPVAL <- switch(alternative,
+                            less = phyper_cpp(x11, x11+x21, x12+x22, x11+x12, TRUE, log.p, midp, TRUE),
+                            greater = phyper_cpp(x11-1, x11+x21, x12+x22, x11+x12, FALSE, log.p, midp, TRUE),
+                            two.sided = fisher22_2sided_pval(x11, x12, x21, x22, midp, log.p))
+    } else {
+      P_OR_LNPVAL <- switch(alternative,
+                            less = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, TRUE, log.p, midp),
+                            greater = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, FALSE, log.p, midp),
+                            two.sided = fisher22_2sided_pval_ex(x11, x12, x21, x22, or, midp, log.p, or.denom))
+    }
     ESTIMATE <- c("odds ratio" = odds_ratio_22(x11, x12, x21, x22))
     if (conf.int) {
       CINT <- switch(alternative,
@@ -631,9 +638,9 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
       RVAL <- list(p.value = P_OR_LNPVAL)
     }
     RVAL <- c(RVAL,
-              conf.int = if (conf.int) CINT,
-              estimate = ESTIMATE,
-              null.value = NVAL)
+              list(conf.int = if (conf.int) CINT,
+                   estimate = ESTIMATE,
+                   null.value = NVAL))
   }
 
   structure(c(RVAL,
