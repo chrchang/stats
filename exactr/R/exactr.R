@@ -619,8 +619,8 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                             two.sided = fisher22_2sided_pval(x11, x12, x21, x22, midp, log.p))
     } else {
       P_OR_LNPVAL <- switch(alternative,
-                            less = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, TRUE, log.p, midp),
-                            greater = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, FALSE, log.p, midp),
+                            less = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, TRUE, midp, log.p),
+                            greater = fisher22_1sided_pval_ex(x11, x12, x21, x22, or/or.denom, FALSE, midp, log.p),
                             two.sided = fisher22_2sided_pval_ex(x11, x12, x21, x22, or, midp, log.p, or.denom))
     }
     ESTIMATE <- c("odds ratio" = odds_ratio_22(x11, x12, x21, x22))
