@@ -6,6 +6,7 @@ ISRC = include/binom.cc \
        include/fisher.cc \
        include/hypergeom.cc \
        include/hypergeom_detail.cc \
+       include/nchypergeom_fisher.cc \
        include/plink2_base.cc \
        include/plink2_float.cc \
        include/plink2_highprec.cc \
@@ -21,8 +22,7 @@ CINCLUDE =
 CXXINCLUDE =
 
 CLEAN = *.o \
-        include/*.o \
-        mini-gmp/*.o
+        include/*.o
 
 BASEFLAGS=-ffp-contract=off
 CFLAGS=-O2 -std=gnu99 ${BASEFLAGS} ${CWARN}

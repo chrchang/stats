@@ -31,10 +31,10 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^5, 2^6): errRMS=1.44e-16  scipyErrRMS=1.96e-16
     n in [2^20, 2^21): errRMS=5.4e-16  scipyErrRMS=6e-14
     n in [2^35, 2^36): errRMS=5.83e-16  scipyErrRMS=7.53e-12
-    $ utils/binomtest_benchmark.py --z-score 1  # ~100-200x speedup, better accuracy
-    n=(2^5)-1: base=1.18e-06  scipy=0.000235 sec/iter
-    n=(2^20)-1: base=4.13e-06  scipy=0.000546 sec/iter
-    n=(2^35)-1: base=5.93e-06  scipy=0.000887 sec/iter
+    $ utils/binomtest_benchmark.py --z-score 1  # ~100-250x speedup, better accuracy
+    n=(2^5)-1: base=9.62e-07  scipy=0.000229 sec/iter
+    n=(2^20)-1: base=3.98e-06  scipy=0.000529 sec/iter
+    n=(2^35)-1: base=5.88e-06  scipy=0.000847 sec/iter
 
     $ utils/phyper_accuracy.py --z-score -0.5  # scipy accuracy degrades quickly
     n in [2^5, 2^6): errRMS=0  approxErrRMS=1.72e-16  scipyErrRMS=2.84e-16
@@ -55,12 +55,12 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
 
     $ utils/fisher_exact_22_accuracy.py --z-score -1
     n in [2^5, 2^6): errRMS=9.71e-17  scipyErrRMS=2.39e-16
-    n in [2^20, 2^21): errRMS=3.17e-15  scipyErrRMS=1.85e-10
-    n in [2^35, 2^36): errRMS=6.63e-13
-    $ utils/fisher_exact_22_benchmark.py --z-score -1  # ~75-250x speedup, better accuracy
-    n=(2^5)-1: base=1.07e-06  scipy=0.000258 sec/iter
-    n=(2^20)-1: base=8.34e-06  scipy=0.000667 sec/iter
-    n=(2^35)-1: base=0.000742 sec/iter
+    n in [2^20, 2^21): errRMS=1.33e-15  scipyErrRMS=1.85e-10
+    n in [2^35, 2^36): errRMS=4.52e-13
+    $ utils/fisher_exact_22_benchmark.py --z-score -1  # ~100-600x speedup, better accuracy
+    n=(2^5)-1: base=4.75e-07  scipy=0.000258 sec/iter
+    n=(2^20)-1: base=6.14e-06  scipy=0.000667 sec/iter
+    n=(2^35)-1: base=0.000864 sec/iter
 
     $ utils/odds_ratio_accuracy.py --z-score 1
     n in [2^5, 2^6): estErrRMS=5.25e-16  ciLowErrRMS=7.12e-16  ciHighErrRMS=7.23e-16  scipyEstErrRMS=1.3e-15  scipyCiLowErrRMS=1.25e-14  scipyCiHighErrRMS=1.42e-15
@@ -78,9 +78,9 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^15, 2^16): errRMS=2.9e-16  snphweErrRMS=6.48e-16
     n in [2^20, 2^21): errRMS=6.25e-16  snphweErrRMS=1.6e-15
     $ utils/HWE_benchmark.py --maf 0.05 --z-score 1  # snphwe.snphwe() is accurate, but slow for biobank-scale cases (we're >200x as fast for n~=1m)
-    n=(2^10)-1: base=2.83e-07  snphwe=8.08e-07 sec/iter
-    n=(2^15)-1: base=4.5e-07  snphwe=1.24e-05 sec/iter
-    n=(2^20)-1: base=1.48e-06  snphwe=0.000388 sec/iter
+    n=(2^10)-1: base=2.67e-07  snphwe=6.17e-07 sec/iter
+    n=(2^15)-1: base=4.08e-07  snphwe=1.28e-05 sec/iter
+    n=(2^20)-1: base=1.56e-06  snphwe=0.00038 sec/iter
 
 The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).

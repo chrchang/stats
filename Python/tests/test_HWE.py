@@ -5,6 +5,7 @@ import pytest
 
 # First four test cases are from the R HardyWeinberg package's vignettes.
 # Tests #5-8 are from https://github.com/jeremymcrae/snphwe .
+# Test #9 was discovered via fuzzing.
 # Entries are of the form (hom1, hets, hom2, alternative, midp, p_want).
 r_HWE_cases = [
     (298, 489, 213, "two-sided", True, 0.6330965),
@@ -15,6 +16,7 @@ r_HWE_cases = [
     (20, 1000, 5000, "two-sided", False, 1.26598491e-5),
     (200000, 200000, 200000, "two-sided", False, 0.0),
     (495000, 4990, 10, "two-sided", False, 0.570223198305),
+    (168, 919, 670634, "two-sided", False, 0.0),
     ]
 
 

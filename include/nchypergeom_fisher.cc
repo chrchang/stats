@@ -123,13 +123,13 @@ int64_t ModeFNCHypergeo(int64_t m1x, int64_t m2x, int64_t mx1, double odds) {
       m11 += 1;
       m22 += 1;
     } while (m11 * m22 <= m12 * odds * m21);
-    return m11 - 1;
+    return S_CAST(int64_t, m11) - 1;
   }
   while (1) {
     m12 += 1;
     m21 += 1;
     if (m11 * m22 <= m12 * odds * m21) {
-      return m11;
+      return S_CAST(int64_t, m11);
     }
     m11 -= 1;
     m22 -= 1;
@@ -566,7 +566,7 @@ double P_FNCHypergeo(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t 
       break;
     }
   }
-  const dd_real lnprob_ratio_ddr = nchypergeom_ln_prob_ratio(obs_m11, mode, m1x, m2x, mx1, odds);
+  const dd_real lnprob_ratio_ddr = nchypergeom_ln_prob_ratio(obs_m11, mode, S_CAST(int64_t, m1x), S_CAST(int64_t, m2x), S_CAST(int64_t, mx1), odds);
   m11 = obs_m11;
   m12_odds = (m1x - m11) * odds;
   m21 = mx1 - m11;

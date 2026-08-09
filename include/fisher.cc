@@ -83,33 +83,31 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
   // floating-point precision limit, return
   //   log(tail_sum / (tail_sum + center_sum))
   //
-  // As with HweLnP(), we note that if we're within 172 steps of the mode and
-  // the starting relative-likelihood is normalized to 1, the modal
-  // relative-likelihood can be loosely bounded above by
-  //   ((172^172) / 172!)^4 ~= 5.3e+292
-  // which leaves enough headroom to accumulate the rest of the center-sum and
-  // represent intermediate values without overflowing.
-  if (ddr_geq(ddr_mul2d(obs_m11 + 172, obs_m22 + 172), ddr_mul2d(obs_m12 - 172, obs_m21 - 172))) {
+  // bugfix (8 Aug 2026): previous 172-steps-from-mode check doesn't prevent
+  // overflow for obs_m12 huge, obs_m21 <= 172
+  const double first_inward_mult = S_CAST(double, obs_m12) * S_CAST(double, obs_m21) / (S_CAST(double, obs_m11 + 1) * S_CAST(double, obs_m22 + 1));
+  const double m1x = obs_m11 + obs_m12;
+  const double m2x = obs_m21 + obs_m22;
+  const double mx1 = obs_m11 + obs_m21;
+  const double mxx = m1x + m2x;
+  const double modal_m21 = m2x * mx1 / mxx;
+  if ((first_inward_mult <= 1) || ((m21 - modal_m21) * log(first_inward_mult) < 672)) {
     lik = 1;
     m11 = obs_m11;
     m12 = obs_m12;
     m21 = obs_m21;
     m22 = obs_m22;
     double center_sum = 0.5 * midp;
+    double one_plus_scaled_eps = 1 + k2m52;
     while (1) {
       m11 += 1;
       m22 += 1;
       lik *= (m12 * m21) / (m11 * m22);
       m12 -= 1;
       m21 -= 1;
-      // Number of center contingency tables is maximized with obs_m22 = 0,
-      // modal_m22 = 172, other values large.
-      // Since 1 + 1/2 + ... + 1/172 < 1/173 + ... + 1/53000, we're limited to
-      // ~53000 tables.  Each lik update involves 4 operations which can each
-      // introduce up to 0.5 ULP relative error under the default rounding
-      // mode.
-      if (lik < 1 + 53000 * 2 * k2m52) {
-        if (lik <= 1 - 53000 * 2 * k2m52) {
+      one_plus_scaled_eps += 2 * k2m52;
+      if (lik < one_plus_scaled_eps) {
+        if (lik <= 2 - one_plus_scaled_eps) {
           tail_sum += lik;
           break;
         }
@@ -126,6 +124,7 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
           }
           break;
         }
+        one_plus_scaled_eps = 1 + 3 * k2m52;
       }
       center_sum += lik;
     }
@@ -180,10 +179,6 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
   // the middle of the interval.
 
   const double m12_minus_m21 = obs_m12 - obs_m21;
-  const double m1x = obs_m11 + obs_m12;
-  const double m2x = obs_m21 + obs_m22;
-  const double mx1 = obs_m11 + obs_m21;
-  const double mxx = m1x + m2x;
   {
     // x=modal_m21 satisfies
     //    (m2x - x) * (mx1 - x) = x * (x + m12_minus_m21)
@@ -191,7 +186,6 @@ double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int6
     // -> x^2 + x*(-m2x - mx1) + m2x*mx1 = x^2 + x*m12_minus_m21
     // -> m2x*mx1 = x*(m12_minus_m21 + m2x + mx1)
     // -> x = m2x*mx1 / mxx
-    const double modal_m21 = m2x * mx1 / mxx;
     m21 = 2 * modal_m21 - (m21 + obs_m21) * 0.5;
     // Round down (to guarantee we've actually moved to the other side of the
     // mode) and clamp.
@@ -406,7 +400,7 @@ double Fisher22TwoSidedPEx(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, in
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
   const double mx1 = obs_m11 + obs_m21;
-  const int64_t modal_m11 = ModeFNCHypergeo(m1x, m2x, mx1, odds);
+  const int64_t modal_m11 = ModeFNCHypergeo(S_CAST(int64_t, m1x), S_CAST(int64_t, m2x), S_CAST(int64_t, mx1), odds);
   // If our starting contingency table is close enough to the mode to plausibly
   // contribute to center_sum (instead of being lost to the precision limit),
   // just jump back to the starting table and start summing inwards.
@@ -429,7 +423,7 @@ double Fisher22TwoSidedPEx(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, in
     m21 = obs_m21d;
     m22 = obs_m22;
     double center_sum = 0.5 * midp;
-    double one_plus_scaled_eps = 1 + 4 * k2m52;
+    double one_plus_scaled_eps = 1 + k2m52;
     while (1) {
       m11 += 1;
       m22 += 1;
@@ -751,7 +745,6 @@ double Fisher22OddsRatioQuantileMatch(int64_t obs_m11, int64_t obs_m12, int64_t 
 // assumptions.)
 static const double kSwitchThresh = k2p800 * k2p50 * (1LL << 40);
 static const double kLnSwitchThresh = 890.0 * kLn2;
-static const double kJumpThresh = 314.0; // chosen to guarantee base_lik < kSwitchThresh in non-jumping case
 // static const double kSwitchThresh = k2p100 * k2p50;
 // static const double kLnSwitchThresh = 150.0 * kLn2;
 
@@ -801,7 +794,8 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
         break;
       }
     }
-    if (delta < kJumpThresh) {
+    const double first_inward_mult = m11 * m22 / ((m12 + 1) * (m21 + 1));
+    if ((first_inward_mult <= 1) || (delta * log(first_inward_mult) < 612)) {
       // Jump back to starting table, and iterate inward until we find the
       // start of the other tail.
       lik = 1;
@@ -975,7 +969,8 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
       break;
     }
   }
-  if (delta > -kJumpThresh) {
+  const double first_inward_mult = S_CAST(double, S_CAST(int64_t, obs_m12) * obs_m21) / S_CAST(double, (obs_m11 + 1LL) * (obs_m22 + 1LL));
+  if ((first_inward_mult <= 1) || (delta * log(first_inward_mult) > -612)) {
     lik = 1;
     m11 = obs_m11;
     m12 = obs_m12;

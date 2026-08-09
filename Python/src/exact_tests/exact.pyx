@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.8.8"
+__version__ = "0.8.9"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:

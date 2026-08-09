@@ -1037,22 +1037,28 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   // to tailenter_succ and sum outward.
   const double tailenter_lik = lik;
   const double tailenter_succ = succ;
-  while (lik <= one_minus_scaled_eps) {
-    tail_sum += lik;
-    fail += 1;
-    lik *= succ / (succ_odds_ratio * fail);
-    succ -= 1;
-    one_minus_scaled_eps -= 2 * k2m52;
-  }
-  if (lik < 2 - one_minus_scaled_eps) {
+  while (1) {
+    while (lik <= one_minus_scaled_eps) {
+    BinomTwoSidedP_rtail_instep:
+      tail_sum += lik;
+      fail += 1;
+      lik *= succ / (succ_odds_ratio * fail);
+      succ -= 1;
+      one_minus_scaled_eps -= 2 * k2m52;
+    }
+    if (lik >= 2 - one_minus_scaled_eps) {
+      break;
+    }
     materialize_oddsratio_p_q_tdr(succ_flipped, &p_tdr, &q_tdr, &succ_odds_ratio_tdr);
     const intptr_t cmp_result = BinomCompare(obs_succ, obs_tot, succ_odds_ratio_tdr, S_CAST(int64_t, succ), &starting_lnprobv_tdr, &ln_odds_ratio_tdr, &lik);
-    if (cmp_result <= 0) {
-      tail_sum += lik;
-      if (midp && (cmp_result == 0)) {
-        tail_sum -= 0.5;
+    if (cmp_result >= 0) {
+      if (cmp_result == 0) {
+        tail_sum += 1 - 0.5 * midp;
       }
+      break;
     }
+    one_minus_scaled_eps = 1 - 3 * k2m52;
+    goto BinomTwoSidedP_rtail_instep;
   }
   // Sum away from center, until sums stop changing.
   lik = tailenter_lik;

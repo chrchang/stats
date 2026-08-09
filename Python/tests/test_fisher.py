@@ -71,6 +71,7 @@ def test_fisher():
     assert logp == pytest.approx(math.log(1/70), rel=1e-13, abs=0), "logp"
     assert exact_tests.fisher_exact([[1e9, 2e9], [3e9, 5.999e9]], alternative="less") == pytest.approx(9.686381892010733e-05, rel=1e-10, abs=0)
     assert exact_tests.fisher_exact([[2e12, 3e12], [4e12, 5.9999e12]]) == pytest.approx(2.95770177417893e-50, rel=1e-8, abs=0)
+    assert exact_tests.fisher_exact([[1e3, 1e8], [172, 1e3]], logp=True) == pytest.approx(-1480.7861318079895, rel=1e-10, abs=0)
     # todo: test exception-throwing cases
 
 

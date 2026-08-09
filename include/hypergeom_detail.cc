@@ -85,7 +85,7 @@ double HypergeomMassJustK(int64_t m11, int64_t mxx, int64_t m1x, int64_t mx1, co
     ddrs[5] = ddr_negate(ddr_lfact(m12));
     ddrs[6] = ddr_negate(ddr_lfact(m21));
     ddrs[7] = ddr_negate(ddr_lfact(m22));
-    const dd_real lnresult_ddr = ddr_sub(ddr_sort_and_add(8, ddrs), ddr_lfact(mxx));
+    const dd_real lnresult_ddr = ddr_sub(ddr_sort_and_add(8, ddrs), ddr_make_td(lfact_mxx_tdr));
     return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
   }
   td_real tdrs[8];
@@ -97,7 +97,7 @@ double HypergeomMassJustK(int64_t m11, int64_t mxx, int64_t m1x, int64_t mx1, co
   tdrs[5] = tdr_negate(tdr_lfact(m12));
   tdrs[6] = tdr_negate(tdr_lfact(m21));
   tdrs[7] = tdr_negate(tdr_lfact(m22));
-  const td_real lnresult_tdr = tdr_sub(tdr_sort_and_add(8, tdrs), tdr_lfact(mxx));
+  const td_real lnresult_tdr = tdr_sub(tdr_sort_and_add(8, tdrs), lfact_mxx_tdr);
   return logp? lnresult_tdr.x[0] : tdr_exp(lnresult_tdr).x[0];
 }
 
