@@ -17,7 +17,7 @@
 #' @param log logical; if TRUE, probabilities are returned as logarithms.
 #' @return pmf(x).
 #' @export
-dbinom <- function(x, size, prob = 0.5, log = FALSE) {
+dbinom <- function(x, size, prob, log = FALSE) {
     .Call(`_exactr_dbinom`, x, size, prob, log)
 }
 

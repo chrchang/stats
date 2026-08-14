@@ -13,13 +13,18 @@
 #include <Rcpp.h>
 using namespace Rcpp;
 
+static inline bool nonint(double x, double roundx) {
+  // R_nonint()
+  return (fabs(x - roundx) > 1e-9 * MAXV(1, fabs(x)));
+}
+
 static inline bool nonint_warn(double x, double roundx) {
-  // Similar to R_D_nonint_check().
-  if (fabs(x - roundx) <= 1e-9 * MAXV(1, fabs(x))) {
-    return false;
+  // R_D_nonint_check()
+  if (nonint(x, roundx)) {
+    warning("non-integer x = %.17g", x);
+    return true;
   }
-  warning("non-integer x = %.17g", x);
-  return true;
+  return false;
 }
 
 plink2::td_real make_prob_tdr(double prob, double prob_denom) {
@@ -50,64 +55,87 @@ plink2::td_real make_prob_tdr(double prob, double prob_denom) {
 //' @return pmf(x).
 //' @export
 // [[Rcpp::export]]
-NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log = false) {
+NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bool log = false) {
+  // Imitate SETUP_Math3 macro in R src/library/stats/src/distn.c .
   const uint32_t x_len = x.size();
-  NumericVector results = NumericVector(x_len);
-  if (size == plink2::INFINITY_D) {
-    for (uint32_t idx = 0; idx < x_len; ++idx) {
-      const double k_float = x[idx];
-      if (isnan(k_float)) {
-        results[idx] = k_float;
-        continue;
-      }
-      if ((prob == 0.0) && (round(k_float) == 0)) {
-        results[idx] = log? 0.0 : 1.0;
-        continue;
-      }
-      results[idx] = log? (0.0 / 0.0) : 0.0;
+  const uint32_t size_len = size.size();
+  const uint32_t prob_len = prob.size();
+  if ((x_len == 0) || (size_len == 0) || (prob_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (x_len == 0) {
+      results.attr("dim") = x.attr("dim");
     }
-  } else {
-    const double size_round = round(size);
-    // This excludes a bit of stats::dbinom()'s domain.
-    if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
-      stop("size is not in {[0, 2^52 - 1] U Inf}");
-    }
-    const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
-    const int64_t n = static_cast<int64_t>(size_round);
-    uint32_t p_is_half;
-    plink2::td_real lfact_n_tdr;
-    plink2::td_real lnp_tdr;
-    plink2::td_real lnq_tdr;
-    plink2::BinomMassMultiKPrecomp(n, prob_tdr, &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr);
-    // possible todo: use parallel-for from RcppParallel for large x_len.
-    // possible todo: when len(x) > max(x) - min(x) + 1 (so there is at least
-    // one repeat value), memoize.  (how often does this come up?)
-    for (uint32_t idx = 0; idx < x_len; ++idx) {
-      const double k_float = x[idx];
-      if (isnan(k_float)) {
-        results[idx] = k_float;
-        continue;
-      }
-      const double k_round = round(k_float);
-      if ((k_round < 0) || (k_round > size_round) || nonint_warn(k_float, k_round)) {
-        results[idx] = log? (0.0 / 0.0) : 0.0;
-        continue;
-      }
-      const int64_t k = static_cast<int64_t>(k_round);
-      if ((prob == 0.0) || (prob == 1.0)) {
-        if (((prob == 0.0) && (k == 0)) || ((k == n) && (prob == 1.0))) {
-          results[idx] = log? 0.0 : 1.0;
-        } else {
-          results[idx] = log? (0.0 / 0.0) : 0.0;
-        }
-        continue;
-      }
-      results[idx] = plink2::BinomMassJustK(k, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, log);
-    }
+    return results;
   }
-  results.attr("dim") = x.attr("dim");
+  const uint32_t results_len = std::max({x_len, size_len, prob_len});
+  NumericVector results = NumericVector(results_len);
+  uint32_t nans_produced = 0;
+  // possible todo: use parallel-for from RcppParallel for large results_len.
+
+  // Imitate mod_iterate3 macro in R src/library/stats/src/distn.c .
+  uint32_t x_idx = 0;
+  uint32_t size_idx = 0;
+  uint32_t prob_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double k_float = x[x_idx++];
+    const double n_float = size[size_idx++];
+    const double p = prob[prob_idx++];
+    x_idx = (x_idx == x_len)? 0 : x_idx;
+    size_idx = (size_idx == size_len)? 0 : size_idx;
+    prob_idx = (prob_idx == prob_len)? 0 : prob_idx;
+    if (traits::is_nan<REALSXP>(k_float) || traits::is_nan<REALSXP>(n_float) || traits::is_nan<REALSXP>(p)) {
+      if (NumericVector::is_na(k_float) || NumericVector::is_na(n_float) || NumericVector::is_na(p)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
+      continue;
+    }
+    const double n_round = nearbyint(n_float);
+    if ((p < 0) || (p > 1) || (n_float < 0) || nonint(n_float, n_round)) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    const double k_round = nearbyint(k_float);
+    if (nonint_warn(k_float, k_round) || (k_float < 0) || (k_float == R_PosInf)) {
+      results[ridx] = log? R_NegInf : 0.0;
+      continue;
+    }
+    if ((p == 0.0) || (p == 1.0)) {
+      if (((p == 0.0) && (k_round == 0)) || ((k_round == n_round) && (p == 1.0))) {
+        results[ridx] = log? 0.0 : 1.0;
+      } else {
+        results[ridx] = log? R_NegInf : 0.0;
+      }
+      continue;
+    }
+    if (n_round >= (1LL << 52)) {
+      if (n_round != R_PosInf) {
+        // straightforward to implement approximation if necessary
+        stop("size values in [2^52, Inf) not currently supported");
+      }
+      results[ridx] = log? R_NegInf : 0.0;
+      continue;
+    }
+    results[ridx] = plink2::BinomMass(static_cast<int64_t>(k_round), static_cast<int64_t>(n_round), plink2::tdr_make1(p), log);
+  }
+  // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  if (results_len == x_len) {
+    results.attr("dim") = x.attr("dim");
+  } else if (results_len == size_len) {
+    results.attr("dim") = size.attr("dim");
+  } else {
+    results.attr("dim") = prob.attr("dim");
+  }
   return results;
 }
+
+// TODO: fix vectorization/recycling in remaining functions.
 
 //' @title Binomial distribution cmf
 //' @description Backend for pbinom(), separated since dots aren't permitted in

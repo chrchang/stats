@@ -4,7 +4,7 @@
 \alias{dbinom}
 \title{Binomial distribution pmf}
 \usage{
-dbinom(x, size, prob = 0.5, log = FALSE)
+dbinom(x, size, prob, log = FALSE)
 }
 \arguments{
 \item{x}{vector of success counts.}

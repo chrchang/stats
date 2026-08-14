@@ -12,5 +12,17 @@ test_that("dbinom works", {
       }
     }
   }
-  ## (more tests coming)
+
+  x0 <- -2 * 10^-c(22,10,7,5)
+  suppressWarnings(expect_warning(fx0 <- dbinom(x0, size = 3, prob = 0.1)))
+  expect_all_equal(fx0, 0)
+
+  expect_no_error(lapply(sample(10000, size=1000), function(M) {
+    ## Range reduced for now due to 2^52 limit.
+    ## n <- (M/100)*10^(2:20)
+    n <- (M/100)*10^(2:11)
+    if (anyNA(P <- dbinom(1,n,0.5))) {
+      stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
+    }
+  }))
 })

@@ -11,14 +11,14 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // dbinom
-NumericVector dbinom(NumericVector x, double size, double prob, bool log);
+NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bool log);
 RcppExport SEXP _exactr_dbinom(SEXP xSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP logSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
-    Rcpp::traits::input_parameter< double >::type size(sizeSEXP);
-    Rcpp::traits::input_parameter< double >::type prob(probSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type size(sizeSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type prob(probSEXP);
     Rcpp::traits::input_parameter< bool >::type log(logSEXP);
     rcpp_result_gen = Rcpp::wrap(dbinom(x, size, prob, log));
     return rcpp_result_gen;
