@@ -51,34 +51,59 @@ plink2::td_real make_prob_tdr(double prob, double prob_denom) {
 //' @export
 // [[Rcpp::export]]
 NumericVector dbinom(NumericVector x, double size, double prob = 0.5, bool log = false) {
-  const double size_round = round(size);
-  if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
-    stop("size is not in [0, 2^52 - 1]");
-  }
-  const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
-  const int64_t n = static_cast<int64_t>(size_round);
-  uint32_t p_is_half;
-  plink2::td_real lfact_n_tdr;
-  plink2::td_real lnp_tdr;
-  plink2::td_real lnq_tdr;
-  plink2::BinomMassMultiKPrecomp(n, prob_tdr, &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr);
-  // possible todo: use parallel-for from RcppParallel for large x_len.
-  // possible todo: when len(x) > max(x) - min(x) + 1 (so there is at least one
-  // repeat value), memoize.  (how often does this come up?)
   const uint32_t x_len = x.size();
   NumericVector results = NumericVector(x_len);
-  for (uint32_t idx = 0; idx < x_len; ++idx) {
-    const double k_float = x[idx];
-    if (isnan(k_float)) {
-      results[idx] = k_float;
-      continue;
-    }
-    const double k_round = round(k_float);
-    if ((k_round < 0) || (k_round > size_round) || nonint_warn(k_float, k_round)) {
+  if (size == plink2::INFINITY_D) {
+    for (uint32_t idx = 0; idx < x_len; ++idx) {
+      const double k_float = x[idx];
+      if (isnan(k_float)) {
+        results[idx] = k_float;
+        continue;
+      }
+      if ((prob == 0.0) && (round(k_float) == 0)) {
+        results[idx] = log? 0.0 : 1.0;
+        continue;
+      }
       results[idx] = log? (0.0 / 0.0) : 0.0;
-      continue;
     }
-    results[idx] = plink2::BinomMassJustK(static_cast<int64_t>(k_round), n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, log);
+  } else {
+    const double size_round = round(size);
+    // This excludes a bit of stats::dbinom()'s domain.
+    if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
+      stop("size is not in {[0, 2^52 - 1] U Inf}");
+    }
+    const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
+    const int64_t n = static_cast<int64_t>(size_round);
+    uint32_t p_is_half;
+    plink2::td_real lfact_n_tdr;
+    plink2::td_real lnp_tdr;
+    plink2::td_real lnq_tdr;
+    plink2::BinomMassMultiKPrecomp(n, prob_tdr, &p_is_half, &lfact_n_tdr, &lnp_tdr, &lnq_tdr);
+    // possible todo: use parallel-for from RcppParallel for large x_len.
+    // possible todo: when len(x) > max(x) - min(x) + 1 (so there is at least
+    // one repeat value), memoize.  (how often does this come up?)
+    for (uint32_t idx = 0; idx < x_len; ++idx) {
+      const double k_float = x[idx];
+      if (isnan(k_float)) {
+        results[idx] = k_float;
+        continue;
+      }
+      const double k_round = round(k_float);
+      if ((k_round < 0) || (k_round > size_round) || nonint_warn(k_float, k_round)) {
+        results[idx] = log? (0.0 / 0.0) : 0.0;
+        continue;
+      }
+      const int64_t k = static_cast<int64_t>(k_round);
+      if ((prob == 0.0) || (prob == 1.0)) {
+        if (((prob == 0.0) && (k == 0)) || ((k == n) && (prob == 1.0))) {
+          results[idx] = log? 0.0 : 1.0;
+        } else {
+          results[idx] = log? (0.0 / 0.0) : 0.0;
+        }
+        continue;
+      }
+      results[idx] = plink2::BinomMassJustK(k, n, p_is_half, lfact_n_tdr, lnp_tdr, lnq_tdr, log);
+    }
   }
   results.attr("dim") = x.attr("dim");
   return results;
