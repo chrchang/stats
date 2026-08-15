@@ -29,5 +29,5 @@ Probability point function for hypergeometric distribution with parameters
 }
 \details{
 Starts with CLT-based initial guess, follows with Newton iteration
-to find a close-enough pmf value before evaluating cmf.
+to find a close-enough pmf value before evaluating cdf.
 }

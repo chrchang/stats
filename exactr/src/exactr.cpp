@@ -360,8 +360,6 @@ NumericVector qbinom_cpp(NumericVector p, NumericVector size, NumericVector prob
   return results;
 }
 
-// TODO: fix vectorization/recycling in remaining functions.
-
 //' @title Exact binomial two-sided test p-value
 //' @description Implements main p-value calculation for 2-sided binom.test().
 //' @noRd
@@ -397,134 +395,222 @@ double binom_2sided_pval(double x_round, double size_round, double prob, bool mi
 //' @return pmf(x).
 //' @export
 // [[Rcpp::export]]
-NumericVector dhyper(NumericVector x, double m, double n, double k, bool log = false) {
-  const double m_round = round(m);
-  const double n_round = round(n);
-  const double k_round = round(k);
-  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
-    stop("m is not in [0, 2^52 - 1]");
-  }
-  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
-    stop("n is not in [0, 2^52 - 1]");
-  }
-  const int64_t mi = static_cast<int64_t>(m_round);
-  const int64_t ni = static_cast<int64_t>(n_round);
-  const int64_t total = mi + ni;
-  if (total >= (1LL << 52)) {
-    stop("m+n is not in [0, 2^52 - 1]");
-  }
-
-  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
-    stop("k is not in [0, m+n]");
-  }
-  const int64_t ki = static_cast<int64_t>(k_round);
-  if (ki > total) {
-    stop("k is not in [0, m+n]");
-  }
-
-  const double x_min = MAXV(0, k_round - n_round);
-  const double x_max = MINV(m_round, k_round);
-  plink2::td_real lfact_m1x_tdr;
-  plink2::td_real lfact_m2x_tdr;
-  plink2::td_real lfact_mx1_tdr;
-  plink2::td_real lfact_mx2_tdr;
-  plink2::td_real lfact_mxx_tdr;
-  plink2::HypergeomMassMultiKPrecomp(total, ki, mi, &lfact_m1x_tdr, &lfact_m2x_tdr, &lfact_mx1_tdr, &lfact_mx2_tdr, &lfact_mxx_tdr);
+NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericVector k, bool log = false) {
+  // Imitate SETUP_Math4 macro in R src/library/stats/src/distn.c .
   const uint32_t x_len = x.size();
-  NumericVector results = NumericVector(x_len);
-  for (uint32_t idx = 0; idx < x_len; ++idx) {
-    const double x_float = x[idx];
-    if (isnan(x_float)) {
-      results[idx] = x_float;
-      continue;
+  const uint32_t m_len = m.size();
+  const uint32_t n_len = n.size();
+  const uint32_t k_len = k.size();
+  if ((x_len == 0) || (m_len == 0) || (n_len == 0) || (k_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (x_len == 0) {
+      results.attr("dim") = x.attr("dim");
     }
-    const double x_round = round(x_float);
-    if ((x_round < x_min) || (!(x_round <= x_max)) || nonint_warn(x_float, x_round)) {
-      results[idx] = log? (0.0 / 0.0) : 0.0;
-      continue;
-    }
-    results[idx] = plink2::HypergeomMassJustK(static_cast<int64_t>(x_round), total, ki, mi, lfact_m1x_tdr, lfact_m2x_tdr, lfact_mx1_tdr, lfact_mx2_tdr, lfact_mxx_tdr, log);
+    return results;
   }
-  results.attr("dim") = x.attr("dim");
+  const uint32_t results_len = std::max({x_len, m_len, n_len, k_len});
+  NumericVector results = NumericVector(results_len);
+  uint32_t nans_produced = 0;
+
+  // Imitate mod_iterate4 macro in R src/library/stats/src/distn.c .
+  uint32_t x_idx = 0;
+  uint32_t m_idx = 0;
+  uint32_t n_idx = 0;
+  uint32_t k_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double a_float = x[x_idx++];
+    const double ac_float = m[m_idx++];
+    const double bd_float = n[n_idx++];
+    const double ab_float = k[k_idx++];
+    x_idx = (x_idx == x_len)? 0 : x_idx;
+    m_idx = (m_idx == m_len)? 0 : m_idx;
+    n_idx = (n_idx == n_len)? 0 : n_idx;
+    k_idx = (k_idx == k_len)? 0 : k_idx;
+    // if_NA_Math4_set()
+    if (traits::is_nan<REALSXP>(a_float) || traits::is_nan<REALSXP>(ac_float) || traits::is_nan<REALSXP>(bd_float) || traits::is_nan<REALSXP>(ab_float)) {
+      if (NumericVector::is_na(a_float) || NumericVector::is_na(ac_float) || NumericVector::is_na(bd_float) || NumericVector::is_na(ab_float)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
+      continue;
+    }
+
+    // src/nmath/dhyper.c
+    const double ac_round = nearbyint(ac_float);
+    const double bd_round = nearbyint(bd_float);
+    const double ab_round = nearbyint(ab_float);
+    if ((ac_float < 0) || nonint(ac_float, ac_round) || (bd_float < 0) || nonint(bd_float, bd_round) || (ab_float < 0) || nonint(ab_float, ab_round) || (ab_float > ac_float + bd_float)) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    if (a_float < 0) {
+      results[ridx] = log? R_NegInf : 0.0;
+      continue;
+    }
+    const double a_round = nearbyint(a_float);
+    if (nonint_warn(a_float, a_round)) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    if ((ab_round < a_round) || (ac_round < a_round) || (ab_round - a_round > bd_round)) {
+      results[ridx] = log? R_NegInf : 0.0;
+      continue;
+    }
+    if (ab_round == 0) {
+      if (a_round == 0) {
+        results[ridx] = log? 0.0 : 1.0;
+      } else {
+        results[ridx] = log? R_NegInf : 0.0;
+      }
+      continue;
+    }
+
+    if (ac_round + bd_round >= (1LL << 52)) {
+      // stats::dhyper() handles infinities in a fiddly manner which isn't
+      // covered by tests, so I won't try to replicate that for now.
+      // As with dbinom(), if we need to handle larger finite cases I'd prefer
+      // to delegate those to Rmpfr.
+      stop("m+n values >= 2^52 not currently supported");
+    }
+
+    const int64_t a = static_cast<int64_t>(a_round);
+    const int64_t b = static_cast<int64_t>(ab_round) - a;
+    const int64_t c = static_cast<int64_t>(ac_round) - a;
+    const int64_t d = static_cast<int64_t>(bd_round) - b;
+    results[ridx] = plink2::HypergeomMass(a, b, c, d, log);
+  }
+
+  // Imitate FINISH_Math4 macro in R src/library/stats/src/distn.c .
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  if (results_len == x_len) {
+    results.attr("dim") = x.attr("dim");
+  } else if (results_len == m_len) {
+    results.attr("dim") = m.attr("dim");
+  } else if (results_len == n_len) {
+    results.attr("dim") = n.attr("dim");
+  } else {
+    results.attr("dim") = k.attr("dim");
+  }
   return results;
 }
 
-//' @title Hypergeometric distribution cmf
+//' @title Hypergeometric distribution cdf
 //' @description Backend for phyper(), separated since dots aren't permitted in
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool midp, bool approx) {
-  const double m_round = round(m);
-  const double n_round = round(n);
-  const double k_round = round(k);
-  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
-    stop("m is not in [0, 2^52 - 1]");
-  }
-  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
-    stop("n is not in [0, 2^52 - 1]");
-  }
-  const int64_t ac = static_cast<int64_t>(m_round);
-  const int64_t bd = static_cast<int64_t>(n_round);
-  const int64_t total = ac + bd;
-  if (total >= (1LL << 52)) {
-    stop("m+n is not in [0, 2^52 - 1]");
-  }
-
-  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
-    stop("k is not in [0, m+n]");
-  }
-  const int64_t ab = static_cast<int64_t>(k_round);
-  if (ab > total) {
-    stop("k is not in [0, m+n]");
-  }
-
-  const double a_min = MAXV(0, k_round - n_round);
-  const double a_max = MINV(m_round, k_round);
-
+NumericVector phyper_cpp(NumericVector q, NumericVector m, NumericVector n, NumericVector k, bool lower_tail, bool log_p, bool midp, bool approx) {
+  // Imitate SETUP_Math4 macro in R src/library/stats/src/distn.c .
   const uint32_t q_len = q.size();
-  NumericVector results = NumericVector(q_len);
-  for (uint32_t idx = 0; idx < q_len; ++idx) {
-    const double a_float = q[idx];
-    if (isnan(a_float)) {
-      results[idx] = a_float;
+  const uint32_t m_len = m.size();
+  const uint32_t n_len = n.size();
+  const uint32_t k_len = k.size();
+  if ((q_len == 0) || (m_len == 0) || (n_len == 0) || (k_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (q_len == 0) {
+      results.attr("dim") = q.attr("dim");
+    }
+    return results;
+  }
+  const uint32_t results_len = std::max({q_len, m_len, n_len, k_len});
+  NumericVector results = NumericVector(results_len);
+  uint32_t nans_produced = 0;
+
+  // Imitate mod_iterate4 macro in R src/library/stats/src/distn.c .
+  uint32_t q_idx = 0;
+  uint32_t m_idx = 0;
+  uint32_t n_idx = 0;
+  uint32_t k_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double a_float = q[q_idx++];
+    const double ac_float = m[m_idx++];
+    const double bd_float = n[n_idx++];
+    const double ab_float = k[k_idx++];
+    q_idx = (q_idx == q_len)? 0 : q_idx;
+    m_idx = (m_idx == m_len)? 0 : m_idx;
+    n_idx = (n_idx == n_len)? 0 : n_idx;
+    k_idx = (k_idx == k_len)? 0 : k_idx;
+    // if_NA_Math4_set()
+    if (traits::is_nan<REALSXP>(a_float) || traits::is_nan<REALSXP>(ac_float) || traits::is_nan<REALSXP>(bd_float) || traits::is_nan<REALSXP>(ab_float)) {
+      if (NumericVector::is_na(a_float) || NumericVector::is_na(ac_float) || NumericVector::is_na(bd_float) || NumericVector::is_na(ab_float)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
       continue;
     }
-    // Imitate R phyper().
+
+    // src/nmath/phyper.c boundary checks
+    const double ac_round = nearbyint(ac_float);
+    const double bd_round = nearbyint(bd_float);
+    const double ab_round = nearbyint(ab_float);
+    const double total = ac_round + bd_round;
+    if ((ac_round < 0) || (bd_round < 0) || (total == R_PosInf) || (ab_round < 0) || (ab_round > total)) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    if (total >= (1LL << 52)) {
+      stop("m+n values in [2^52, Inf) not currently supported");
+    }
+    const double a_min = std::max(0.0, ab_round - bd_round);
+    const double a_max = std::min(ab_round, ac_round);
     const double a_floor = floor(a_float + 1e-7);
-    double result;
     if ((a_floor < a_min) || (a_floor > a_max)) {
       if ((a_floor < a_min) == lower_tail) {
-        result = log_p? (0.0 / 0.0) : 0.0;
+        results[ridx] = log_p? R_NegInf : 0.0;
       } else {
-        result = log_p? 0.0 : 1.0;
+        results[ridx] = log_p? 0.0 : 1.0;
       }
-    } else {
-      int64_t a = static_cast<int64_t>(a_floor);
-      int64_t b = ab - a;
-      int64_t c = ac - a;
-      int64_t d = bd - b;
-      if (!lower_tail) {
-        plink2::swap_i64(&a, &b);
-        plink2::swap_i64(&c, &d);
-        a -= 1;
-        b += 1;
-        c += 1;
-        d -= 1;
-      }
-      if ((a < 0) || (d < 0)) {
-        result = log_p? (0.0 / 0.0) : 0.0;
-      } else if (approx) {
-        result = plink2::PhyperApprox(a, b, c, d, 0, midp, log_p);
-      } else {
-        result = plink2::Phyper(a, b, c, d, log_p);
-      }
+      continue;
     }
-    results[idx] = result;
+    int64_t a = static_cast<int64_t>(a_floor);
+    int64_t b = static_cast<int64_t>(ab_round) - a;
+    int64_t c = static_cast<int64_t>(ac_round) - a;
+    int64_t d = static_cast<int64_t>(bd_round) - b;
+    if (!lower_tail) {
+      plink2::swap_i64(&a, &b);
+      plink2::swap_i64(&c, &d);
+      a -= 1;
+      b += 1;
+      c += 1;
+      d -= 1;
+    }
+    double result;
+    if ((a < 0) || (d < 0)) {
+      result = log_p? R_NegInf : 0.0;
+    } else if (approx) {
+      result = plink2::PhyperApprox(a, b, c, d, 0, midp, log_p);
+    } else {
+      result = plink2::Phyper(a, b, c, d, log_p);
+    }
+    results[ridx] = result;
   }
-  results.attr("dim") = q.attr("dim");
+
+  // Imitate FINISH_Math4 macro in R src/library/stats/src/distn.c .
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  if (results_len == q_len) {
+    results.attr("dim") = q.attr("dim");
+  } else if (results_len == m_len) {
+    results.attr("dim") = m.attr("dim");
+  } else if (results_len == n_len) {
+    results.attr("dim") = n.attr("dim");
+  } else {
+    results.attr("dim") = k.attr("dim");
+  }
   return results;
 }
+
+// TODO: fix vectorization/recycling in remaining functions.
 
 //' @title Hypergeometric distribution ppf
 //' @description Backend for qbinom(), separated since dots aren't permitted in

@@ -28,7 +28,7 @@ is.boolean <- function(x) {
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @return cmf(q).
+#' @return cdf(q).
 #' @export
 pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
@@ -66,7 +66,7 @@ pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE
 #' @param log.p logical; if TRUE, probabilities p are given as log(p).
 #'
 #' @details Starts with CLT-based initial guess, follows with Newton iteration
-#' to find a close-enough pmf value before evaluating cmf.
+#' to find a close-enough pmf value before evaluating cdf.
 #'
 #' @return ppf(p).
 #' @export
@@ -258,10 +258,10 @@ binom.test <- function(x, n, p=0.5,
   }
 }
 
-#' Hypergeometric distribution cmf
+#' Hypergeometric distribution cdf
 #'
-#' Cumulative mass function for hypergeometric distribution with parameters
-#' `m`, `n`, and `k`.
+#' Cumulative distribution function for hypergeometric distribution with
+#' parameters `m`, `n`, and `k`.
 #'
 #' @param q vector which can be interpreted as numbers of white balls drawn
 #'   without replacement from an urn which contains both black and white balls.
@@ -281,20 +281,20 @@ binom.test <- function(x, n, p=0.5,
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @return cmf(q).
+#' @return cdf(q).
 #' @export
 phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
     stop("'q' must be a numeric vector")
   }
-  if (!is.numeric(m) || length(m) != 1) {
-    stop("'m' must be a single numeric value")
+  if (!is.numeric(m)) {
+    stop("'m' must be a numeric vector")
   }
-  if (!is.numeric(n) || length(n) != 1) {
-    stop("'n' must be a single numeric value")
+  if (!is.numeric(n)) {
+    stop("'n' must be a numeric vector")
   }
-  if (!is.numeric(k) || length(k) != 1) {
-    stop("'k' must be a single numeric value")
+  if (!is.numeric(k)) {
+    stop("'k' must be a numeric vector")
   }
   if (!is.boolean(lower.tail)) {
     stop("'lower.tail' must be a single boolean value")
@@ -323,7 +323,7 @@ phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
 #' @param log.p logical; if TRUE, probabilities p are given as log(p).
 #'
 #' @details Starts with CLT-based initial guess, follows with Newton iteration
-#' to find a close-enough pmf value before evaluating cmf.
+#' to find a close-enough pmf value before evaluating cdf.
 #'
 #' @return ppf(p).
 #' @export

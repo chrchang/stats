@@ -23,7 +23,7 @@ otherwise use a faster algorithm (which is still more accurate than R
 4.6.1 pbinom() and scipy 1.18 stats.binom.cdf()).}
 }
 \value{
-cmf(q).
+cdf(q).
 }
 \description{
 Cumulative distribution function for binomial distribution with parameters

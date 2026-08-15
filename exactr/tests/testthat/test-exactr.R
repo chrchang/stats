@@ -144,3 +144,39 @@ test_that("binom.test works", {
     binom.test(c(800,10))
   })
 })
+
+test_that("dhyper works", {
+  ## Based on dhyper() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
+  ## tests/print-tests.{R,Rout.save} .
+  expect_no_error(lapply(sample(10000, size=1000), function(M) {
+    ## Domain reduced for now due to 2^52 limit.
+    # n <- (M/100)*10^(2:20)
+    n <- (M/100)*10^(2:11)
+    if (anyNA(P <- dhyper(n+1,n+5,n+5,n))) {
+      # stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
+      stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
+    }
+  }))
+  # todo: more tests
+})
+
+test_that("phyper works", {
+  ## Based on phyper() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
+  ## tests/print-tests.{R,Rout.save} .
+  .suppHyper <- function(m,n,k) max(0, k-n) : min(k, m)
+  hyp.mn <- rbind(m = c(10, 15, 999),
+                  n = c( 7,  0,   0))
+  for (j in 1:ncol(hyp.mn)) {
+    mn <- hyp.mn[,j]
+    m <- mn[["m"]]
+    n <- mn[["n"]]
+    for (k in 2:m) {
+      x <- .suppHyper(m,n,k)
+      x <- c(x[1]-1L, x)
+      expect_equal(phyper(x, m, n, k), cumsum(dhyper(x, m, n, k)))
+      expect_equal(phyper(x, m, n, k, log.p=TRUE),
+        log(cumsum(dhyper(x, m, n, k))))
+    }
+  }
+  # todo: more tests
+})

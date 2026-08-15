@@ -74,30 +74,30 @@ BEGIN_RCPP
 END_RCPP
 }
 // dhyper
-NumericVector dhyper(NumericVector x, double m, double n, double k, bool log);
+NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericVector k, bool log);
 RcppExport SEXP _exactr_dhyper(SEXP xSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP logSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
-    Rcpp::traits::input_parameter< double >::type m(mSEXP);
-    Rcpp::traits::input_parameter< double >::type n(nSEXP);
-    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type m(mSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type n(nSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type k(kSEXP);
     Rcpp::traits::input_parameter< bool >::type log(logSEXP);
     rcpp_result_gen = Rcpp::wrap(dhyper(x, m, n, k, log));
     return rcpp_result_gen;
 END_RCPP
 }
 // phyper_cpp
-NumericVector phyper_cpp(NumericVector q, double m, double n, double k, bool lower_tail, bool log_p, bool midp, bool approx);
+NumericVector phyper_cpp(NumericVector q, NumericVector m, NumericVector n, NumericVector k, bool lower_tail, bool log_p, bool midp, bool approx);
 RcppExport SEXP _exactr_phyper_cpp(SEXP qSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP, SEXP approxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type q(qSEXP);
-    Rcpp::traits::input_parameter< double >::type m(mSEXP);
-    Rcpp::traits::input_parameter< double >::type n(nSEXP);
-    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type m(mSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type n(nSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type k(kSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);

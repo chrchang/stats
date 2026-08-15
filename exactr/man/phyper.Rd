@@ -2,7 +2,7 @@
 % Please edit documentation in R/exactr.R
 \name{phyper}
 \alias{phyper}
-\title{Hypergeometric distribution cmf}
+\title{Hypergeometric distribution cdf}
 \usage{
 phyper(q, m, n, k, lower.tail = TRUE, log.p = FALSE, approx = FALSE)
 }
@@ -26,11 +26,11 @@ otherwise use a faster algorithm (which is still more accurate than R
 4.6.1 phyper() and scipy 1.18 stats.hypergeom.cdf()).}
 }
 \value{
-cmf(q).
+cdf(q).
 }
 \description{
-Cumulative mass function for hypergeometric distribution with parameters
-\code{m}, \code{n}, and \code{k}.
+Cumulative distribution function for hypergeometric distribution with
+parameters \code{m}, \code{n}, and \code{k}.
 }
 \details{
 Based on the QD high-precision library.

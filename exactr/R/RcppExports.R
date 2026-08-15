@@ -67,7 +67,7 @@ dhyper <- function(x, m, n, k, log = FALSE) {
     .Call(`_exactr_dhyper`, x, m, n, k, log)
 }
 
-#' @title Hypergeometric distribution cmf
+#' @title Hypergeometric distribution cdf
 #' @description Backend for phyper(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
