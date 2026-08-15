@@ -137,3 +137,10 @@ test_that("qbinom works", {
   expect_true(all((1 > pqb6) & (pqb6 >= 0.05)))
   expect_true(all((0.05 > pqb6_1) & (pqb6_1 >= 0.035)))
 })
+
+test_that("binom.test works", {
+  ## From R 4.6.1 tests/reg-test-2.{R,Rout.save} .
+  expect_snapshot({
+    binom.test(c(800,10))
+  })
+})

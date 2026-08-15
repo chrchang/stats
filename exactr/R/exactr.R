@@ -194,7 +194,7 @@ binom.test <- function(x, n, p=0.5,
   P_OR_LNPVAL <- switch(alternative,
                         less = pbinom_cpp(x, n, p, TRUE, log.p, midp, TRUE, p.denom),
                         greater = pbinom_cpp(x - 1, n, p, FALSE, log.p, midp, TRUE, p.denom),
-                        two.sided = binom_test_pval(x, n, p, midp, log.p, p.denom))
+                        two.sided = binom_2sided_pval(x, n, p, midp, log.p, p.denom))
 
   p.L <- function(x, alpha) {
     if (x == 0) {  # No solution
@@ -232,20 +232,30 @@ binom.test <- function(x, n, p=0.5,
     METHOD <- paste(METHOD, "(midp)")
   }
 
-  RVAL <- list(statistic = x, parameter = n)
   if (log.p) {
-    RVAL <- c(RVAL, p.value = exp(P_OR_LNPVAL), log.p.value = P_OR_LNPVAL)
+    structure(list(statistic = x,
+                   parameter = n,
+                   p.value = exp(P_OR_LNPVAL),
+                   log.p.value = P_OR_LNPVAL,
+                   conf.int = CINT,
+                   estimate = ESTIMATE,
+                   null.value = p,
+                   alternative = alternative,
+                   method = "Exact binomial test",
+                   data.name = DNAME),
+              class = "htest")
   } else {
-    RVAL <- c(RVAL, p.value = P_OR_LNPVAL)
+    structure(list(statistic = x,
+                   parameter = n,
+                   p.value = P_OR_LNPVAL,
+                   conf.int = CINT,
+                   estimate = ESTIMATE,
+                   null.value = p,
+                   alternative = alternative,
+                   method = "Exact binomial test",
+                   data.name = DNAME),
+              class = "htest")
   }
-  structure(c(RVAL,
-              conf.int = CINT,
-              estimate = ESTIMATE,
-              null.value = p,
-              alternative = alternative,
-              method = METHOD,
-              data.name = DNAME),
-            class = "htest")
 }
 
 #' Hypergeometric distribution cmf
