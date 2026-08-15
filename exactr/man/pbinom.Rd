@@ -2,7 +2,7 @@
 % Please edit documentation in R/exactr.R
 \name{pbinom}
 \alias{pbinom}
-\title{Binomial distribution cmf}
+\title{Binomial distribution cdf}
 \usage{
 pbinom(q, size, prob = 0.5, lower.tail = TRUE, log.p = FALSE, approx = FALSE)
 }
@@ -26,7 +26,7 @@ otherwise use a faster algorithm (which is still more accurate than R
 cmf(q).
 }
 \description{
-Cumulative mass function for binomial distribution with parameters
+Cumulative distribution function for binomial distribution with parameters
 \code{size} and \code{prob}.
 }
 \details{

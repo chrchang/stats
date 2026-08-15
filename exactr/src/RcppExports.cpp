@@ -25,14 +25,14 @@ BEGIN_RCPP
 END_RCPP
 }
 // pbinom_cpp
-NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom);
+NumericVector pbinom_cpp(NumericVector q, NumericVector size, NumericVector prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom);
 RcppExport SEXP _exactr_pbinom_cpp(SEXP qSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP, SEXP approxSEXP, SEXP prob_denomSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type q(qSEXP);
-    Rcpp::traits::input_parameter< double >::type size(sizeSEXP);
-    Rcpp::traits::input_parameter< double >::type prob(probSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type size(sizeSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type prob(probSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
@@ -43,14 +43,14 @@ BEGIN_RCPP
 END_RCPP
 }
 // qbinom_cpp
-NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_tail, bool log_p);
+NumericVector qbinom_cpp(NumericVector p, NumericVector size, NumericVector prob, bool lower_tail, bool log_p);
 RcppExport SEXP _exactr_qbinom_cpp(SEXP pSEXP, SEXP sizeSEXP, SEXP probSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
-    Rcpp::traits::input_parameter< double >::type size(sizeSEXP);
-    Rcpp::traits::input_parameter< double >::type prob(probSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type size(sizeSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type prob(probSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     rcpp_result_gen = Rcpp::wrap(qbinom_cpp(p, size, prob, lower_tail, log_p));

@@ -55,7 +55,7 @@ plink2::td_real make_prob_tdr(double prob, double prob_denom) {
 //' @return pmf(x).
 //' @export
 // [[Rcpp::export]]
-NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bool log = false) {
+NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = NumericVector::create(0.5), bool log = false) {
   // Imitate SETUP_Math3 macro in R src/library/stats/src/distn.c .
   const uint32_t x_len = x.size();
   const uint32_t size_len = size.size();
@@ -70,9 +70,9 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bo
   const uint32_t results_len = std::max({x_len, size_len, prob_len});
   NumericVector results = NumericVector(results_len);
   uint32_t nans_produced = 0;
-  // possible todo: use parallel-for from RcppParallel for large results_len.
 
   // Imitate mod_iterate3 macro in R src/library/stats/src/distn.c .
+  // possible todo: use parallel-for from RcppParallel for large results_len.
   uint32_t x_idx = 0;
   uint32_t size_idx = 0;
   uint32_t prob_idx = 0;
@@ -83,6 +83,7 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bo
     x_idx = (x_idx == x_len)? 0 : x_idx;
     size_idx = (size_idx == size_len)? 0 : size_idx;
     prob_idx = (prob_idx == prob_len)? 0 : prob_idx;
+    // if_NA_Math3_set()
     if (traits::is_nan<REALSXP>(k_float) || traits::is_nan<REALSXP>(n_float) || traits::is_nan<REALSXP>(p)) {
       if (NumericVector::is_na(k_float) || NumericVector::is_na(n_float) || NumericVector::is_na(p)) {
         results[ridx] = NA_REAL;
@@ -92,7 +93,11 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bo
       // This counts as a preexisting rather than a 'produced' NaN.
       continue;
     }
+
+    // src/nmath/dbinom.c
     const double n_round = nearbyint(n_float);
+    // strangely, R has a test which requires n_float rather than just n_round
+    // < 0, when that is not the case for e.g. pbinom().
     if ((p < 0) || (p > 1) || (n_float < 0) || nonint(n_float, n_round)) {
       results[ridx] = R_NaN;
       nans_produced = 1;
@@ -111,9 +116,16 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bo
       }
       continue;
     }
+    // stats::dbinom() is expected to handle size in [2^52, Inf), and denormal
+    // p.  If we need to handle such arguments, I'd prefer to do so by
+    // delegating to Rmpfr; that lets us continue to promise <= 1 ULP error.
+    // (todo: check whether the 1 ULP error promise is currently broken for p
+    // near but not below DBL_MIN, and fix that if so.)
+    //
+    // In the meantime, plink2::BinomMass()'s domain could be extended up to
+    // n=INT64_MAX.
     if (n_round >= (1LL << 52)) {
       if (n_round != R_PosInf) {
-        // straightforward to implement approximation if necessary
         stop("size values in [2^52, Inf) not currently supported");
       }
       results[ridx] = log? R_NegInf : 0.0;
@@ -135,54 +147,97 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob, bo
   return results;
 }
 
-// TODO: fix vectorization/recycling in remaining functions.
-
-//' @title Binomial distribution cmf
+//' @title Binomial distribution cdf
 //' @description Backend for pbinom(), separated since dots aren't permitted in
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom) {
-  const double size_round = round(size);
-  if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
-    stop("size is not in [0, 2^52 - 1]");
-  }
-  const plink2::td_real prob_tdr = make_prob_tdr(prob, prob_denom);
-  const int64_t n = static_cast<int64_t>(size_round);
-  // Unfortunately, can't take advantage of some vectorization opportunities
-  // without potentially changing the last bit of some results, so I won't plan
-  // on writing Pbinom{,Approx}Multi() functions for now.
-  // possible todo: use parallel-for from RcppParallel for large q_len.
-  // possible todo: when len(q) > max(q) - min(q) + 1 (so there is at least one
-  // repeat value), memoize.  (how often does this come up?)
+NumericVector pbinom_cpp(NumericVector q, NumericVector size, NumericVector prob, bool lower_tail, bool log_p, bool midp, bool approx, double prob_denom) {
+  // Imitate SETUP_Math3 macro in R src/library/stats/src/distn.c .
   const uint32_t q_len = q.size();
-  NumericVector results = NumericVector(q_len);
-  for (uint32_t idx = 0; idx < q_len; ++idx) {
-    const double k_float = q[idx];
-    if (isnan(k_float)) {
-      results[idx] = k_float;
+  const uint32_t size_len = size.size();
+  const uint32_t prob_len = prob.size();
+  if ((q_len == 0) || (size_len == 0) || (prob_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (q_len == 0) {
+      results.attr("dim") = q.attr("dim");
+    }
+    return results;
+  }
+
+  const uint32_t results_len = std::max({q_len, size_len, prob_len});
+  NumericVector results = NumericVector(results_len);
+  uint32_t nans_produced = 0;
+
+  // Imitate mod_iterate3 macro in R src/library/stats/src/distn.c .
+  // possible todo: use parallel-for from RcppParallel for large results_len.
+  uint32_t q_idx = 0;
+  uint32_t size_idx = 0;
+  uint32_t prob_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double k_float = q[q_idx++];
+    const double n_float = size[size_idx++];
+    const double p = prob[prob_idx++];
+    q_idx = (q_idx == q_len)? 0 : q_idx;
+    size_idx = (size_idx == size_len)? 0 : size_idx;
+    prob_idx = (prob_idx == prob_len)? 0 : prob_idx;
+    // if_NA_Math3_set()
+    if (traits::is_nan<REALSXP>(k_float) || traits::is_nan<REALSXP>(n_float) || traits::is_nan<REALSXP>(p)) {
+      if (NumericVector::is_na(k_float) || NumericVector::is_na(n_float) || NumericVector::is_na(p)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
       continue;
     }
-    // Imitate R pbinom().
-    const double k_floor = floor(k_float + 1e-7);
-    int64_t k;
-    // Avoid underflow/overflow in float64 -> int64 conversion.
-    if (k_floor < 0) {
-      k = -1;
-    } else if (k_floor <= size_round) {
-      k = static_cast<int64_t> (k_floor);
-    } else {
-      k = n + 1;
+
+    // src/nmath/pbinom.c
+    const double n_round = nearbyint(n_float);
+    plink2::td_real p_tdr = plink2::tdr_make1(p);
+    if (prob_denom != 1.0) {
+      p_tdr = plink2::tdr_divd(p_tdr, prob_denom);
     }
+    if ((n_float == R_PosInf) || nonint_warn(n_float, n_round) || (n_round < 0) || (!(p_tdr.x[0] >= 0.0)) || plink2::tdr_gtd(p_tdr, 1.0)) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    if (k_float < 0) {
+      results[ridx] = log_p? R_NegInf : 0.0;
+      continue;
+    }
+    const double k_floor = floor(k_float + 1e-7);
+    if (n_round <= k_floor) {
+      results[ridx] = log_p? 0.0 : 1.0;
+      continue;
+    }
+
+    if (n_round >= (1LL << 52)) {
+      stop("size values in [2^52, Inf) not currently supported");
+    }
+
+    const int64_t k = static_cast<int64_t>(k_floor);
+    const int64_t n = static_cast<int64_t>(n_round);
     double result;
     if (approx) {
-      result = plink2::PbinomApprox(k, n, prob_tdr, !lower_tail, midp, log_p);
+      result = plink2::PbinomApprox(k, n, p_tdr, !lower_tail, midp, log_p);
     } else {
-      result = plink2::Pbinom(k, n, prob_tdr, !lower_tail, log_p);
+      result = plink2::Pbinom(k, n, p_tdr, !lower_tail, log_p);
     }
-    results[idx] = result;
+    results[ridx] = result;
   }
-  results.attr("dim") = q.attr("dim");
+  // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  if (results_len == q_len) {
+    results.attr("dim") = q.attr("dim");
+  } else if (results_len == size_len) {
+    results.attr("dim") = size.attr("dim");
+  } else {
+    results.attr("dim") = prob.attr("dim");
+  }
   return results;
 }
 
@@ -191,45 +246,94 @@ NumericVector pbinom_cpp(NumericVector q, double size, double prob, bool lower_t
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_tail, bool log_p) {
-  const double size_round = round(size);
-  if ((size_round < 0) || (!(size_round < (1LL << 52)))) {
-    stop("size is not in [0, 2^52 - 1]");
-  }
-  const plink2::td_real prob_tdr = make_prob_tdr(prob, 1.0);
-  const int64_t n = static_cast<int64_t>(size_round);
-  // Unfortunately, with current backend implementation, it's tricky to benefit
-  // much from vectorization without destabilizing results when a probability
-  // is within epsilon of a cdf value, so I won't plan on writing QbinomMulti()
-  // functions for now.
-  // possible todo: use parallel-for from RcppParallel for large p_len.
-  // possible todo: implement a function which precomputes cmf(k_min),
-  // cmf(k_min+1), ..., cmf(k_max) in a manner perfectly consistent with
-  // Qbinom() (this will probably involve modifying Qbinom() to reliably invert
-  // Pbinom()).  Then, when len(p) is large enough, we can just call that
-  // function and perform binary searches on its result.
+NumericVector qbinom_cpp(NumericVector p, NumericVector size, NumericVector prob, bool lower_tail, bool log_p) {
+  // Imitate SETUP_Math3 macro in R src/library/stats/src/distn.c .
   const uint32_t p_len = p.size();
-  NumericVector results = NumericVector(p_len);
+  const uint32_t size_len = size.size();
+  const uint32_t prob_len = prob.size();
+  if ((p_len == 0) || (size_len == 0) || (prob_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (p_len == 0) {
+      results.attr("dim") = p.attr("dim");
+    }
+    return results;
+  }
+
+  const uint32_t results_len = std::max({p_len, size_len, prob_len});
+  NumericVector results = NumericVector(results_len);
   uint32_t nans_produced = 0;
-  for (uint32_t idx = 0; idx < p_len; ++idx) {
-    const double p_float = p[idx];
-    if (isnan(p_float)) {
+
+  // Imitate mod_iterate3 macro in R src/library/stats/src/distn.c .
+  // possible todo: use parallel-for from RcppParallel for large results_len.
+  uint32_t p_idx = 0;
+  uint32_t size_idx = 0;
+  uint32_t prob_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double p_float = p[p_idx++];
+    const double n_float = size[size_idx++];
+    const double prob_float = prob[prob_idx++];
+    p_idx = (p_idx == p_len)? 0 : p_idx;
+    size_idx = (size_idx == size_len)? 0 : size_idx;
+    prob_idx = (prob_idx == prob_len)? 0 : prob_idx;
+    // if_NA_Math3_set()
+    if (traits::is_nan<REALSXP>(p_float) || traits::is_nan<REALSXP>(n_float) || traits::is_nan<REALSXP>(prob_float)) {
+      if (NumericVector::is_na(p_float) || NumericVector::is_na(n_float) || NumericVector::is_na(prob_float)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
+      continue;
+    }
+
+    // src/nmath/qbinom.c
+    const double n_round = nearbyint(n_float);
+    if ((n_float == R_PosInf) || (prob_float < 0.0) || (prob_float > 1.0) || (n_round < 0)) {
+      results[ridx] = R_NaN;
       nans_produced = 1;
-      results[idx] = p_float;
       continue;
     }
     if (log_p) {
-      if (p_float > 0.0) {
+      if (p_float > 0) {
+        results[ridx] = R_NaN;
         nans_produced = 1;
-        results[idx] = 0.0 / 0.0;
         continue;
       }
-    } else {
-      if ((p_float < 0.0) || (p_float > 1.0)) {
+      if (p_float == 0) {  // upper bound
+        results[ridx] = lower_tail? n_round : 0;
+        continue;
+      }
+      if (p_float == R_NegInf) {
+        results[ridx] = lower_tail? 0 : n_round;
+        continue;
+      }
+    } else {  // !log_p
+      if ((p_float < 0) || (p_float > 1)) {
+        results[ridx] = R_NaN;
         nans_produced = 1;
-        results[idx] = 0.0 / 0.0;
+        continue;
+      }
+      if (p_float == 0) {
+        results[ridx] = lower_tail? 0 : n_round;
+        continue;
+      }
+      if (p_float == 1) {
+        results[ridx] = lower_tail? n_round : 0;
       }
     }
+    if ((prob_float == 0) || (n_round == 0)) {
+      results[ridx] = 0;
+      continue;
+    }
+    if (prob_float == 1) {
+      results[ridx] = n_round;
+      continue;
+    }
+
+    if (n_round >= (1LL << 52)) {
+      stop("size values in [2^52, Inf) not currently supported");
+    }
+
     plink2::dd_real p_ddr = plink2::ddr_maked(p_float);
     bool cur_log = log_p;
     if (!lower_tail) {
@@ -240,14 +344,23 @@ NumericVector qbinom_cpp(NumericVector p, double size, double prob, bool lower_t
         p_ddr = plink2::ddr_negate(plink2::ddr_add2d(p_float, -1));
       }
     }
-    results[idx] = plink2::QbinomHalfUlp(p_ddr, n, prob_tdr, cur_log);
+    results[ridx] = plink2::QbinomHalfUlp(p_ddr, static_cast<int64_t>(n_round), plink2::tdr_make1(prob_float), cur_log);
   }
+  // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
   if (nans_produced) {
     warning("NaNs produced");
   }
-  results.attr("dim") = p.attr("dim");
+  if (results_len == p_len) {
+    results.attr("dim") = p.attr("dim");
+  } else if (results_len == size_len) {
+    results.attr("dim") = size.attr("dim");
+  } else {
+    results.attr("dim") = prob.attr("dim");
+  }
   return results;
 }
+
+// TODO: fix vectorization/recycling in remaining functions.
 
 //' @title Exact binomial two-sided test p-value
 //' @description Implements main p-value calculation for 2-sided binom.test().

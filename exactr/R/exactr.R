@@ -2,9 +2,9 @@ is.boolean <- function(x) {
   is.logical(x) && length(x) == 1 && !is.na(x)
 }
 
-#' Binomial distribution cmf
+#' Binomial distribution cdf
 #'
-#' Cumulative mass function for binomial distribution with parameters
+#' Cumulative distribution function for binomial distribution with parameters
 #' `size` and `prob`.
 #'
 #' @param q vector of success counts.
@@ -34,11 +34,11 @@ pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE
   if (!is.numeric(q)) {
     stop("'q' must be a numeric vector")
   }
-  if (!is.numeric(size) || length(size) != 1) {
-    stop("'size' must be a single numeric value")
+  if (!is.numeric(size)) {
+    stop("'size' must be a numeric vector")
   }
-  if (!is.numeric(prob) || length(prob) != 1) {
-    stop("'prob' must be a single numeric value")
+  if (!is.numeric(prob)) {
+    stop("'prob' must be a numeric vector")
   }
   if (!is.boolean(lower.tail)) {
     stop("'lower.tail' must be a single boolean value")
@@ -74,11 +74,11 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
     stop("'p' must be a numeric vector")
   }
-  if (!is.numeric(size) || length(size) != 1) {
-    stop("'size' must be a single numeric value")
+  if (!is.numeric(size)) {
+    stop("'size' must be a numeric vector")
   }
-  if (!is.numeric(prob) || length(prob) != 1) {
-    stop("'prob' must be a single numeric value")
+  if (!is.numeric(prob)) {
+    stop("'prob' must be a numeric vector")
   }
   if (!is.boolean(lower.tail)) {
     stop("'lower.tail' must be a single boolean value")

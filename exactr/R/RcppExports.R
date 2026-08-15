@@ -17,11 +17,11 @@
 #' @param log logical; if TRUE, probabilities are returned as logarithms.
 #' @return pmf(x).
 #' @export
-dbinom <- function(x, size, prob, log = FALSE) {
+dbinom <- function(x, size, prob = as.numeric( c(0.5)), log = FALSE) {
     .Call(`_exactr_dbinom`, x, size, prob, log)
 }
 
-#' @title Binomial distribution cmf
+#' @title Binomial distribution cdf
 #' @description Backend for pbinom(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
