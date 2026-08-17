@@ -610,60 +610,80 @@ NumericVector phyper_cpp(NumericVector q, NumericVector m, NumericVector n, Nume
   return results;
 }
 
-// TODO: fix vectorization/recycling in remaining functions.
-
 //' @title Hypergeometric distribution ppf
 //' @description Backend for qbinom(), separated since dots aren't permitted in
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail, bool log_p) {
-  const double m_round = round(m);
-  const double n_round = round(n);
-  const double k_round = round(k);
-  if ((m_round < 0) || (!(m_round < (1LL << 52)))) {
-    stop("m is not in [0, 2^52 - 1]");
-  }
-  if ((n_round < 0) || (!(n_round < (1LL << 52)))) {
-    stop("n is not in [0, 2^52 - 1]");
-  }
-  const int64_t ac = static_cast<int64_t>(m_round);
-  const int64_t bd = static_cast<int64_t>(n_round);
-  const int64_t total = ac + bd;
-  if (total >= (1LL << 52)) {
-    stop("m+n is not in [0, 2^52 - 1]");
-  }
-
-  if ((k_round < 0) || (!(k_round < (1LL << 52)))) {
-    stop("k is not in [0, m+n]");
-  }
-  const int64_t ab = static_cast<int64_t>(k_round);
-  if (ab > total) {
-    stop("k is not in [0, m+n]");
-  }
-
+NumericVector qhyper_cpp(NumericVector p, NumericVector m, NumericVector n, NumericVector k, bool lower_tail, bool log_p) {
+  // Imitate SETUP_Math4 macro in R src/library/stats/src/distn.c .
   const uint32_t p_len = p.size();
-  NumericVector results = NumericVector(p_len);
+  const uint32_t m_len = m.size();
+  const uint32_t n_len = n.size();
+  const uint32_t k_len = k.size();
+  if ((p_len == 0) || (m_len == 0) || (n_len == 0) || (k_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (p_len == 0) {
+      results.attr("dim") = p.attr("dim");
+    }
+    return results;
+  }
+  const uint32_t results_len = std::max({p_len, m_len, n_len, k_len});
+  NumericVector results = NumericVector(results_len);
   uint32_t nans_produced = 0;
-  for (uint32_t idx = 0; idx < p_len; ++idx) {
-    const double p_float = p[idx];
-    if (isnan(p_float)) {
+
+  // Imitate mod_iterate4 macro in R src/library/stats/src/distn.c .
+  uint32_t p_idx = 0;
+  uint32_t m_idx = 0;
+  uint32_t n_idx = 0;
+  uint32_t k_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double p_float = p[p_idx++];
+    const double ac_float = m[m_idx++];
+    const double bd_float = n[n_idx++];
+    const double ab_float = k[k_idx++];
+    p_idx = (p_idx == p_len)? 0 : p_idx;
+    m_idx = (m_idx == m_len)? 0 : m_idx;
+    n_idx = (n_idx == n_len)? 0 : n_idx;
+    k_idx = (k_idx == k_len)? 0 : k_idx;
+    // if_NA_Math4_set()
+    if (traits::is_nan<REALSXP>(p_float) || traits::is_nan<REALSXP>(ac_float) || traits::is_nan<REALSXP>(bd_float) || traits::is_nan<REALSXP>(ab_float)) {
+      if (NumericVector::is_na(p_float) || NumericVector::is_na(ac_float) || NumericVector::is_na(bd_float) || NumericVector::is_na(ab_float)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      // This counts as a preexisting rather than a 'produced' NaN.
+      continue;
+    }
+
+    // src/nmath/qhyper.c boundary checks
+    const double ac_round = nearbyint(ac_float);
+    const double bd_round = nearbyint(bd_float);
+    const double ab_round = nearbyint(ab_float);
+    const double total = ac_round + bd_round;
+    if ((p_float == R_NegInf) || (p_float == R_PosInf) || (ac_round < 0) || (bd_round < 0) || (total == R_PosInf) || (ab_round < 0) || (ab_round > total)) {
+      results[ridx] = R_NaN;
       nans_produced = 1;
-      results[idx] = p_float;
       continue;
     }
     if (log_p) {
       if (p_float > 0.0) {
+        results[ridx] = R_NaN;
         nans_produced = 1;
-        results[idx] = 0.0 / 0.0;
         continue;
       }
     } else {
       if ((p_float < 0.0) || (p_float > 1.0)) {
+        results[ridx] = R_NaN;
         nans_produced = 1;
-        results[idx] = 0.0 / 0.0;
+        continue;
       }
     }
+    if (total >= (1LL << 52)) {
+      stop("m+n values in [2^52, Inf) not currently supported");
+    }
+
     plink2::dd_real p_ddr = plink2::ddr_maked(p_float);
     bool cur_log = log_p;
     if (!lower_tail) {
@@ -674,14 +694,26 @@ NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool low
         p_ddr = plink2::ddr_negate(plink2::ddr_add2d(p_float, -1));
       }
     }
-    results[idx] = plink2::QhyperHalfUlp(p_ddr, ac, bd, ab, cur_log);
+    results[ridx] = plink2::QhyperHalfUlp(p_ddr, static_cast<int64_t>(ac_round), static_cast<int64_t>(bd_round), static_cast<int64_t>(ab_round), cur_log);
   }
+
+  // Imitate FINISH_Math4 macro in R src/library/stats/src/distn.c .
   if (nans_produced) {
     warning("NaNs produced");
   }
-  results.attr("dim") = p.attr("dim");
+  if (results_len == p_len) {
+    results.attr("dim") = p.attr("dim");
+  } else if (results_len == m_len) {
+    results.attr("dim") = m.attr("dim");
+  } else if (results_len == n_len) {
+    results.attr("dim") = n.attr("dim");
+  } else {
+    results.attr("dim") = k.attr("dim");
+  }
   return results;
 }
+
+// TODO: fix vectorization/recycling in remaining functions.
 
 //' @title Fisher 2x3 test log-p-value
 //' @description Implements main p-value calculation for 2x3 tables.

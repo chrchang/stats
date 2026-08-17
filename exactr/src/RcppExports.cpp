@@ -107,15 +107,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // qhyper_cpp
-NumericVector qhyper_cpp(NumericVector p, double m, double n, double k, bool lower_tail, bool log_p);
+NumericVector qhyper_cpp(NumericVector p, NumericVector m, NumericVector n, NumericVector k, bool lower_tail, bool log_p);
 RcppExport SEXP _exactr_qhyper_cpp(SEXP pSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericVector >::type p(pSEXP);
-    Rcpp::traits::input_parameter< double >::type m(mSEXP);
-    Rcpp::traits::input_parameter< double >::type n(nSEXP);
-    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type m(mSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type n(nSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type k(kSEXP);
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     rcpp_result_gen = Rcpp::wrap(qhyper_cpp(p, m, n, k, lower_tail, log_p));

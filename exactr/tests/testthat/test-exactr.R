@@ -1,9 +1,9 @@
 test_that("dbinom works", {
   ## Based on dbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
-  for (n in rbinom(n1, size = 2*n0, p = .4)) {
+  for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
-      for (k in rbinom(n3, size = n, prob = runif(1))) {
+      for (k in stats::rbinom(n3, size = n, prob = runif(1))) {
         if (k!=n && p!=0) {
           expect_equal(stats::pf((k+1)/(n-k)*(1-p)/p, df1=2*(n-k), df2=2*(k+1)),
                        sum(dbinom(0:k, size = n, prob = p)),
@@ -53,9 +53,9 @@ test_that("dbinom works", {
 test_that("pbinom works", {
   ## Based on pbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
-  for (n in rbinom(n1, size = 2*n0, p = .4)) {
+  for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
-      for (k in rbinom(n3, size = n, prob = runif(1))) {
+      for (k in stats::rbinom(n3, size = n, prob = runif(1))) {
         if (k!=n && p!=0) {
           expect_equal(       pbinom(0:k, size=n, prob=p),
                        cumsum(dbinom(0:k, size=n, prob=p)))
@@ -66,7 +66,7 @@ test_that("pbinom works", {
 
   set.seed(123)
   n <- 20
-  Rbinom <- sort(unique(rbinom(n, size = 55, prob = pi/16)))
+  Rbinom <- sort(unique(stats::rbinom(n, size = 55, prob = pi/16)))
   Pbinom <- pbinom(Rbinom, size = 55, prob = pi/16)
   expect_equal(log1p(-Pbinom), pbinom(Rbinom, size=55, prob=pi/16, lower=F, log=T))
 
@@ -91,7 +91,7 @@ test_that("qbinom works", {
   ## Based on qbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
   set.seed(123)
   n <- 20
-  Rbinom <- sort(unique(rbinom(n, size = 55, prob = pi/16)))
+  Rbinom <- sort(unique(stats::rbinom(n, size = 55, prob = pi/16)))
   Pbinom <- pbinom(Rbinom, size = 55, prob = pi/16)
   ep <- 1e-7
   f1 <- 1 - 1e-7
@@ -146,8 +146,8 @@ test_that("binom.test works", {
 })
 
 test_that("dhyper works", {
-  ## Based on dhyper() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
-  ## tests/print-tests.{R,Rout.save} .
+  ## Based on dhyper() tests in R 4.6.1 tests/d-p-q-r-tst-2.R and
+  ## tests/print-tests.R .
   expect_no_error(lapply(sample(10000, size=1000), function(M) {
     ## Domain reduced for now due to 2^52 limit.
     # n <- (M/100)*10^(2:20)
@@ -157,12 +157,20 @@ test_that("dhyper works", {
       stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
     }
   }))
-  # todo: more tests
+
+  N1 <- 10
+  N2 <- 7
+  n <- 8
+  x <- 0:N1
+  Mhyp2 <- dhyper(x, N1, N2, n)
+  expect_equal(Mhyp2, c(0, 0.0004113534, 0.01295763, 0.103661, 0.3023447,
+                        0.3628137, 0.1814068, 0.03455368, 0.00185109, 0, 0),
+               tolerance=6e-7)
 })
 
 test_that("phyper works", {
   ## Based on phyper() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
-  ## tests/print-tests.{R,Rout.save} .
+  ## tests/print-tests.R .
   .suppHyper <- function(m,n,k) max(0, k-n) : min(k, m)
   hyp.mn <- rbind(m = c(10, 15, 999),
                   n = c( 7,  0,   0))
@@ -178,5 +186,32 @@ test_that("phyper works", {
         log(cumsum(dhyper(x, m, n, k))))
     }
   }
-  # todo: more tests
+
+  set.seed(123)
+  n <- 20
+  Rhyper <- sort(unique(stats::rhyper(n, m=40, n=30, k=20)))
+  Phyper <- phyper(Rhyper, m=40, n=30, k=20)
+  expect_equal(log1p(-Phyper), phyper(Rhyper, m=40, n=30, k=20, lower=F, log=T))
+
+  expect_all_equal(phyper(c(0:3, 1e67), 0, 0, 0), 1)
+
+  N1 <- 10
+  N2 <- 7
+  n <- 8
+  x <- 0:N1
+  Mhyp1 <- phyper(x, N1, N2, n)
+  expect_equal(Mhyp1, c(0, 0.0004113534, 0.01336898, 0.117030, 0.4193747,
+                        0.7821884, 0.9635952, 0.99814891, 1.00000000, 1, 1),
+               tolerance=6e-7)
+})
+
+test_that("qhyper works", {
+  ## Based on qhyper() tests in R 4.6.1 tests/d-p-q-r-tests.R .
+  set.seed(123)
+  n <- 20
+  Rhyper <- sort(unique(stats::rhyper(n, m=40, n=30, k=20)))
+  Phyper <- phyper(Rhyper, m=40, n=30, k=20)
+  f1 <- 1 - 1e-7
+  expect_equal(Rhyper, qhyper(Phyper*f1, m=40, n=30, k=20))
+  ## todo: more tests
 })

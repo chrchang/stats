@@ -331,14 +331,14 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
     stop("'p' must be a numeric vector")
   }
-  if (!is.numeric(m) || length(m) != 1) {
-    stop("'m' must be a single numeric value")
+  if (!is.numeric(m)) {
+    stop("'m' must be a numeric vector")
   }
-  if (!is.numeric(n) || length(n) != 1) {
-    stop("'n' must be a single numeric value")
+  if (!is.numeric(n)) {
+    stop("'n' must be a numeric vector")
   }
-  if (!is.numeric(k) || length(k) != 1) {
-    stop("'k' must be a single numeric value")
+  if (!is.numeric(k)) {
+    stop("'k' must be a numeric vector")
   }
   if (!is.boolean(lower.tail)) {
     stop("'lower.tail' must be a single boolean value")
