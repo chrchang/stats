@@ -537,11 +537,22 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
     }
-    RET <- eval(substitute(stats::fisher.test(ex, ey, workspace, hybrid,
-                                              hybridPars, control, or,
-                                              alternative, conf.int,
-                                              conf.level, simulate.p.value, B),
-                           list(ex = expr.x, ey = expr.y)))
+    args <- list(x = expr.x)
+    if (!is.null(expr.y)) {
+      args$y <- expr.y
+    }
+    ## ugh
+    args$workspace <- substitute(workspace)
+    args$hybrid <- substitute(hybrid)
+    args$hybridPars <- substitute(hybridPars)
+    args$control <- substitute(control)
+    args$or <- substitute(or)
+    args$alternative <- substitute(alternative)
+    args$conf.int <- substitute(conf.int)
+    args$conf.level <- substitute(conf.level)
+    args$simulate.p.value <- substitute(simulate.p.value)
+    args$B <- substitute(B)
+    RET <- do.call(stats::fisher.test, args, envir = parent.frame())
     if (log.p) {
       if (RET$p.value <= 0.0) {
         warning("p.value underflowed to zero, and direct calculation of log.p.value not yet supported in this case; setting log.p.value to -Inf")

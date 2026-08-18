@@ -211,7 +211,36 @@ test_that("qhyper works", {
   n <- 20
   Rhyper <- sort(unique(stats::rhyper(n, m=40, n=30, k=20)))
   Phyper <- phyper(Rhyper, m=40, n=30, k=20)
+  ep <- 1e-7
   f1 <- 1 - 1e-7
   expect_equal(Rhyper, qhyper(Phyper*f1, m=40, n=30, k=20))
+  p1 <- 1 + ep
+  expect_equal(Rhyper, qhyper(p1-Phyper, m=40, n=30, k=20, lower=F))
+  expect_equal(Rhyper, qhyper(log(Phyper)-ep, m=40, n=30, k=20, log=TRUE))
+  expect_equal(Rhyper, qhyper(log1p(-Phyper)+ep, m=40, n=30, k=20, lower=F, log=T))
+})
+
+test_that("fisher.test works", {
+  ## Based on fisher.test() tests in R 4.6.1 tests/reg-tests-1{a,b,d,e}.R .
+  x <- matrix(c(2, 2, 4, 8, 6, 0, 1, 1, 7, 8, 1, 3, 1, 3, 7, 4, 2, 2, 2,
+                1, 1, 0, 0, 0, 0, 0, 1, 1, 2, 0, 1, 1, 0, 2, 1, 0, 0, 0),
+              nc = 2)
+  fisher.test(x)
+
+  fisher.test(cbind(0, c(0,0,0,1)))
+
+  ## R PR#4688: once gave p.value=Inf, now gives FEXACT error 501
+  ## (After new algorithm is fully implemented, this case should no longer
+  ## yield an error at all.  But we'll probably want to skip it under some
+  ## circumstances, it looks like it'll be slow.)
+  reli <- cbind(Si = c(2121, 100, 27, 0),
+                av = c(4700, 216, 67, 0),
+                Nc = c(6234,2461,502,14))
+  expect_error(fisher.test(reli, workspace=2000000))
+
+  a <- diag(1:3)
+  p <- fisher.test(a, simulate.p.value=TRUE)$p.value
+  expect_gt(p, 0.001)
+
   ## todo: more tests
 })
