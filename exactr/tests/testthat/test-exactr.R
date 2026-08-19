@@ -17,37 +17,35 @@ test_that("dbinom works", {
   suppressWarnings(expect_warning(fx0 <- dbinom(x0, size = 3, prob = 0.1)))
   expect_all_equal(fx0, 0)
 
+  ## This test is quite slow, since exactr::dbinom uses Rmpfr for the larger
+  ## exponents.  May want to skip most of the Rmpfr-requiring cases in some
+  ## circumstances.
   expect_no_error(lapply(sample(10000, size=1000), function(M) {
-    ## Domain reduced for now due to 2^52 limit.
-    # n <- (M/100)*10^(2:20)
-    n <- (M/100)*10^(2:11)
+    n <- (M/100)*10^(2:20)
     if (anyNA(P <- dbinom(1,n,0.5))) {
-      # stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
-      stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
+      stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
     }
   }))
 
   expect_all_equal(dbinom(2^c(0:1023, 1023.999), size=Inf, prob = .1), 0)
 
-  ## Uncomment if/when x domain expanded.
-  # x. <- 1.20e308
-  # N <- 1.72e308
-  # prb <- print(seq(13, 127, by = 6))/128
-  # db <- dbinom(x., N, prob = prb, log = TRUE)
-  # expect_equal(-2^1012 * c(3978.52477729, 3004.42235841, 2321.14764068, 1804.10617471, 1395.99909831,
-  #                          1065.91552786, 795.509574314, 573.263664821, 391.782927199, 246.423578896,
-  #                          134.598198071, 55.4909088367, 10.1000515546, 1.6625043907, 36.710476479,
-  #                          127.476528317, 297.82558994, 600.93919587, 1195.32578926, 3368.52998705),
-  #              db,
-  #              tolerance=1e-11)
+  x. <- 1.20e308
+  N <- 1.72e308
+  prb <- print(seq(13, 127, by = 6))/128
+  db <- dbinom(x., N, prob = prb, log = TRUE)
+  expect_equal(-2^1012 * c(3978.52477729, 3004.42235841, 2321.14764068, 1804.10617471, 1395.99909831,
+                           1065.91552786, 795.509574314, 573.263664821, 391.782927199, 246.423578896,
+                           134.598198071, 55.4909088367, 10.1000515546, 1.6625043907, 36.710476479,
+                           127.476528317, 297.82558994, 600.93919587, 1195.32578926, 3368.52998705),
+               db,
+               tolerance=1e-11)
 
-  ## Uncomment if/when denormal prob handled correctly.
-  # x <- c(12:20, 100*c(1,3,10,20,50))
-  # db <- dbinom(x, size=x+1, prob = 2^-1024.1, log = TRUE)
-  # expect_equal(c(-8515.66, -9225.44, -9935.22, -10645, -11354.8, -12064.6, -12774.4,
-  #              -13484.2, -14194, -70980.6, -212950, -709845, -1419700, -3549250),
-  #            db,
-  #            tolerance=1e-5)
+  x <- c(12:20, 100*c(1,3,10,20,50))
+  db <- dbinom(x, size=x+1, prob = 2^-1024.1, log = TRUE)
+  expect_equal(c(-8515.66, -9225.44, -9935.22, -10645, -11354.8, -12064.6, -12774.4,
+                 -13484.2, -14194, -70980.6, -212950, -709845, -1419700, -3549250),
+               db,
+               tolerance=1e-5)
 })
 
 test_that("pbinom works", {
@@ -242,5 +240,25 @@ test_that("fisher.test works", {
   p <- fisher.test(a, simulate.p.value=TRUE)$p.value
   expect_gt(p, 0.001)
 
-  ## todo: more tests
+  dd <- data.frame(group=1, score=c(rep(0,14), rep(1,29), rep(2, 16)))[rep(1:59, 2),]
+  dd[,"group"] <- c(rep("DOG", 59), rep("kitty", 59))
+  Pv <- with(dd, fisher.test(score, group)$p.value)
+  expect_gte(Pv, 0)
+  expect_lte(Pv, 1)
+
+  set.seed(7)
+  t44 <- table(sample(LETTERS[1:4], size=50, replace=TRUE),
+               sample(letters[1:4], size=50, replace=TRUE))
+  ft44 <- do.call(fisher.test, list(t44))
+  expect_equal(t44, eval(str2lang(ft44$data.name)))
+
+  ## (This case might also become tractable soon.)
+  d <- matrix(c(1,0,5,2,1,90
+               ,2,1,0,2,3,89
+               ,0,0,0,1,0,14
+               ,0,0,0,0,0, 5
+               ,0,0,0,0,0, 2
+               ,0,0,0,0,0, 2
+                ), nrow=6, byrow=TRUE)
+  expect_error(fisher.test(d))
 })

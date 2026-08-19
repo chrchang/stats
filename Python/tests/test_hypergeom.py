@@ -68,10 +68,7 @@ def test_dhyper():
         p_got = exact_tests.hypergeom.pmf(test_case[0], test_case[1], test_case[2], test_case[3])
         lnp_got = exact_tests.hypergeom.logpmf(test_case[0], test_case[1], test_case[2], test_case[3])
         assert p_got == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
-        if math.isnan(lnp_got):
-            assert 0.0 == test_case[4]
-        else:
-            assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
+        assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149436094e-08, rel=1e-15, abs=0)
     assert exact_tests.dhyper(0, 0, 0, 0) == 1.0
     assert exact_tests.dhyper(2, 2, 2, 4) == 1.0

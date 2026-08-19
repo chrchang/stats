@@ -4,8 +4,6 @@
 #' Binomial distribution pmf
 #'
 #' Mass function for binomial distribution with parameters `size` and `prob`.
-#' Implementation is based on log-factorial functions utilizing the QD
-#' high-precision library.
 #'
 #' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
@@ -15,7 +13,15 @@
 #' @param size number of trials (zero or more).
 #' @param prob probability of success on each trial.
 #' @param log logical; if TRUE, probabilities are returned as logarithms.
+#'
+#' @details Implementation is based on log-factorial functions utilizing the
+#'   QD high-precision library.
+#'
+#'   Extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin) are not
+#'   supported unless the Rmpfr package is installed.
+#'
 #' @return pmf(x).
+#'
 #' @export
 dbinom <- function(x, size, prob = as.numeric( c(0.5)), log = FALSE) {
     .Call(`_exactr_dbinom`, x, size, prob, log)

@@ -20,8 +20,13 @@ pmf(x).
 }
 \description{
 Mass function for binomial distribution with parameters \code{size} and \code{prob}.
-Implementation is based on log-factorial functions utilizing the QD
-high-precision library.
+}
+\details{
+Implementation is based on log-factorial functions utilizing the
+QD high-precision library.
+
+Extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin) are not
+supported unless the Rmpfr package is installed.
 }
 \references{
 Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double

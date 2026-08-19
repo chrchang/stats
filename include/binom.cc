@@ -66,7 +66,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
-    return logp? (0.0 / 0.0) : 0.0;
+    return logp? -INFINITY_D : 0.0;
   }
   if ((p_tdr.x[0] < k2m537p5) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m537p5))) {
     return PbinomExtremeSuccP(obs_k, n, p_tdr, complement, midp, logp);
@@ -92,7 +92,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
   if (complement) {
     obs_k = n - obs_k - (!midp);
     if (obs_k < 0) {
-      return logp? (0.0 / 0.0) : 0.0;
+      return logp? -INFINITY_D : 0.0;
     }
     swap_ddr(&p_ddr, &q_ddr);
   }
@@ -253,7 +253,7 @@ double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
-    return logp? (0.0 / 0.0) : 0.0;
+    return logp? -INFINITY_D : 0.0;
   }
   if ((p_tdr.x[0] < k2m537p5) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m537p5))) {
     return PbinomExtremeSuccP(obs_k, n, p_tdr, complement, 0, logp);

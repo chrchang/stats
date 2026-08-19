@@ -20,6 +20,8 @@ is.boolean <- function(x) {
 #' @details Based on the BFRAC component of Boost's TOMS 708 implementation,
 #' and the QD high-precision library.
 #'
+#' @return cdf(q).
+#'
 #' @references DiDonato AR, Morris AH (1992) Algorithm 708: Significant digit
 #'   computation of the incomplete beta function ratios.  ACM Transactions on
 #'   Mathematical Software (TOMS), 18.
@@ -28,7 +30,6 @@ is.boolean <- function(x) {
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @return cdf(q).
 #' @export
 pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
@@ -69,6 +70,7 @@ pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE
 #' to find a close-enough pmf value before evaluating cdf.
 #'
 #' @return ppf(p).
+#'
 #' @export
 qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
@@ -124,10 +126,6 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   rounding error.  For reliable tie recognition in that scenario, represent
 #'   the fraction exactly by specifying e.g. `p`=1 and `p.denom`=3.
 #'
-#' @references Clopper CJ, Pearson ES (1934) The use of confidence or fiducial
-#'   limits illustrated in the case of the binomial.  Biometrika, 26.
-#'   <https://doi.org/10.2307/2331986>.
-#'
 #' @return A list with class "`htest`" containing the following components:
 #'   \item{statistic}{the number of successes.}
 #'   \item{parameter}{the number of trials.}
@@ -139,6 +137,11 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   \item{alternative}{a character string describing the alternative hypothesis.}
 #'   \item{method}{the character string "`Exact binomial test`" or "`Exact binomial test (midp)`".}
 #'   \item{data.name}{a character string giving the names of the data.}
+#'
+#' @references Clopper CJ, Pearson ES (1934) The use of confidence or fiducial
+#'   limits illustrated in the case of the binomial.  Biometrika, 26.
+#'   <https://doi.org/10.2307/2331986>.
+#'
 #' @export
 binom.test <- function(x, n, p=0.5,
                        alternative=c("two.sided", "less", "greater"),
@@ -277,11 +280,12 @@ binom.test <- function(x, n, p=0.5,
 #'
 #' @details Based on the QD high-precision library.
 #'
+#' @return cdf(q).
+#'
 #' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @return cdf(q).
 #' @export
 phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
@@ -326,6 +330,7 @@ phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
 #' to find a close-enough pmf value before evaluating cdf.
 #'
 #' @return ppf(p).
+#'
 #' @export
 qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
@@ -448,6 +453,16 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   replicates (`B = 2000`) implies a minimum p-value of about 0.0005
 #'   (1/(`B`+1)).
 #'
+#' @return A list with class "`htest`" containing the following components:
+#'   \item{p.value}{the p- or midp-value of the test.}
+#'   \item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument `log.p = TRUE`.}
+#'   \item{conf.int}{a confidence interval for the odds ratio.  Only present in the 2x2 case and if argument `conf.int = TRUE`.}
+#'   \item{estimate}{an estimate of the odds ratio.  Note that the _conditional_ Maximum Likelihood Estimate (MLE) rather than the unconditional MLE (the sample odds ratio) is used.  Only present in the 2x2 case.}
+#'   \item{null.value}{the odds ratio under the null, `or`.  Only present in the 2x2 case.}
+#'   \item{alternative}{a character string describing the alternative hypothesis.}
+#'   \item{method}{character string starting with "`Fisher's Exact Test for Count Data`".}
+#'   \item{data.name}{a character string giving the name(s) of the data.}
+#'
 #' @references Fisher RA (1935) The logic of inductive inference.  Journal of
 #'   the Royal Statistical Society Series A, 98.
 #'   <https://doi.org/10.2307/2342435>.
@@ -476,15 +491,6 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   generating `r`x`c` tables with given row and column totals.  Applied
 #'   Statistics, 30.  <https://doi.org/10.2307/2346669>.
 #'
-#' @return A list with class "`htest`" containing the following components:
-#'   \item{p.value}{the p- or midp-value of the test.}
-#'   \item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument `log.p = TRUE`.}
-#'   \item{conf.int}{a confidence interval for the odds ratio.  Only present in the 2x2 case and if argument `conf.int = TRUE`.}
-#'   \item{estimate}{an estimate of the odds ratio.  Note that the _conditional_ Maximum Likelihood Estimate (MLE) rather than the unconditional MLE (the sample odds ratio) is used.  Only present in the 2x2 case.}
-#'   \item{null.value}{the odds ratio under the null, `or`.  Only present in the 2x2 case.}
-#'   \item{alternative}{a character string describing the alternative hypothesis.}
-#'   \item{method}{character string starting with "`Fisher's Exact Test for Count Data`".}
-#'   \item{data.name}{a character string giving the name(s) of the data.}
 #' @export
 fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
                         hybridPars = c(expect = 5, percent = 80, Emin = 1),

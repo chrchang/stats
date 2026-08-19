@@ -254,7 +254,7 @@ double PbinomExtremeSuccP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t comp
   if (complement) {
     obs_k = n - obs_k - (!midp);
     if (obs_k < 0) {
-      return logp? (0.0 / 0.0) : 0.0;
+      return logp? -INFINITY_D : 0.0;
     }
     swap_ddr(&p_ddr, &q_ddr);
   }
@@ -296,7 +296,7 @@ double PbinomExtremeSuccP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t comp
     return logp? -kLn2 : 0.5;
   }
   if (ddr_is_zero(q_ddr)) {
-    return logp? (0.0 / 0.0) : 0.0;
+    return logp? -INFINITY_D : 0.0;
   }
   if (nmk == 1) {
     const double pval = (1 - 0.5 * midp) * ddr_muld(q_ddr, n_d).x[0];

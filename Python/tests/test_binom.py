@@ -88,18 +88,18 @@ def test_dbinom():
         assert pval == pytest.approx(test_case[3], rel=1e-15, abs=DBL_MIN), str(test_case)
     assert exact_tests.dbinom(0, 0) == 1.0
     assert exact_tests.dbinom(-1, 0) == 0.0
-    assert math.isnan(exact_tests.dbinom(-1, 0, logp=True))
+    assert exact_tests.dbinom(-1, 0, logp=True) == -math.inf
     assert exact_tests.dbinom(1, 0) == 0.0
-    assert math.isnan(exact_tests.dbinom(1, 0, logp=True))
+    assert exact_tests.dbinom(1, 0, logp=True) == -math.inf
     assert exact_tests.dbinom(0, 2, 0.0) == 1.0
     assert exact_tests.dbinom(1, 2, 0.0) == 0.0
-    assert math.isnan(exact_tests.dbinom(1, 2, 0.0, logp=True))
+    assert exact_tests.dbinom(1, 2, 0.0, logp=True) == -math.inf
     assert exact_tests.dbinom(2, 2, 0.0) == 0.0
-    assert math.isnan(exact_tests.dbinom(2, 2, 0.0, logp=True))
+    assert exact_tests.dbinom(2, 2, 0.0, logp=True) == -math.inf
     assert exact_tests.dbinom(0, 2, 1.0) == 0.0
-    assert math.isnan(exact_tests.dbinom(0, 2, 1.0, logp=True))
+    assert exact_tests.dbinom(0, 2, 1.0, logp=True) == -math.inf
     assert exact_tests.dbinom(1, 2, 1.0) == 0.0
-    assert math.isnan(exact_tests.dbinom(1, 2, 1.0, logp=True))
+    assert exact_tests.dbinom(1, 2, 1.0, logp=True) == -math.inf
     assert exact_tests.dbinom(2, 2, 1.0) == 1.0
     assert exact_tests.dbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
     assert exact_tests.dbinom(1, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2) + math.log(999999999), rel=1e-15, abs=0)
@@ -118,14 +118,14 @@ def test_pbinom():
             assert pval == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
     assert exact_tests.pbinom(0, 0) == 1.0
     assert exact_tests.pbinom(-1, 0) == 0.0
-    assert math.isnan(exact_tests.pbinom(-1, 0, logp=True))
+    assert exact_tests.pbinom(-1, 0, logp=True) == -math.inf
     assert exact_tests.pbinom(1, 0) == 1.0
     assert exact_tests.pbinom(0, 2, 0.0) == 1.0
     assert exact_tests.pbinom(0, 2, 1.0) == 0.0
-    assert math.isnan(exact_tests.pbinom(0, 2, 1.0, logp=True))
+    assert exact_tests.pbinom(0, 2, 1.0, logp=True) == -math.inf
     assert exact_tests.pbinom(1, 2, 0.0) == 1.0
     assert exact_tests.pbinom(1, 2, 1.0) == 0.0
-    assert math.isnan(exact_tests.pbinom(1, 2, 1.0, logp=True))
+    assert exact_tests.pbinom(1, 2, 1.0, logp=True) == -math.inf
     assert exact_tests.pbinom(2, 2, 0.0) == 1.0
     assert exact_tests.pbinom(2, 2, 1.0) == 1.0
     assert exact_tests.pbinom(0, 999999999, logp=True) == pytest.approx(-999999999 * math.log(2), rel=1e-15, abs=0)
@@ -189,20 +189,20 @@ def test_binomtest():
     assert exact_tests.binomtest(0, 2, 0.0, midp=True) == 0.5
     assert exact_tests.binomtest(0, 2, 1.0) == 0.0
     assert exact_tests.binomtest(0, 2, 1.0, midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(0, 2, 1.0, logp=True))
-    assert math.isnan(exact_tests.binomtest(0, 2, 1.0, midp=True, logp=True))
+    assert exact_tests.binomtest(0, 2, 1.0, logp=True) == -math.inf
+    assert exact_tests.binomtest(0, 2, 1.0, midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(1, 2, 0.0) == 0.0
     assert exact_tests.binomtest(1, 2, 0.0, midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(1, 2, 0.0, logp=True))
-    assert math.isnan(exact_tests.binomtest(1, 2, 0.0, midp=True, logp=True))
+    assert exact_tests.binomtest(1, 2, 0.0, logp=True) == -math.inf
+    assert exact_tests.binomtest(1, 2, 0.0, midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(1, 2, 1.0) == 0.0
     assert exact_tests.binomtest(1, 2, 1.0, midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(1, 2, 1.0, logp=True))
-    assert math.isnan(exact_tests.binomtest(1, 2, 1.0, midp=True, logp=True))
+    assert exact_tests.binomtest(1, 2, 1.0, logp=True) == -math.inf
+    assert exact_tests.binomtest(1, 2, 1.0, midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(2, 2, 0.0) == 0.0
     assert exact_tests.binomtest(2, 2, 0.0, midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(2, 2, 0.0, logp=True))
-    assert math.isnan(exact_tests.binomtest(2, 2, 0.0, midp=True, logp=True))
+    assert exact_tests.binomtest(2, 2, 0.0, logp=True) == -math.inf
+    assert exact_tests.binomtest(2, 2, 0.0, midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(2, 2, 1.0) == 1.0
     assert exact_tests.binomtest(2, 2, 1.0, midp=True) == 0.5
 
@@ -212,14 +212,14 @@ def test_binomtest():
     assert exact_tests.binomtest(0, 2, 0.0, alternative="less", midp=True) == 0.5
     assert exact_tests.binomtest(0, 2, 1.0, alternative="less") == 0.0
     assert exact_tests.binomtest(0, 2, 1.0, alternative="less", midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(0, 2, 1.0, alternative="less", logp=True))
-    assert math.isnan(exact_tests.binomtest(0, 2, 1.0, alternative="less", midp=True, logp=True))
+    assert exact_tests.binomtest(0, 2, 1.0, alternative="less", logp=True) == -math.inf
+    assert exact_tests.binomtest(0, 2, 1.0, alternative="less", midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(1, 2, 0.0, alternative="less") == 1.0
     assert exact_tests.binomtest(1, 2, 0.0, alternative="less", midp=True) == 1.0
     assert exact_tests.binomtest(1, 2, 1.0, alternative="less") == 0.0
     assert exact_tests.binomtest(1, 2, 1.0, alternative="less", midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(1, 2, 1.0, alternative="less", logp=True))
-    assert math.isnan(exact_tests.binomtest(1, 2, 1.0, alternative="less", midp=True, logp=True))
+    assert exact_tests.binomtest(1, 2, 1.0, alternative="less", logp=True) == -math.inf
+    assert exact_tests.binomtest(1, 2, 1.0, alternative="less", midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(2, 2, 0.0, alternative="less") == 1.0
     assert exact_tests.binomtest(2, 2, 0.0, alternative="less", midp=True) == 1.0
     assert exact_tests.binomtest(2, 2, 1.0, alternative="less") == 1.0
@@ -233,14 +233,14 @@ def test_binomtest():
     assert exact_tests.binomtest(0, 2, 1.0, alternative="greater", midp=True) == 1.0
     assert exact_tests.binomtest(1, 2, 0.0, alternative="greater") == 0.0
     assert exact_tests.binomtest(1, 2, 0.0, alternative="greater", midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(1, 2, 0.0, alternative="greater", logp=True))
-    assert math.isnan(exact_tests.binomtest(1, 2, 0.0, alternative="greater", midp=True, logp=True))
+    assert exact_tests.binomtest(1, 2, 0.0, alternative="greater", logp=True) == -math.inf
+    assert exact_tests.binomtest(1, 2, 0.0, alternative="greater", midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(1, 2, 1.0, alternative="greater") == 1.0
     assert exact_tests.binomtest(1, 2, 1.0, alternative="greater", midp=True) == 1.0
     assert exact_tests.binomtest(2, 2, 0.0, alternative="greater") == 0.0
     assert exact_tests.binomtest(2, 2, 0.0, alternative="greater", midp=True) == 0.0
-    assert math.isnan(exact_tests.binomtest(2, 2, 0.0, alternative="greater", logp=True))
-    assert math.isnan(exact_tests.binomtest(2, 2, 0.0, alternative="greater", midp=True, logp=True))
+    assert exact_tests.binomtest(2, 2, 0.0, alternative="greater", logp=True) == -math.inf
+    assert exact_tests.binomtest(2, 2, 0.0, alternative="greater", midp=True, logp=True) == -math.inf
     assert exact_tests.binomtest(2, 2, 1.0, alternative="greater") == 1.0
     assert exact_tests.binomtest(2, 2, 1.0, alternative="greater", midp=True) == 0.5
 

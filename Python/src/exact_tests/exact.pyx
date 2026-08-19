@@ -1,11 +1,11 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t
-from libc.math cimport NAN
+from libc.math cimport INFINITY
 import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.8.9"
+__version__ = "0.9.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -129,7 +129,7 @@ cdef td_real_struct TdrMake(object p):
 
 cdef double zeroval(bint logp) nogil:
     if logp:
-        return NAN
+        return -INFINITY
     return 0.0
 
 cdef double oneval(bint logp) nogil:
@@ -139,7 +139,7 @@ cdef double oneval(bint logp) nogil:
 cdef double dbinom_internal(int64_t k, int64_t n, double p, bint logp) nogil:
     if k < 0 or k > n:
         if logp:
-            return NAN
+            return -INFINITY
         else:
             return 0.0
     if p == 0.0 or p == 1.0:
@@ -155,7 +155,7 @@ cdef dbinom_vectorize_k(object k_obj, int64_t n, double p, bint logp):
     cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(kar_size, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
-        out_of_support_result = NAN
+        out_of_support_result = -INFINITY
     else:
         out_of_support_result = 0.0
     cdef uintptr_t idx
@@ -229,7 +229,7 @@ cdef dbinom_vectorize_kp(object k_obj, int64_t n, object p_obj, bint logp):
     cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(par_size, dtype=np.float64)
     cdef double out_of_support_result
     if logp:
-        out_of_support_result = NAN
+        out_of_support_result = -INFINITY
     else:
         out_of_support_result = 0.0
     cdef double pd
@@ -693,8 +693,8 @@ def dhyper(object x, int64_t m, int64_t n, int64_t k, bint logp=0):
 
 cdef double hypergeom_cdf_internal(int64_t k, int64_t M, int64_t n, int64_t N, bint lowertail, bint logp, bint approx) except? 2.0:
     if k < 0 or k >= (1LL << 52):
-        # Unlike pbinom(), we don't bother with returning NAN/0/1 in some of
-        # these cases.
+        # Unlike pbinom(), we don't bother with returning -INFINITY/0/1 in some
+        # of these cases.
         raise RuntimeError("Parameters, row/column sums, and population size must be in [0, 2^52).")
     cdef int64_t b = n - k
     cdef int64_t c = N - k
@@ -706,7 +706,7 @@ cdef double hypergeom_cdf_internal(int64_t k, int64_t M, int64_t n, int64_t N, b
         c, d = d, c
         if k == 0 or d == 0:
             if logp:
-                return NAN
+                return -INFINITY
             return 0
         k -= 1
         b += 1

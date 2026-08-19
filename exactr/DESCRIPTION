@@ -19,7 +19,7 @@ Authors@R: c(person(given="Christopher",
 Description: Implements the binomial and Fisher's (2x2 and 2x3 so far) exact
     tests, along with corresponding discrete distributions
     (binomial, hypergeometric).  Accuracy and speed of these functions compare
-    favorably to their counterparts in the R 4.6.0 standard library.
+    favorably to their counterparts in the R 4.6 standard library.
 Encoding: UTF-8
 License: LGPL-3
 BugReports: https://github.com/chrchang/stats/issues
@@ -30,5 +30,5 @@ LinkingTo:
 Imports:
     Rcpp
 Suggests:
-    testthat (>= 3.0.0)
+    Rmpfr, testthat (>= 3.0.0)
 Config/testthat/edition: 3
