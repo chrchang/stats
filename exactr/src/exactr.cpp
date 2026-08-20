@@ -42,22 +42,23 @@ plink2::td_real make_prob_tdr(double prob, double prob_denom) {
 //'
 //' Mass function for binomial distribution with parameters `size` and `prob`.
 //'
-//' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
-//'   precision floating point arithmetic.  Proceedings of the 15th IEEE
-//'   Symposium on Computer Arithmetic.
-//'
 //' @param x vector of success counts.
 //' @param size number of trials (zero or more).
 //' @param prob probability of success on each trial.
 //' @param log logical; if TRUE, probabilities are returned as logarithms.
 //'
-//' @details Implementation is based on log-factorial functions utilizing the
-//'   QD high-precision library.
-//'
-//'   Extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin) are not
-//'   supported unless the Rmpfr package is installed.
+//' @details Implementation is based on Loader's algorithm and the QD
+//'   high-precision library.
 //'
 //' @return pmf(x).
+//'
+//' @references Loader C (2000) Fast and Accurate Computation of Binomial
+//'   Probabilities.
+//'   <https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf>
+//'
+//' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+//'   precision floating point arithmetic.  Proceedings of the 15th IEEE
+//'   Symposium on Computer Arithmetic.
 //'
 //' @export
 // [[Rcpp::export]]
@@ -122,45 +123,11 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = N
       }
       continue;
     }
-    // stats::dbinom() is expected to handle size in [2^52, Inf), and denormal
-    // p.  If we need to handle such arguments, I'd prefer to do so by
-    // delegating to Rmpfr; that lets us continue to promise <= 1 ULP error.
-    // (todo: check whether the 1 ULP error promise is currently broken for p
-    // near but not below DBL_MIN, and fix that if so.)
-    //
-    // In the meantime, plink2::BinomMass()'s domain could be extended up to
-    // n=INT64_MAX.
-    if ((n_round >= (1LL << 52)) || (p < DBL_MIN)) {
-      if (n_round == R_PosInf) {
-        results[ridx] = log? R_NegInf : 0.0;
-        continue;
-      }
-      Environment pkg_env;
-      try {
-        pkg_env = Environment::namespace_env("Rmpfr");
-      } catch (...) {
-        stop("The 'Rmpfr' package is required for extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin)");
-      }
-      // log(n!) is the only positive-magnitude term in the log-probability,
-      // and for large n it has less than log2(n log n) bits before the binary
-      // point.  So if we perform the computation with (log2(n log n) + 60)
-      // bits, relative error should still be limited to ~2^{-60} after the big
-      // subtraction.
-      int32_t prec = 60;
-      if (n_round > 1) {
-        // log2(n_round * std::log(n_round)) can overflow
-        prec += nearbyint(log2(n_round) + log2(std::log(n_round)));
-      }
-      Function mpfr_func = pkg_env["mpfr"];
-      List p_mp = mpfr_func(p, prec);
-      Function dbinom_func = pkg_env["dbinom"];
-      List pval_mp = dbinom_func(k_round, n_round, p_mp, log, true);
-      Function as_numeric_func("as.numeric");
-      NumericVector pval_dbl = as_numeric_func(pval_mp);
-      results[ridx] = pval_dbl[0];
+    if (n_round == R_PosInf) {
+      results[ridx] = log? R_NegInf : 0.0;
       continue;
     }
-    results[ridx] = plink2::BinomMass(static_cast<int64_t>(k_round), static_cast<int64_t>(n_round), plink2::tdr_make1(p), log);
+    results[ridx] = plink2::BinomMassExtrange(k_round, n_round, p, log);
   }
   // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
   if (nans_produced) {

@@ -71,6 +71,7 @@ extern const dd_real _ddr_log05;
 extern const dd_real _ddr_64log2;
 extern const dd_real _ddr_ln10;
 extern const dd_real _ddr_recip_ln10;
+extern const dd_real _ddr_half_log_2pi;
 
 CONSTI32(_tdr_n_ln_fact, 256);
 extern const td_real _tdr_ln_fact[_tdr_n_ln_fact];
@@ -431,6 +432,14 @@ dd_real ddr_expm1(const dd_real a);
 
 dd_real ddr_log1p(const dd_real a);
 
+// Supports denormal a.
+HEADER_INLINE dd_real ddr_log_extrange(const dd_real a) {
+  if (a.x[0] > DBL_MIN) {
+    return ddr_log(a);
+  }
+  const dd_real a_shifted = ddr_mul_pwr2(a, k2p64);
+  return ddr_sub(ddr_log(a_shifted), _ddr_64log2);
+}
 
 // Try to put smaller-magnitude values first (or just use ddr_sort_and_add()).
 HEADER_INLINE dd_real ddr_add3(const dd_real a, const dd_real b, const dd_real c) {
@@ -447,6 +456,9 @@ HEADER_INLINE dd_real ddr_add5(const dd_real a, const dd_real b, const dd_real c
 
 // Assumes xx is a nonnegative integer < 2^52.
 dd_real ddr_lfact(double xx);
+
+// Supports integer 0 <= n <= DBL_MAX.
+dd_real ddr_stirlerr(const dd_real n_ddr);
 
 HEADER_INLINE dd_real ddr_add_lfacts(const double a, const double b) {
   return ddr_add(ddr_lfact(a), ddr_lfact(b));
@@ -788,6 +800,9 @@ HEADER_INLINE td_real tdr_muld(const td_real a, double b) {
 }
 
 // todo: check if sloppy-mul is good enough for all our use cases
+
+// probable todo: check if tdr_muldd() (and the like) is worth implementing;
+// note that the corresponding QD function had a bugfix in May 2026
 
 td_real tdr_accurate_mul(const td_real a, const td_real b);
 

@@ -2,6 +2,7 @@
 *.o
 *.log
 binom_demo
+dbinom_demo
 fisher_demo
 hwe_demo
 stats_src.zip

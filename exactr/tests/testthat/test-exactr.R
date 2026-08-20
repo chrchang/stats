@@ -17,9 +17,6 @@ test_that("dbinom works", {
   suppressWarnings(expect_warning(fx0 <- dbinom(x0, size = 3, prob = 0.1)))
   expect_all_equal(fx0, 0)
 
-  ## This test is quite slow, since exactr::dbinom uses Rmpfr for the larger
-  ## exponents.  May want to skip most of the Rmpfr-requiring cases in some
-  ## circumstances.
   expect_no_error(lapply(sample(10000, size=1000), function(M) {
     n <- (M/100)*10^(2:20)
     if (anyNA(P <- dbinom(1,n,0.5))) {

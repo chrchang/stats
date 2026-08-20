@@ -48,6 +48,9 @@ double LnBinomCoeff(int64_t n, int64_t k);
 
 double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp);
 
+// Unlike BinomMass(), this supports n >= 2^52 and denormal p.
+double BinomMassExtrange(double k, double n, double p, uint32_t logp);
+
 double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
 
 HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {

@@ -22,13 +22,14 @@ pmf(x).
 Mass function for binomial distribution with parameters \code{size} and \code{prob}.
 }
 \details{
-Implementation is based on log-factorial functions utilizing the
-QD high-precision library.
-
-Extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin) are not
-supported unless the Rmpfr package is installed.
+Implementation is based on Loader's algorithm and the QD
+high-precision library.
 }
 \references{
+Loader C (2000) Fast and Accurate Computation of Binomial
+Probabilities.
+\url{https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf}
+
 Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
 precision floating point arithmetic.  Proceedings of the 15th IEEE
 Symposium on Computer Arithmetic.

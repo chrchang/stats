@@ -55,6 +55,14 @@ double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp) {
   return ddr_exp(ln_prob_ddr).x[0];
 }
 
+double BinomMassExtrange(double k, double n, double p, uint32_t logp) {
+  const dd_real ln_prob_ddr = binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), ddr_maked(p), ddr_add2d(1.0, -p));
+  if (logp) {
+    return ln_prob_ddr.x[0];
+  }
+  return ddr_exp(ln_prob_ddr).x[0];
+}
+
 // Assumes 0 <= obs_succ <= obs_tot < 2^52 and 0 < p < 1.
 //
 // See Pbinom() below for a higher-accuracy variant of this function; this one

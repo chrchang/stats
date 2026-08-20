@@ -5,22 +5,23 @@
 #'
 #' Mass function for binomial distribution with parameters `size` and `prob`.
 #'
-#' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
-#'   precision floating point arithmetic.  Proceedings of the 15th IEEE
-#'   Symposium on Computer Arithmetic.
-#'
 #' @param x vector of success counts.
 #' @param size number of trials (zero or more).
 #' @param prob probability of success on each trial.
 #' @param log logical; if TRUE, probabilities are returned as logarithms.
 #'
-#' @details Implementation is based on log-factorial functions utilizing the
-#'   QD high-precision library.
-#'
-#'   Extreme inputs (size >= 2^52, or 0 < prob < .Machine$double.xmin) are not
-#'   supported unless the Rmpfr package is installed.
+#' @details Implementation is based on Loader's algorithm and the QD
+#'   high-precision library.
 #'
 #' @return pmf(x).
+#'
+#' @references Loader C (2000) Fast and Accurate Computation of Binomial
+#'   Probabilities.
+#'   <https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf>
+#'
+#' @references Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
+#'   precision floating point arithmetic.  Proceedings of the 15th IEEE
+#'   Symposium on Computer Arithmetic.
 #'
 #' @export
 dbinom <- function(x, size, prob = as.numeric( c(0.5)), log = FALSE) {

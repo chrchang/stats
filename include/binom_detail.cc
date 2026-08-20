@@ -86,6 +86,71 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
   return ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
 }
 
+// binom_ln_prob_loader() implements Catherine Loader's algorithm:
+//   https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+// with dd_reals.  Relative error should be better than ~2^{-90}?
+//
+// The key idea is to decompose the log-probability into a nonpositive term
+// corresponding to p_0 := n/k, and two more nonpositive terms of the form
+//   C * (x log x + 1 - x).
+// Since (x log x + 1 - x) can be accurately evaluated via series expansion for
+// x near 1, we never have significant cancellation.
+
+dd_real loader_bd0(dd_real x_ddr, dd_real np_ddr) {
+  const dd_real x_minus_np_ddr = ddr_sub(x_ddr, np_ddr);
+  // x+np may overflow.
+  const dd_real half_x_plus_np_ddr = ddr_add(ddr_mul_pwr2(x_ddr, 0.5), ddr_mul_pwr2(np_ddr, 0.5));
+  if (fabs(x_minus_np_ddr.x[0]) >= 0.2 * half_x_plus_np_ddr.x[0]) {
+    dd_real log_x_div_np_ddr;
+    // Avoid potential x/np overflow.
+    if (x_ddr.x[0] * (1.0 / (k2p800 * k2p100)) < np_ddr.x[0]) {
+      log_x_div_np_ddr = ddr_log(ddr_accurate_div(x_ddr, np_ddr));
+    } else {
+      log_x_div_np_ddr = ddr_sub(ddr_log(x_ddr), ddr_log_extrange(np_ddr));
+    }
+    // Avoid potential ddr_mul() overflow.
+    return ddr_mul_pwr2(ddr_sub(ddr_mul(ddr_mul_pwr2(x_ddr, 1.0 / 2048), log_x_div_np_ddr), ddr_mul_pwr2(x_minus_np_ddr, 1.0 / 2048)), 2048);
+  }
+  const dd_real double_v_ddr = ddr_accurate_div(x_minus_np_ddr, half_x_plus_np_ddr);
+  dd_real ej_ddr = ddr_mul(x_ddr, double_v_ddr);
+  const dd_real v_ddr = ddr_mul_pwr2(double_v_ddr, 0.5);
+  dd_real s_ddr = ddr_mul(x_minus_np_ddr, v_ddr);
+  const dd_real v2_ddr = ddr_sqr(v_ddr);
+  for (double j = 1; ; j += 1) {
+    ej_ddr = ddr_mul(ej_ddr, v2_ddr);
+    const dd_real s1_ddr = ddr_add(s_ddr, ddr_divd(ej_ddr, 2*j + 1));
+    // Could stop at ~70-bit accuracy if we want a bit more speed.
+    if (ddr_eq(s1_ddr, s_ddr)) {
+      return s_ddr;
+    }
+    s_ddr = s1_ddr;
+  }
+}
+
+dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr) {
+  // Assumes k <= n are nonnegative integers where ddr_sub(n_ddr, k_ddr)
+  // does not incur any error in representing n-k.
+  // Assumes 0 < p,q < 1, p+q=1; one of them may be denormal.
+  if (ddr_is_zero(k_ddr)) {
+    return ddr_mul(ddr_log_extrange(q_ddr), n_ddr);
+  }
+  const dd_real nmk_ddr = ddr_sub(n_ddr, k_ddr);
+  if (ddr_is_zero(nmk_ddr)) {
+    return ddr_mul(ddr_log_extrange(p_ddr), n_ddr);
+  }
+  dd_real ddrs[4];
+  ddrs[0] = ddr_stirlerr(k_ddr);
+  ddrs[1] = ddr_stirlerr(nmk_ddr);
+  ddrs[2] = loader_bd0(k_ddr, ddr_mul(n_ddr, p_ddr));
+  ddrs[3] = loader_bd0(nmk_ddr, ddr_mul(n_ddr, q_ddr));
+  const dd_real log_denom_ddr = ddr_sort_and_add(4, ddrs);
+  const dd_real lc_ddr = ddr_sub(ddr_stirlerr(n_ddr), log_denom_ddr);
+  // Avoid potential overflow/underflow in Loader's original code.  See R
+  // src/nmath/dbinom.c .
+  const dd_real lf_ddr = ddr_add(ddr_add(ddr_log1p(ddr_accurate_div(ddr_negate(k_ddr), n_ddr)), ddr_mul_pwr2(_ddr_half_log_2pi, 2)), ddr_log(k_ddr));
+  return ddr_sub(lc_ddr, ddr_mul_pwr2(lf_ddr, 0.5));
+}
+
 // Low-level interface for vectorized dbinom() (multiple k, single n and p).
 void BinomMassMultiKPrecomp(int64_t n, td_real p_tdr, uint32_t* p_is_half_ptr, td_real* lfact_n_tdr_ptr, td_real* lnp_tdr_ptr, td_real* lnq_tdr_ptr) {
   const dd_real p_ddr = ddr_make_td(p_tdr);
