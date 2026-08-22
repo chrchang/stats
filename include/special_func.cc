@@ -334,7 +334,8 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
   const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   dd_real result_ln_ddr;
   // This should be consistent with use_tdr_for_binom_lnprob().
-  if (a_plus_b > S_CAST(double, 1LL << 36)) {
+  // bugfix (21 Aug 2026): this comparison went the wrong way
+  if (a_plus_b < S_CAST(double, 1LL << 36)) {
     dd_real ddrs[5];
     ddrs[0] = ddr_lfact(a_plus_b - 1);
     ddrs[1] = ddr_negate(ddr_lfact(aa - 1));

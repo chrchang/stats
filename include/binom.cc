@@ -27,7 +27,27 @@
 namespace plink2 {
 #endif
 
-// Assumes 0 <= n < 2^52, k in [0, n].
+// Currently assumes 0 <= n < 2^52, k in [0, n].
+// Not difficult to support n up to DBL_MAX.  WLOG let k <= n/2.  Then,
+//     log(n!/(k!(n-k)!))
+//   =   0.5*log(2*pi) + (n+0.5)*log(n)     - n     + stirlerr(n)
+//     - 0.5*log(2*pi) - (n-k+0.5)*log(n-k) + (n-k) - stirlerr(n-k)
+//     - log(k!)
+//   =        k*log(n) + (n-k+0.5)*log(n)   - k     + stirlerr(n)
+//                     - (n-k+0.5)*log(n-k)         - stirlerr(n-k)
+//          - log(k!)
+//   =   [k*(log(n)-1) + (n-(k-0.5))*log1p(k/(n-k)) + stirlerr(n)]
+//     - [log(k!) + stirlerr(n-k)]
+// The final value is at least around
+//      log((2k)!) - 2 log(k!)
+//   ~= 2k log (2k) - 2k log k
+//    = 2k log 2
+// which is never less than ~1/512th of log(k!) ~= k log k, so dd_real internal
+// precision is easily good enough for a float64 return value.
+// (Can still use the direct calculation for n<2^36.)
+// (We could compute stirlerr(n-k)-stirlerr(n) in a way that avoids
+// cancellation between the leading terms, but that would be inconsequential
+// here.)
 double LnBinomCoeff(int64_t n, int64_t k) {
   if ((k == 0) || (k == n)) {
     return 0;

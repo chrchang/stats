@@ -106,7 +106,7 @@ dd_real loader_bd0(dd_real x_ddr, dd_real np_ddr) {
     if (x_ddr.x[0] * (1.0 / (k2p800 * k2p100)) < np_ddr.x[0]) {
       log_x_div_np_ddr = ddr_log(ddr_accurate_div(x_ddr, np_ddr));
     } else {
-      log_x_div_np_ddr = ddr_sub(ddr_log(x_ddr), ddr_log_extrange(np_ddr));
+      log_x_div_np_ddr = ddr_sub(ddr_log(x_ddr), ddr_log_extdomain(np_ddr));
     }
     // Avoid potential ddr_mul() overflow.
     return ddr_mul_pwr2(ddr_sub(ddr_mul(ddr_mul_pwr2(x_ddr, 1.0 / 2048), log_x_div_np_ddr), ddr_mul_pwr2(x_minus_np_ddr, 1.0 / 2048)), 2048);
@@ -132,11 +132,11 @@ dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_rea
   // does not incur any error in representing n-k.
   // Assumes 0 < p,q < 1, p+q=1; one of them may be denormal.
   if (ddr_is_zero(k_ddr)) {
-    return ddr_mul(ddr_log_extrange(q_ddr), n_ddr);
+    return ddr_mul(ddr_log_extdomain_maybehalf(q_ddr), n_ddr);
   }
   const dd_real nmk_ddr = ddr_sub(n_ddr, k_ddr);
   if (ddr_is_zero(nmk_ddr)) {
-    return ddr_mul(ddr_log_extrange(p_ddr), n_ddr);
+    return ddr_mul(ddr_log_extdomain_maybehalf(p_ddr), n_ddr);
   }
   dd_real ddrs[4];
   ddrs[0] = ddr_stirlerr(k_ddr);

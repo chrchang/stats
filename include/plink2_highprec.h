@@ -433,12 +433,19 @@ dd_real ddr_expm1(const dd_real a);
 dd_real ddr_log1p(const dd_real a);
 
 // Supports denormal a.
-HEADER_INLINE dd_real ddr_log_extrange(const dd_real a) {
+HEADER_INLINE dd_real ddr_log_extdomain(const dd_real a) {
   if (a.x[0] > DBL_MIN) {
     return ddr_log(a);
   }
   const dd_real a_shifted = ddr_mul_pwr2(a, k2p64);
   return ddr_sub(ddr_log(a_shifted), _ddr_64log2);
+}
+
+HEADER_INLINE dd_real ddr_log_extdomain_maybehalf(const dd_real a) {
+  if (ddr_is(a, 0.5)) {
+    return _ddr_log05;
+  }
+  return ddr_log_extdomain(a);
 }
 
 // Try to put smaller-magnitude values first (or just use ddr_sort_and_add()).

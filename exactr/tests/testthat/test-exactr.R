@@ -1,5 +1,6 @@
 test_that("dbinom works", {
-  ## Based on dbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
+  ## Based on dbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
+  ## tests/reg-tests-1{a,e}.R .
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
   for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
@@ -30,23 +31,78 @@ test_that("dbinom works", {
   N <- 1.72e308
   prb <- print(seq(13, 127, by = 6))/128
   db <- dbinom(x., N, prob = prb, log = TRUE)
-  expect_equal(-2^1012 * c(3978.52477729, 3004.42235841, 2321.14764068, 1804.10617471, 1395.99909831,
-                           1065.91552786, 795.509574314, 573.263664821, 391.782927199, 246.423578896,
-                           134.598198071, 55.4909088367, 10.1000515546, 1.6625043907, 36.710476479,
-                           127.476528317, 297.82558994, 600.93919587, 1195.32578926, 3368.52998705),
+  expect_equal(-2^1012 * c(3978.52477729, 3004.42235841, 2321.14764068,
+                           1804.10617471, 1395.99909831, 1065.91552786,
+                           795.509574314, 573.263664821, 391.782927199,
+                           246.423578896, 134.598198071, 55.4909088367,
+                           10.1000515546, 1.6625043907, 36.710476479,
+                           127.476528317, 297.82558994, 600.93919587,
+                           1195.32578926, 3368.52998705),
                db,
                tolerance=1e-11)
 
+  dbArg <- cbind(x = c(1.465e+308, 1.4715e+308, 1.4762e+308, 1.4822e+308,
+                       1.4869e+308, 1.4949e+308, 1.5034e+308, 1.5137e+308,
+                       1.523e+308, 1.5305e+308, 1.5416e+308, 1.5486e+308,
+                       1.5653e+308, 1.5853e+308, 1.639e+308),
+                 size=c(1.6574e+308, 1.6514e+308, 1.7035e+308, 1.679e+308,
+                        1.6531e+308, 1.6285e+308, 1.6993e+308, 1.6661e+308,
+                        1.6801e+308, 1.6873e+308, 1.7506e+308, 1.7052e+308,
+                        1.6752e+308, 1.6885e+308, 1.731e+308),
+                 prob=c(27, 27, 26, 27, 28, 29, 28, 29, 29, 30, 29, 30, 32, 33,
+                        35)/128)
+  db <- apply(dbArg, 1, \(v3) do.call(dbinom, c(v3, list(log=TRUE))))
+  expect_equal(db,
+               c(-1.73031e+308, -1.76399e+308, -1.73534e+308, -1.74653e+308,
+                 -1.7615e+308, -1.79181e+308, -1.7259e+308,  -1.77688e+308,
+                 -1.77981e+308, -1.74055e+308, -1.70236e+308, -1.76548e+308,
+                 -1.79598e+308, -1.79126e+308, -1.79514e+308),
+                 tolerance=1e-5)
+
   x <- c(12:20, 100*c(1,3,10,20,50))
   db <- dbinom(x, size=x+1, prob = 2^-1024.1, log = TRUE)
-  expect_equal(c(-8515.66, -9225.44, -9935.22, -10645, -11354.8, -12064.6, -12774.4,
-                 -13484.2, -14194, -70980.6, -212950, -709845, -1419700, -3549250),
+  expect_equal(c(-8515.66, -9225.44, -9935.22, -10645, -11354.8, -12064.6,
+                 -12774.4, -13484.2, -14194, -70980.6, -212950, -709845,
+                 -1419700, -3549250),
                db,
                tolerance=1e-5)
+
+  Pr <- stats::dmultinom(c(0,0,3), prob=c(1,1,14))
+  expect_equal(Pr, dbinom(3, 3, p=14/16))
+
+  ## get value of `expr` and keep warning as attribute (if there is one)
+  getVaW <- function(expr, obj=FALSE) {
+    W <- NULL
+    withCallingHandlers(val <- expr,
+                        warning = function(w) {
+                          W <<- if(obj) w else conditionMessage(w)
+                          invokeRestart("muffleWarning")
+                        })
+    structure(val %||% quote(._NULL_()), warning = W)
+  }
+  onWindows <- .Platform$OS.type == "windows"
+  englishMsgs <- {
+    if (nzchar(lang <- Sys.getenv("LANGUAGE"))) {
+      lang == "en"
+    } else {
+      if (!onWindows) {
+        lc.msgs <- sub("\\..*", "", print(Sys.getlocale("LC_MESSAGES")))
+        lc.msgs == "C" || substr(lc.msgs, 1, 2) == en
+      } else {
+        lc.type <- sub("\\..*", "", sub("_.*", "", print(Sys.getlocale("LC_CTYPE"))))
+        lc.type == "English" || lc.type == "C"
+      }
+    }
+  }
+  gd <- getVaW(dbinom(1234560:1234570, 9876543.2, .5))
+  if (englishMsgs) {
+    expect_identical(gd, structure(rep(NaN, 11), warning="NaNs produced"))
+  }
 })
 
 test_that("pbinom works", {
-  ## Based on pbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
+  ## Based on pbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
+  ## tests/reg-tests-1{a,b}.R .
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
   for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
@@ -80,10 +136,16 @@ test_that("pbinom works", {
       stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
     }
   }))
+
+  x <- c(-1,0,1,2)
+  expect_identical(pbinom(x, size=0, p=0.5), c(0,1,1,1))
+
+  expect_false(is.nan(pbinom(10, 1e6, 0.01, log.p=TRUE)))
 })
 
 test_that("qbinom works", {
-  ## Based on qbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R .
+  ## Based on qbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
+  ## tests/reg-tests-1a.R .
   set.seed(123)
   n <- 20
   Rbinom <- sort(unique(stats::rbinom(n, size = 55, prob = pi/16)))
@@ -131,6 +193,15 @@ test_that("qbinom works", {
   expect_equal(qb6, c(6001:6004, 6004:6005))
   expect_true(all((1 > pqb6) & (pqb6 >= 0.05)))
   expect_true(all((0.05 > pqb6_1) & (pqb6_1 >= 0.035)))
+
+  expect_equal(qbinom(0.95, 10, 1), 10)
+  expect_equal(qbinom(0, 10, 1), 0)
+  expect_equal(qbinom(0.95, 10, 0), 0)
+  expect_equal(qbinom(0, 10, 0), 0)
+  expect_equal(qbinom(0.95, 0, 0.5), 0)
+
+  z <- qbinom(-Inf, 1, 0.5, log.p=TRUE)
+  expect_true(is.finite(z))
 })
 
 test_that("binom.test works", {
