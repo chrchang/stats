@@ -18,8 +18,10 @@ Authors@R: c(person(given="Christopher",
                     comment = "QD library"))
 Description: Implements the binomial and Fisher's (2x2 and 2x3 so far) exact
     tests, along with corresponding discrete distributions
-    (binomial, hypergeometric).  Accuracy and speed of these functions compare
-    favorably to their counterparts in the R 4.6 standard library.
+    (binomial, hypergeometric).  Accuracy and speed of most of these functions
+    compare favorably to their counterparts in the R 4.6 standard library
+    (exception: binomial-distribution functions sacrifice a bit of speed for
+    extra accuracy).
 Encoding: UTF-8
 License: LGPL-3
 BugReports: https://github.com/chrchang/stats/issues

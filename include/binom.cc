@@ -43,7 +43,9 @@ namespace plink2 {
 //   ~= 2k log (2k) - 2k log k
 //    = 2k log 2
 // which is never less than ~1/512th of log(k!) ~= k log k, so dd_real internal
-// precision is easily good enough for a float64 return value.
+// precision is easily good enough for a float64 return value.  (So, while we
+// could expand the log(k!) expression and cancel out more terms, there's no
+// need.)
 // (Can still use the direct calculation for n<2^36.)
 // (We could compute stirlerr(n-k)-stirlerr(n) in a way that avoids
 // cancellation between the leading terms, but that would be inconsequential
@@ -112,9 +114,9 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    // (took a brief look at Boost's use_asym branch, don't see a reasonable
-    // way to use it without sacrificing accuracy, and current code seems fast
-    // enough.)
+    // TODO: check if BASYM accuracy can be improved enough to be worth it.  R
+    // 4.6 implementation seems substantially better than Boost 1.91, and
+    // should at least be good enough for approx=True?
     return ibeta_largeab_approx(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp * (1 + complement), logp);
   }
   if (complement) {

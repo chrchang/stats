@@ -301,7 +301,7 @@ dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_rea
     */
     dd_ddr = ddr_accurate_div(ddr_maked(1.0), dd_ddr);
     const dd_real delta_ddr = ddr_mul(cc_ddr, dd_ddr);
-    // If I correctly understand what's going on here, (delta - 1) has
+    // If I correctly understand what's going on here, log(delta) has
     // alternating sign and decreasing magnitude, so this should ensure less
     // than cf_eps relative error is coming from incomplete evaluation of the
     // continued fraction.  (Recall that we actually need to limit the
