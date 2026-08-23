@@ -128,14 +128,16 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   // Otherwise, we evaluate the starting log-likelihood with dd_reals to work
   // around catastrophic cancellation, and then iterate leftward to the
   // precision limit.
+
+  // bugfix (23 Aug 2026): previous 168-steps-from-mode check doesn't prevent
+  // overflow for obs_m12 huge, obs_m21 <= 168
+  const double first_inward_mult = m12 * m21 / ((m11 + 1) * (m22 + 1));
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
   const double mx2 = obs_m12 + obs_m22;
   const double mxx = m1x + m2x;
   const double modal_m22 = m2x * mx2 / mxx;
-  // ((168^168) / 168!)^4 ~= 6.3e285
-  // Need a bit more headroom than int32_t case.
-  if (modal_m22 <= obs_m22 + 168) {
+  if ((first_inward_mult <= 1) || ((modal_m22 - m22) * log(first_inward_mult) < 656)) {
     double lik = 1;
     double right_sum = 0;
     while (1) {
@@ -324,12 +326,13 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
   // (todo: opportunistically use the _lfact() path when that's within the
   // error budget and rates to be faster than the left_sum / (left_sum +
   // right_sum) approach.)
+  const double first_inward_mult = m12 * m21 / ((m11 + 1) * (m22 + 1));
   const double m1x = obs_m11 + obs_m12;
   const double m2x = obs_m21 + obs_m22;
   const double mx2 = obs_m12 + obs_m22;
   const double mxx = m1x + m2x;
   const double modal_m22 = m2x * mx2 / mxx;
-  if (modal_m22 <= m22 + 168) {
+  if ((first_inward_mult <= 1) || ((modal_m22 - m22) * log(first_inward_mult) < 656)) {
     dd_real lik_ddr = ddr_maked(1.0);
     dd_real right_sum_ddr = ddr_maked(0.0);
     if (m21 > 0) {

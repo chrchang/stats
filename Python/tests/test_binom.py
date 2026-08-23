@@ -134,8 +134,15 @@ def test_pbinom():
     assert exact_tests.pbinom(5549, 9999, 0.37, logp=True) == pytest.approx(-3.8607083741381037e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
     assert exact_tests.pbinom(2**50 - 555, 2**51, 0.499999) == pytest.approx(1, rel=1e-15, abs=0)
-    # regression test for 0.9.1 bugfix
-    assert exact_tests.pbinom(2**46 - 1, 2**47 - 1) == pytest.approx(0.5, rel=2.3e-16, abs=0)
+    # Regression test for 0.9.1 bugfix.  pbinom() (and phyper()) under the
+    # default approx=False setting is *never* supposed to be off by more than 1
+    # ULP on Linux/Mac/Windows or any other system with a math library
+    # satisfying the Gladman et al. (2024) tolerances summarized at the top of
+    # include/plink2_float.h .
+    # Not too expensive (~0.02 sec oo M2 Mac), but yes, we don't want hundreds
+    # of cases like this in the regular test suite.
+    # Note that R tests should not be written
+    assert exact_tests.pbinom(2**46 - 1, 2**47 - 1) == pytest.approx(0.5, rel=2.23e-16, abs=0)
     # broadcast tests
     assert exact_tests.pbinom([[[0, 1, 2], [3, 4, 5]]], 5) == pytest.approx(np.array([[[0.03125, 0.1875, 0.5], [0.8125, 0.96875, 1]]]), rel=1e-15, abs=0)
     assert exact_tests.binom.cdf([0, 1, 2], 2, [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 1, 1], [0.5625, 0.9375, 1], [0.25, 0.75, 1], [0, 0, 1]]), rel=1e-15, abs=0)

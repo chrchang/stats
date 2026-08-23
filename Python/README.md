@@ -38,20 +38,20 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
 
     $ utils/phyper_accuracy.py --z-score -0.5  # scipy accuracy degrades quickly
     n in [2^5, 2^6): errRMS=0  approxErrRMS=1.72e-16  scipyErrRMS=2.84e-16
-    n in [2^20, 2^21): errRMS=0  approxErrRMS=3.01e-15  scipyErrRMS=1.73e-10
-    n in [2^35, 2^36): errRMS=0  approxErrRMS=3.93e-13  scipyErrRMS=1.05e-05
+    n in [2^20, 2^21): errRMS=0  approxErrRMS=2.75e-15  scipyErrRMS=1.73e-10
+    n in [2^35, 2^36): errRMS=0  approxErrRMS=4.13e-14  scipyErrRMS=1.05e-05
     $ utils/phyper_benchmark.py --z-score -0.5  # scipy speed is ok, except...
-    n=(2^5)-1: base=8.83e-07  approx=2.83e-07  scipy=3.49e-05 sec/iter
-    n=(2^20)-1: base=6.96e-05  approx=5.37e-06  scipy=4.4e-05 sec/iter
-    n=(2^35)-1: base=0.00713  approx=0.000413  scipy=0.002 sec/iter
+    n=(2^5)-1: base=7.67e-07  approx=2e-07  scipy=3.54e-05 sec/iter
+    n=(2^20)-1: base=7.1e-05  approx=5.57e-06  scipy=4.44e-05 sec/iter
+    n=(2^35)-1: base=0.0145  approx=0.000869  scipy=0.00196 sec/iter
     $ utils/phyper_benchmark.py --z-score 0.0001  # ...it blows up for large n when z approaches 0.
-    n=(2^5)-1: base=7.42e-07  approx=2.25e-07  scipy=3.52e-05 sec/iter
-    n=(2^20)-1: base=6.95e-05  approx=5.3e-06  scipy=0.000492 sec/iter
-    n=(2^35)-1: base=0.0146  approx=0.000851  scipy=2.7 sec/iter
+    n=(2^5)-1: base=7.75e-07  approx=2.33e-07  scipy=3.69e-05 sec/iter
+    n=(2^20)-1: base=7.61e-05  approx=5.68e-06  scipy=0.000512 sec/iter
+    n=(2^35)-1: base=0.0152  approx=0.000884  scipy=2.81 sec/iter
     $ utils/phyper_benchmark.py
-    n=(2^5)-1: base=7.5e-07  approx=2.04e-07  scipy=3.51e-05 sec/iter
-    n=(2^20)-1: base=6.88e-05  approx=5.32e-06  scipy=0.000492 sec/iter
-    n=(2^35)-1: base=0.0148  approx=0.000863  scipy=14.8 sec/iter
+    n=(2^5)-1: base=7.42e-07  approx=2.17e-07  scipy=3.6e-05 sec/iter
+    n=(2^20)-1: base=6.86e-05  approx=6.16e-06  scipy=0.00049 sec/iter
+    n=(2^35)-1: base=0.0146  approx=0.000855  scipy=14.9 sec/iter
 
     $ utils/fisher_exact_22_accuracy.py --z-score -1
     n in [2^5, 2^6): errRMS=9.71e-17  scipyErrRMS=2.39e-16

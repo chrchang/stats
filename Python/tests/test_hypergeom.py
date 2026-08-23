@@ -100,6 +100,8 @@ def test_phyper():
         assert exact_tests.phyper(1e9, 4e9, 7.999e9, 3e9, approx=approx) == pytest.approx(9.686381892010733e-05, rel=tol, abs=0)
         assert exact_tests.phyper(0, 0, 0, 0, approx=approx) == 1.0
         assert exact_tests.phyper(2, 2, 2, 4, approx=approx) == 1.0
+        # 0.9.2 bugfix
+        assert exact_tests.phyper(1e3, 1e3+167, 1e8+1e3, 1e8+1e3, approx=approx, logp=True) == pytest.approx(-1433.6513816770455, rel=tol, abs=0)
         # broadcast tests
         assert exact_tests.phyper([[[0, 1, 2], [3, 4, 5]]], 11, 12, 10) == pytest.approx(np.array([[[5.7688979481952964e-05, 0.002172951560486895, 0.02596965559679249], [0.14019383497105936, 0.4067169201776821, 0.7265446224256293]]]), rel=tol, abs=0)
         assert exact_tests.hypergeom.cdf([0, 1, 2], [[4], [5]], 2, 2) == pytest.approx(np.array([[0.16666666666666666, 0.8333333333333334, 1], [0.3, 0.9, 1]]), rel=tol, abs=0)
