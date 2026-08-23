@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -470,7 +470,7 @@ class _BinomDist:
 
     @staticmethod
     def sf(object k, object n, object p=0.5, bint approx=False):
-        return pbinom_vv_internal(k, n, p, complement=True, logp=True, approx=approx)
+        return pbinom_vv_internal(k, n, p, complement=True, logp=False, approx=approx)
 
 binom = _BinomDist()
 

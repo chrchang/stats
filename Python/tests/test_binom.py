@@ -144,6 +144,8 @@ def test_pbinom():
     # Note that the CRAN test harness can inject 1 ULP errors into math-library
     # calls, so the standard R test suite should not include this type of test.
     assert exact_tests.pbinom(2**46 - 1, 2**47 - 1) == pytest.approx(0.5, rel=2.23e-16, abs=0)
+    # 0.9.3 bugfix: .binom.sf() entry point acted like binom.logsf()
+    assert exact_tests.binom.sf(1, 2) == pytest.approx(0.25, rel=1e-15, abs=0)
     # broadcast tests
     assert exact_tests.pbinom([[[0, 1, 2], [3, 4, 5]]], 5) == pytest.approx(np.array([[[0.03125, 0.1875, 0.5], [0.8125, 0.96875, 1]]]), rel=1e-15, abs=0)
     assert exact_tests.binom.cdf([0, 1, 2], 2, [[0], [0.25], [0.5], [1]]) == pytest.approx(np.array([[1, 1, 1], [0.5625, 0.9375, 1], [0.25, 0.75, 1], [0, 0, 1]]), rel=1e-15, abs=0)
