@@ -141,7 +141,8 @@ def test_pbinom():
     # include/plink2_float.h .
     # Not too expensive (~0.02 sec oo M2 Mac), but yes, we don't want hundreds
     # of cases like this in the regular test suite.
-    # Note that R tests should not be written
+    # Note that the CRAN test harness can inject 1 ULP errors into math-library
+    # calls, so the standard R test suite should not include this type of test.
     assert exact_tests.pbinom(2**46 - 1, 2**47 - 1) == pytest.approx(0.5, rel=2.23e-16, abs=0)
     # broadcast tests
     assert exact_tests.pbinom([[[0, 1, 2], [3, 4, 5]]], 5) == pytest.approx(np.array([[[0.03125, 0.1875, 0.5], [0.8125, 0.96875, 1]]]), rel=1e-15, abs=0)
