@@ -114,9 +114,19 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    // TODO: check if BASYM accuracy can be improved enough to be worth it.  R
-    // 4.6 implementation seems substantially better than Boost 1.91, and
-    // should at least be good enough for approx=True?
+    // TODO: check if BASYM accuracy can be improved enough to be worth it.
+    // Boost 1.91 doesn't use BASYM at all, and the formula it uses clearly
+    // doesn't meet our goal.
+    // R 4.6 does use BASYM.  That performs very well in many large cases, but
+    // Brown BW, Levy LB (1994) "Certification of Algorithm 708:
+    // Significant-Digit Computation of the Incomplete Beta", notes that it can
+    // be weaker when a ~= b.  E.g. with R 4.6,
+    //   stats::pbinom(1e9, 2e9, 0.499999)
+    // has relative error is ~3.68e-12, while the corresponding exactr
+    // approx=True call has relative error ~2.90e-15.
+    // But if dd_real arithmetic and perhaps a few more asymptotic-expansion
+    // terms is enough to fix that, that would unblock exactr::pbinom() support
+    // for n >= 2^52.
     return ibeta_largeab_approx(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp * (1 + complement), logp);
   }
   if (complement) {
