@@ -127,7 +127,7 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = N
       results[ridx] = log? R_NegInf : 0.0;
       continue;
     }
-    results[ridx] = plink2::BinomMassExtrange(k_round, n_round, p, log);
+    results[ridx] = plink2::BinomMassExtdomain(k_round, n_round, p, log);
   }
   // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
   if (nans_produced) {
