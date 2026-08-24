@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
         goto main_ret_INVALID_CMDLINE;
       }
-      const double ln_pval = BinomMassExtrange(k, n, p, 1);
+      const double ln_pval = BinomMassExtdomain(k, n, p, 1);
       printf("Log-probability: %.17g\n", ln_pval);
     }
   }
