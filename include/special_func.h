@@ -36,6 +36,8 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
 // performed (1 = no complement, 2 = complement).
 double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double yy, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement);
 
+double erfcx_internal(double x);
+
 // Evaluates regularized incomplete beta function with ordinary (usually off by
 // several ULPs) accuracy.
 double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t midp_complement, uint32_t return_log);

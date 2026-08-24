@@ -23,8 +23,7 @@
 namespace plink2 {
 #endif
 
-// The main ideas behind the binomial distribution and test implementations
-// are:
+// The main ideas behind the binomial test implementation are:
 // 1. It is expensive to evaluate the (log-)probability of an outcome from
 //    scratch, but cheap to compute the likelihood-ratio between a pair of
 //    adjacent outcomes.  Both the binomial test and the {p,q}binom() functions
@@ -38,11 +37,13 @@ namespace plink2 {
 //    even 2^{-24} (float32) are acceptable, it's ok to ignore outcomes with
 //    probabilities less than ~that multiple of the starting outcome's
 //    probability; for common large cases, we can ignore most outcomes.
-// 3. (TODO: summary of DiDonato and Morris's BFRAC)
-// 4. With the help of the QD high-precision library, we can evaluate the
+// 3. With the help of the QD high-precision library, we can evaluate the
 //    log-probability of a single outcome to better-than-float64 precision, and
 //    accumulate partial sums with better-than-float64 precision when
 //    worthwhile.
+//
+// For large cases, we also utilize Catherine Loader's dbinom() algorithm and
+// the BFRAC+BASYM components of DiDonato and Morris's pbinom() algorithm.
 
 double LnBinomCoeff(int64_t n, int64_t k);
 

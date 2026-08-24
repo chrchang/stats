@@ -97,6 +97,10 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
     double HweLnP(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, int32_t midp) nogil
 
 
+cdef extern from "../include/special_func.h" namespace "plink2":
+    double erfcx_internal(double x)
+
+
 # The pmf and cmf functions here default to delivering <1 ULP relative error;
 # and similarly, the quantile functions are designed to correspond to cmf
 # approximations with at least 53-bit accuracy everywhere.
@@ -1025,3 +1029,7 @@ def HWE_exact(int32_t hom1, int32_t hets, int32_t hom2, str alternative="two-sid
 
 def snphwe(int32_t hets, int32_t hom1, int32_t hom2, bint midp=0, bint logp=0):
     return HWE_exact_2sided_internal(hom1, hets, hom2, midp, logp)
+
+
+def erfcx(double x):
+    return erfcx_internal(x)

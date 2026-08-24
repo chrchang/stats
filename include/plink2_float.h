@@ -329,6 +329,97 @@ HEADER_INLINE double _poly9_solo(double xx, double x2, double x3, double x4, dou
   return _poly8_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, prefer_fma(c9, x4, c5), c6, c7, c8);
 }
 
+HEADER_INLINE double _poly8_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8) {
+  const double rem0 =
+    fma(
+      fma(
+        c8,
+        x4,
+        c4),
+      x4,
+      c0);
+  const double rem1 =
+    fma(
+      c5,
+      x4,
+      c1)
+    * xx;
+  const double rem2 =
+    fma(
+      c6,
+      x4,
+      c2)
+    * x2;
+  const double rem3 =
+    fma(
+      c7,
+      x4,
+      c3)
+    * x3;
+  return rem0 + rem1 + (rem2 + rem3);
+}
+
+HEADER_INLINE double _poly9_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9) {
+  return _poly8_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, fma(c9, x4, c5), c6, c7, c8);
+}
+
+HEADER_INLINE double _poly10_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10) {
+  return _poly9_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, fma(c10, x4, c6), c7, c8, c9);
+}
+
+HEADER_INLINE double _poly11_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11) {
+  return _poly10_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, fma(c11, x4, c7), c8, c9, c10);
+}
+
+HEADER_INLINE double _poly12_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12) {
+  return _poly11_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, fma(c12, x4, c8), c9, c10, c11);
+}
+
+HEADER_INLINE double _poly13_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13) {
+  return _poly12_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, fma(c13, x4, c9), c10, c11, c12);
+}
+
+HEADER_INLINE double _poly14_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14) {
+  return _poly13_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, fma(c14, x4, c10), c11, c12, c13);
+}
+
+HEADER_INLINE double _poly15_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15) {
+  return _poly14_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, fma(c15, x4, c11), c12, c13, c14);
+}
+
+HEADER_INLINE double _poly16_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16) {
+  return _poly15_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, fma(c16, x4, c12), c13, c14, c15);
+}
+
+HEADER_INLINE double _poly17_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17) {
+  return _poly16_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, fma(c17, x4, c13), c14, c15, c16);
+}
+
+HEADER_INLINE double _poly18_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18) {
+  return _poly17_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, fma(c18, x4, c14), c15, c16, c17);
+}
+
+HEADER_INLINE double _poly19_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19) {
+  return _poly18_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, fma(c19, x4, c15), c16, c17, c18);
+}
+
+HEADER_INLINE double _poly20_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19, double c20) {
+  return _poly19_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, fma(c20, x4, c16), c17, c18, c19);
+}
+
+HEADER_INLINE double _poly21_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19, double c20, double c21) {
+  return _poly20_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, fma(c21, x4, c17), c18, c19, c20);
+}
+
+HEADER_INLINE double _poly22_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19, double c20, double c21, double c22) {
+  return _poly21_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, fma(c22, x4, c18), c19, c20, c21);
+}
+
+HEADER_INLINE double _poly23_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19, double c20, double c21, double c22, double c23) {
+  return _poly22_fma_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, fma(c23, x4, c19), c20, c21, c22);
+}
+
+
 HEADER_INLINE double POLY2(double xx, double c0, double c1, double c2) {
   return
     prefer_fma(
@@ -399,6 +490,12 @@ HEADER_INLINE double POLY8_SOLO(double xx, double c0, double c1, double c2, doub
 HEADER_INLINE double POLY9_SOLO(double xx, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9) {
   const double x2 = xx * xx;
   return _poly9_solo(xx, x2, xx * x2, x2 * x2, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9);
+}
+
+
+HEADER_INLINE double POLY23_FMA_SOLO(double xx, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8, double c9, double c10, double c11, double c12, double c13, double c14, double c15, double c16, double c17, double c18, double c19, double c20, double c21, double c22, double c23) {
+  const double x2 = xx * xx;
+  return _poly23_fma_solo(xx, x2, xx * x2, x2 * x2, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20, c21, c22, c23);
 }
 
 

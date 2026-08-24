@@ -846,6 +846,7 @@ double BinomTwoSidedP(int64_t obs_succ, int64_t obs_tot, td_real p_tdr, int32_t 
   }
   const double succ_odds_ratio = succ_odds_ratio_tdr.x[0];
   // todo: benchmark different thresholds
+  // todo: branch between bfrac and basym
   const uint32_t consider_bfrac = (obs_tot > 512);
   double tail_sum;
   if (consider_bfrac && (MINV(succ + 1, fail) >= 40)) {

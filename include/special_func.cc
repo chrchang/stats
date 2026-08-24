@@ -213,17 +213,135 @@ double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double 
   }
 }
 
-// Adaptations of DiDonato and Morris's BFRAC, which is in turn based on a
+double erfcx_internal(double x) {
+  // e^(x^2) * erfc(x).
+  //
+  // This is based on Norbert Juffa's implementation from
+  // https://stackoverflow.com/a/39777361 , which adapts the approach in
+  //   Shepherd MM and Laframboise JG (1981) Chebyshev Approximation of (1+2x)
+  //   exp(x^2) erfc x in 0 <= x < \inf .  Mathematics of Computation, 36.
+  // to achieve ~3 ULP maximum error with float64 arithmetic.  CC BY-SA 3.0
+  // license.
+  //
+  // This function makes heavy use of FMA to limit rounding error, so it
+  // incurs a significant performance hit when compiled to support older x86.
+  //
+  // An alternative is the erfcx_y100() function from
+  // http://ab-initio.mit.edu/faddeeva/ , which uses a huge switch statement
+  // with a different degree-6 polynomial for each of 100 cases.  That might
+  // make sense for an application where erfcx() was the primary compute
+  // bottleneck, but it's only secondary for BASYM so I doubt it's worth the
+  // i-cache hit.
+
+  const double a = fmax(x, 0.0 - x);  // NaN-preserving absolute value
+
+  // Compute q = (a-4)/(a+4) accurately.  [0, \inf) -> [-1, 1].
+  double q;
+  {
+    const double am4 = a - 4.0;
+    const double ap4 = a + 4.0;
+    const double recip_ap4 = 1.0 / ap4;
+    const double q_approx = am4 * recip_ap4;
+    const double negt = 4 * (q_approx + 1.0) - a;
+    const double e = fma(q_approx, -a, -negt);
+    q = fma(recip_ap4, e, q_approx);
+  }
+
+  // Approximate (1+2*a)*exp(a*a)*erfc(a) as p(q)+1 for q in [-1, 1].
+  const double p = POLY23_FMA_SOLO(q,
+                                   2.3299511862555250e-01,
+                                   -1.3962111684056208e-01,
+                                   1.5379652102610957e-02,
+                                   6.8097054254651804e-02,
+                                   -1.0103906603588378e-01,
+                                   9.3732834999538536e-02,
+                                   -6.6330365820039094e-02,
+                                   3.7167515521269866e-02,
+                                   -1.6197733983519948e-02,
+                                   5.0319701025945277e-03,
+                                   -7.5777369791018515e-04,
+                                   -1.9925728768782324e-04,
+                                   1.5062307184282616e-04,
+                                   -2.4397380523258482e-05,
+                                   -1.1225056665965572e-05,
+                                   5.7059822144459833e-06,
+                                   2.9796165315625938e-07,
+                                   -8.2040389712752056e-07,
+                                   7.1190423171700940e-08,
+                                   1.0585794011876720e-07,
+                                   -1.6386753783877791e-08,
+                                   -1.2155985739342269e-08,
+                                   1.5764464777959401e-09,
+                                   8.9820305531190140e-10);
+
+  // Divide (1+p) by (1+2*a) -> exp(a*a)*erfc(a)
+  double result;
+  {
+    const double d = a + 0.5;
+    const double half_recip_d = 0.5 / d;
+    q = fma(p, half_recip_d, half_recip_d);  // q = (p+1)/(1+2*a)
+    const double t = 2 * q;
+    const double e = (p - q) + fma(t, -a, 1.0);  // residual: (p+1)-q*(1+2*a)
+    result = fma(e, half_recip_d, q);
+  }
+  // Handle negative arguments: erfcx(x) = 2*exp(x*x) - erfcx(|x|)
+  if (x < 0.0) {
+    const double s = x * x;
+    const double d = fma(x, x, -s);
+    const double e = exp(s);
+    result = e - result;
+    result = fma(e, 2 * d, result);
+    result = result + e;
+    if (e > DBL_MAX) {
+      result = e;  // avoid creating NaN
+    }
+  }
+  return result;
+}
+
+dd_real erfcx_ddr(dd_real x_ddr) {
+  // We want a few more bits of accuracy than TOMS 708 erfc1() provides, and
+  // don't need bleeding-edge speed for now (just need to be better than
+  // evaluating >100000 continued-fraction terms...).  Hopefully this port of
+  // the Netlib CALERF function, which specifies constants to 18 digits and is
+  // supposed to have maximum relative error slightly better than 10^{-18}, is
+  // good enough.
+  // If not:
+  // - The Shepherd/Laframboise paper appears to have constants which yield
+  //   ~22-digit accuracy.
+  // - Zaghloul MR (2022) "Efficient multiple-precision computation of the
+  //   scaled complementary error function and the Dawson Integral" looks like
+  //   a description of an implementation with ~30-digit accuracy, but I'm not
+  //   aware of a permissively-licensed implementation.
+
+  // TODO
+  return ddr_maked(0.0);
+}
+
+CONSTI32(kBasymApproxIter, 20);
+
+dd_real basym_approx(double aa, double bb, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
+
+  // TODO
+  return ddr_maked(0.0);
+}
+
+// Adaptations of DiDonato and Morris's BFRAC and BASYM.  BFRAC is based on a
 // continued fraction introduced in
 //   Aroian LA (1941) Continued fractions for the incomplete beta function.
 //   Annals of Mathematical Statistics, 12.
-// For most larger cases, this continued fraction converges more quickly than
+// BASYM is introduced in
+//   DiDonato AR and Morris AH Jr (1992) Algorithm 708: Significant Digit
+//   Computation of the Incomplete Beta Function Ratios.  ACM Transactions on
+//   Mathematical Software, 18.
+//
+// For most larger cases, the continued fraction converges more quickly than
 // binomial partial sums.  ibeta_largeab_approx() makes limited use of dd_real
 // precision to address the worst precision bottlenecks, while ibeta_largeab()
 // trades off speed for provably great precision.
 //
 // (I still have work to do in understanding the derivation and properties of
-// this continued fraction well enough to take a real shot at improving e.g.
+// these two expansions well enough to take a real shot at improving e.g.
 // the rather similar hypergeometric cdf calculation.)
 double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t midp_complement, uint32_t return_log) {
   // normalized always true, min(aa,bb) >= 40, max(aa,bb) much larger
@@ -252,9 +370,17 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   //   0.27656474988907576
   //   >>> timeit.timeit(lambda: scipy.stats.binom.cdf(157000000, 419430500, 0.375), number=10000)
   //   0.27791083394549787
-  dd_real result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
-  const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], aq_minus_bp_ddr, inv, midp_complement));
-  result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
+
+  dd_real result_ln_ddr;
+  if (1) {
+    // BFRAC
+    result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
+    const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], aq_minus_bp_ddr, inv, midp_complement));
+    result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
+  } else {
+    // BASYM
+    result_ln_ddr = basym_approx(aa, bb, aq_minus_bp_ddr, inv, midp_complement);
+  }
   if ((!inv) && return_log) {
     return result_ln_ddr.x[0];
   }
@@ -379,10 +505,10 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
 }
 
 // This is a port of R 4.6.0 src/nmath/qnorm.c , which implements
-//   Wichura, MJ (1988) Algorithm AS 241: The Percentage Points of the Normal
+//   Wichura MJ (1988) Algorithm AS 241: The Percentage Points of the Normal
 //   Distribution.  Applied Statistics, 37, 477-484.
 // and
-//   Maechler, M (2022) Asymptotic Tail Formulas For Gaussian Quantiles.
+//   Maechler M (2022) Asymptotic Tail Formulas For Gaussian Quantiles.
 //   https://cran.r-project.org/web/packages/DPQ/vignettes/qnorm-asymp.pdf .
 //
 // As of this writing, the R function appears to have less-efficient polynomial
