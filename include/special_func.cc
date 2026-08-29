@@ -386,7 +386,7 @@ dd_real erfcx_ddr(dd_real x_ddr) {
   } else {
     result_ddr = ddr_maked(0);
     const dd_real _ddr_inv_sqrt_pi = {{0.5641895835477563, 7.66772980658294e-18}};
-    if (y_ddr.x[0] >= 26.543) {
+    if (y_ddr.x[0] >= 6.71e7) {
       if (y_ddr.x[0] < 2.53e307) {
         result_ddr = ddr_accurate_div(_ddr_inv_sqrt_pi, y_ddr);
       }
@@ -635,7 +635,6 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
 }
 
 dd_real basym(double a, double b, dd_real lambda_ddr) {
-  // not sufficiently accurate yet; see e.g. k=1e9, n=1e9, p=0.5099
   const dd_real e1_ddr = {{0.3535533905932738, -2.4168233283632284e-17}};  // 2^{-3/2}
   const dd_real ln_e0_ddr = {{0.12078223763524522, 4.1797047492946264e-18}};  // log(2/sqrt(pi))
 
@@ -897,8 +896,8 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
   //   log((x^a)(y^b) / Beta(a,b))
   // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
   dd_real result_ln_ddr;
-  if (1) {
-  // if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
+  // if (1) {
+  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
     const double a_plus_b = aa + bb;
     const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
     // This should be consistent with use_tdr_for_binom_lnprob().

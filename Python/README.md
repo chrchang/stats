@@ -23,9 +23,9 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^20, 2^21): errRMS=0  approxErrRMS=0  scipyErrRMS=1.01e-13
     n in [2^35, 2^36): errRMS=0  approxErrRMS=4.82e-17  scipyErrRMS=1.66e-11
     $ utils/pbinom_benchmark.py
-    n=(2^5)-1: base=9.21e-07  approx=3.17e-07  scipy=2.97e-05 sec/iter
-    n=(2^20)-1: base=3.92e-05  approx=1.44e-06  scipy=2.98e-05 sec/iter
-    n=(2^35)-1: base=0.00112  approx=1.01e-06  scipy=9.68e-05 sec/iter
+    n=(2^5)-1: base=7e-07  approx=3.21e-07  scipy=2.94e-05 sec/iter
+    n=(2^20)-1: base=2.8e-06  approx=1.53e-06  scipy=3.02e-05 sec/iter
+    n=(2^35)-1: base=1.47e-06  approx=1.4e-06  scipy=9.58e-05 sec/iter
 
     $ utils/binomtest_accuracy.py --z-score 1
     n in [2^5, 2^6): errRMS=1.44e-16  scipyErrRMS=1.96e-16
