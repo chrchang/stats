@@ -485,6 +485,7 @@ static const dd_real _ddr_sqrt2 = {{1.4142135623730951, -9.667293313452913e-17}}
 // Could move this into plink2_highprec.
 dd_real ddr_log1pmx(dd_real x_ddr) {
   static const double minLog1Value = -0.79149064;
+  // printf("x: %.17g\n", x_ddr.x[0]);
   if (ddr_gtd(x_ddr, 1) || (x_ddr.x[0] < minLog1Value)) {
     return ddr_sub(ddr_log1p(x_ddr), x_ddr);
   }
@@ -634,6 +635,7 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
 }
 
 dd_real basym(double a, double b, dd_real lambda_ddr) {
+  // not sufficiently accurate yet; see e.g. k=1e9, n=1e9, p=0.5099
   const dd_real e1_ddr = {{0.3535533905932738, -2.4168233283632284e-17}};  // 2^{-3/2}
   const dd_real ln_e0_ddr = {{0.12078223763524522, 4.1797047492946264e-18}};  // log(2/sqrt(pi))
 
@@ -723,7 +725,7 @@ dd_real basym(double a, double b, dd_real lambda_ddr) {
     sum_ddr = ddr_add(sum_ddr, ddr_add(t0_ddr, t1_ddr));
 
     // erfcx limited to ~18-digit precision
-    const double eps = 16 * k2m64;
+    const double eps = k2m60;
     if (fabs(t0_ddr.x[0]) + fabs(t1_ddr.x[0]) <= eps * sum_ddr.x[0]) {
       break;
     }
@@ -895,7 +897,8 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
   //   log((x^a)(y^b) / Beta(a,b))
   // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
   dd_real result_ln_ddr;
-  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
+  if (1) {
+  // if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
     const double a_plus_b = aa + bb;
     const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
     // This should be consistent with use_tdr_for_binom_lnprob().
