@@ -232,14 +232,16 @@ HEADER_INLINE double ratfun_eval(const double* numer_coefs, const double* denom_
 }
 
 // Hardcoded sequences of prefer_fma() instructions for
-// polynomial/rational-function  evaluation, for use when degree is known at
+// polynomial/rational-function evaluation, for use when degree is known at
 // compile-time.  (todo: check whether the largest hardcoded degree here still
 // tends to be inlined by modern compilers; when that isn't the case,
 // poly_eval/ratfun_eval should be used instead.)
 
 // Common case is evaluation of a rational function, with both numerator and
 // denominator polynomials.  Two FMA chains per polynomial should work well
-// across a variety of platforms.
+// across a variety of platforms.  (Could hardcode another level, or "all the
+// levels" (Estrin's scheme) after a few more years if that lines up better
+// with new hardware.)
 //
 // Occasionally it is useful to call this form directly (see plink2_stats
 // QuantileToZscore()).
@@ -329,6 +331,7 @@ HEADER_INLINE double _poly9_solo(double xx, double x2, double x3, double x4, dou
   return _poly8_solo(xx, x2, x3, x4, c0, c1, c2, c3, c4, prefer_fma(c9, x4, c5), c6, c7, c8);
 }
 
+// When accuracy is prioritized over speed on old x86.
 HEADER_INLINE double _poly8_fma_solo(double xx, double x2, double x3, double x4, double c0, double c1, double c2, double c3, double c4, double c5, double c6, double c7, double c8) {
   const double rem0 =
     fma(

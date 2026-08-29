@@ -88,7 +88,8 @@ dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_dd
 
 // binom_ln_prob_loader() implements Catherine Loader's algorithm:
 //   https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
-// with dd_reals.  Relative error should be better than ~2^{-90}?
+// with dd_reals (similar in character to R ebd0()).  Relative error should be
+// better than ~2^{-90}?
 //
 // The key idea is to decompose the log-probability into a nonpositive term
 // corresponding to p_0 := n/k, and two more nonpositive terms of the form

@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
         goto main_ret_INVALID_CMDLINE;
       }
       const double p = strtod(argv[3], &endptr);
-      if ((endptr == argv[3]) || (p <= 0) || (p >= 1)) {
+      if ((endptr == argv[3]) || (p <= 0) || (!(p < 1))) {
         fprintf(stderr, "Error: Invalid or unsupported rate '%s'.\n", argv[3]);
         goto main_ret_INVALID_CMDLINE;
       }

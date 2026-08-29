@@ -5,7 +5,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -98,7 +98,7 @@ cdef extern from "../include/plink2_hwe.h" namespace "plink2":
 
 
 cdef extern from "../include/special_func.h" namespace "plink2":
-    double erfcx_internal(double x)
+    dd_real_struct erfcx_ddr(dd_real_struct x_ddr)
 
 
 # The pmf and cmf functions here default to delivering <1 ULP relative error;
@@ -1032,4 +1032,4 @@ def snphwe(int32_t hets, int32_t hom1, int32_t hom2, bint midp=0, bint logp=0):
 
 
 def erfcx(double x):
-    return erfcx_internal(x)
+    return erfcx_ddr(ddr_maked(x)).x[0]

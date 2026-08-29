@@ -432,6 +432,10 @@ dd_real ddr_expm1(const dd_real a);
 
 dd_real ddr_log1p(const dd_real a);
 
+dd_real ddr_logspace_add(dd_real a, dd_real b);
+
+dd_real ddr_logspace_sub(dd_real a, dd_real b);
+
 // Supports denormal a.
 HEADER_INLINE dd_real ddr_log_extdomain(const dd_real a) {
   if (a.x[0] > DBL_MIN) {
@@ -447,6 +451,10 @@ HEADER_INLINE dd_real ddr_log_extdomain_maybehalf(const dd_real a) {
   }
   return ddr_log_extdomain(a);
 }
+
+dd_real ddr_logspace_add(dd_real a, dd_real b);
+
+dd_real ddr_logspace_sub(dd_real a, dd_real b);
 
 // Try to put smaller-magnitude values first (or just use ddr_sort_and_add()).
 HEADER_INLINE dd_real ddr_add3(const dd_real a, const dd_real b, const dd_real c) {

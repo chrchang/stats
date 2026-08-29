@@ -213,6 +213,7 @@ double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double 
   }
 }
 
+/*
 double erfcx_internal(double x) {
   // e^(x^2) * erfc(x).
   //
@@ -225,6 +226,8 @@ double erfcx_internal(double x) {
   //
   // This function makes heavy use of FMA to limit rounding error, so it
   // incurs a significant performance hit when compiled to support older x86.
+  // (We could use prefer_fma() in place of fma(), but Juffa's maximum-error
+  // measurement was with FMA so I'd rather not risk it.)
   //
   // An alternative is the erfcx_y100() function from
   // http://ab-initio.mit.edu/faddeeva/ , which uses a huge switch statement
@@ -233,9 +236,13 @@ double erfcx_internal(double x) {
   // bottleneck, but it's only secondary for BASYM so I doubt it's worth the
   // i-cache hit.
 
-  const double a = fmax(x, 0.0 - x);  // NaN-preserving absolute value
+  const double a = fabs(x);  // no need to preserve NaN type
 
   // Compute q = (a-4)/(a+4) accurately.  [0, \inf) -> [-1, 1].
+  // (This looks awkward, but compare to
+  //   ddr_accurate_div(ddr_add2d(a, -4.0), ddr_add2d(a, 4.0)).x[0]
+  // ...
+  // todo: understand why this works.)
   double q;
   {
     const double am4 = a - 4.0;
@@ -248,6 +255,8 @@ double erfcx_internal(double x) {
   }
 
   // Approximate (1+2*a)*exp(a*a)*erfc(a) as p(q)+1 for q in [-1, 1].
+  // This currently deviates slightly from Juffa in using 4 FMA chains instead
+  // of 2; could change that if it matters.
   const double p = POLY23_FMA_SOLO(q,
                                    2.3299511862555250e-01,
                                    -1.3962111684056208e-01,
@@ -278,6 +287,8 @@ double erfcx_internal(double x) {
   double result;
   {
     const double d = a + 0.5;
+    // Juffa separated out a (1.0 / d) reciprocal operation, but I don't think
+    // that's relevant to the target x86/ARM platforms?
     const double half_recip_d = 0.5 / d;
     q = fma(p, half_recip_d, half_recip_d);  // q = (p+1)/(1+2*a)
     const double t = 2 * q;
@@ -298,8 +309,11 @@ double erfcx_internal(double x) {
   }
   return result;
 }
+*/
 
 dd_real erfcx_ddr(dd_real x_ddr) {
+  // e^(x^2) * erfc(x).
+
   // We want a few more bits of accuracy than TOMS 708 erfc1() provides, and
   // don't need bleeding-edge speed for now (just need to be better than
   // evaluating >100000 continued-fraction terms...).  Hopefully this port of
@@ -314,16 +328,409 @@ dd_real erfcx_ddr(dd_real x_ddr) {
   //   a description of an implementation with ~30-digit accuracy, but I'm not
   //   aware of a permissively-licensed implementation.
 
-  // TODO
-  return ddr_maked(0.0);
+  const dd_real y_ddr = (x_ddr.x[0] < 0)? ddr_negate(x_ddr) : x_ddr;
+  if (y_ddr.x[0] <= 0.46875) {
+    const dd_real ysq_ddr = ddr_sqr(x_ddr);
+    const dd_real a_ddr[5] = {
+      {3.1611237438705655, 1.0548186774540226e-16},
+      {113.86415415105016, -2.2479264470748604e-15},
+      {377.485237685302, -3.6016967575997115e-15},
+      {3209.3775891384694, 9.497032806277276e-14},
+      {0.18577770618460315, 5.416702813818119e-21}
+    };
+    const dd_real b_ddr[4] = {
+      {23.601290952344122, -1.431396647496149e-15},
+      {244.02463793444417, 9.395336285233499e-16},
+      {1282.6165260773723, -4.756335288286209e-14},
+      {2844.236833439171, -2.0311236299574375e-13}
+    };
+    dd_real xnum_ddr = ddr_mul(ysq_ddr, a_ddr[4]);
+    dd_real xden_ddr = ysq_ddr;
+    for (uint32_t i = 0; i < 3; ++i) {
+      xnum_ddr = ddr_mul(ddr_add(xnum_ddr, a_ddr[i]), ysq_ddr);
+      xden_ddr = ddr_mul(ddr_add(xden_ddr, b_ddr[i]), ysq_ddr);
+    }
+    const dd_real result_ddr = ddr_accurate_div(ddr_mul(x_ddr, ddr_add(xnum_ddr, a_ddr[3])), ddr_add(xden_ddr, b_ddr[3]));
+    return ddr_mul(ddr_exp(ysq_ddr), ddr_negate(ddr_addd(result_ddr, -1)));
+  }
+  dd_real result_ddr;
+  if (y_ddr.x[0] <= 4.0) {
+    const dd_real c_ddr[9] = {
+      {0.5641884969886701, -4.053940047736978e-17},
+      {8.883149794388377, -8.786879024142399e-16},
+      {66.11919063714163, 1.4691960141062737e-15},
+      {298.6351381974001, 6.773012172430754e-15},
+      {881.952221241769, 3.7460106108337643e-14},
+      {1712.0476126340707, -9.41757458075881e-14},
+      {2051.0783778260716, -1.0350867055356502e-13},
+      {1230.3393547979972, 4.730488546192646e-14},
+      {2.1531153547440383e-08, 1.1924348055929413e-24}
+    };
+    const dd_real d_ddr[8] = {
+      {15.744926110709835, -7.983691024244763e-16},
+      {117.6939508913125, 2.235159965697676e-15},
+      {537.1811018620099, -2.409748174995184e-14},
+      {1621.3895745666903, -8.124007698148489e-14},
+      {3290.7992357334597, -5.1796375662088396e-14},
+      {4362.619090143247, -2.1654533237218857e-13},
+      {3439.3676741437216, 2.4890174493193628e-14},
+      {1230.3393548037495, -1.093101528659463e-13}
+    };
+    dd_real xnum_ddr = ddr_mul(c_ddr[8], y_ddr);
+    dd_real xden_ddr = y_ddr;
+    for (uint32_t i = 0; i < 7; ++i) {
+      xnum_ddr = ddr_mul(ddr_add(xnum_ddr, c_ddr[i]), y_ddr);
+      xden_ddr = ddr_mul(ddr_add(xden_ddr, d_ddr[i]), y_ddr);
+    }
+    result_ddr = ddr_accurate_div(ddr_add(xnum_ddr, c_ddr[7]), ddr_add(xden_ddr, d_ddr[7]));
+  } else {
+    result_ddr = ddr_maked(0);
+    const dd_real _ddr_inv_sqrt_pi = {{0.5641895835477563, 7.66772980658294e-18}};
+    if (y_ddr.x[0] >= 26.543) {
+      if (y_ddr.x[0] < 2.53e307) {
+        result_ddr = ddr_accurate_div(_ddr_inv_sqrt_pi, y_ddr);
+      }
+    } else {
+      const dd_real p_ddr[6] = {
+        {0.30532663496123236, -1.3134974790824345e-17},
+        {0.36034489994980445, -1.459828991058748e-17},
+        {0.12578172611122926, -1.2391333019062585e-17},
+        {0.016083785148742275, 1.4105070992778564e-18},
+        {0.0006587491615298378, -1.9665056634718896e-20},
+        {0.016315387137302097, 3.855181504311986e-19}
+      };
+      const dd_real q_ddr[5] = {
+        {2.568520192289822, 2.1844100914488081e-16},
+        {1.8729528499234604, 2.0056509142450522e-17},
+        {0.5279051029514285, -3.898581574347918e-17},
+        {0.06051834131244132, -4.6397944450654906e-20},
+        {0.0023352049762686918, 8.153490887023054e-20}
+      };
+      dd_real ysq_ddr = ddr_accurate_div(ddr_maked(1), ddr_sqr(y_ddr));
+      dd_real xnum_ddr = ddr_mul(p_ddr[5], ysq_ddr);
+      dd_real xden_ddr = ysq_ddr;
+      for (uint32_t i = 0; i < 4; ++i) {
+        xnum_ddr = ddr_mul(ddr_add(xnum_ddr, p_ddr[i]), ysq_ddr);
+        xden_ddr = ddr_mul(ddr_add(xden_ddr, q_ddr[i]), ysq_ddr);
+      }
+      result_ddr = ddr_accurate_div(ddr_mul(ysq_ddr, ddr_add(xnum_ddr, p_ddr[4])), ddr_add(xden_ddr, q_ddr[4]));
+      result_ddr = ddr_accurate_div(ddr_sub(_ddr_inv_sqrt_pi, result_ddr), y_ddr);
+    }
+  }
+  if (x_ddr.x[0] < 0) {
+    // don't need this for pbinom(), but it's nice to provide an erfcx()
+    // library function
+    // ddr_exp(x) currently overflows at x=709, even though log(DBL_MAX) is a
+    // bit larger.
+    result_ddr = ddr_sub(ddr_mul_pwr2(ddr_exp(ddr_sqr(x_ddr)), 2), result_ddr);
+  }
+  return result_ddr;
 }
 
+// log1pmx() and supporting logcf() are from R src/nmath/pgamma.c .
+// Some recent discussion at
+//   https://cran.r-project.org/web/packages/DPQ/vignettes/log1pmx-etc.pdf
+// ; but I don't see a separate log1pmx() implementation in DPQ 0.6-1 so I'm
+// guessing the algorithm is best left alone for now (outside of dd_real
+// widening).
+dd_real ddr_logcf_d2(dd_real x_ddr, double i, double eps) {
+  const double d = 2;
+  // Continued fraction for calculation of
+  //   1/i + x/(i+d) + x^2/(i+2*d) + x^3/(i+3*d) + ...
+  // d currently assumed to be a power of 2, update b2_ddr initialization if
+  // that can no longer be assumed.
+  const double scalefactor = k2p200 * (1LL << 56);
+  double c1 = 2 * d;
+  double c2 = i + d;
+  double c4 = c2 + d;
+  dd_real a1_ddr = ddr_maked(c2);
+  dd_real b1_ddr = ddr_muld(ddr_addd(ddr_muld(x_ddr, -i), c2), i);
+  dd_real b2_ddr = ddr_mul_pwr2(x_ddr, d*d);
+  dd_real a2_ddr = ddr_sub(ddr_mul2d(c4, c2), b2_ddr);
+
+  b2_ddr = ddr_sub(ddr_muld(b1_ddr, c4), ddr_muld(b2_ddr, i));
+
+  while (fabs(ddr_sub(ddr_mul(a2_ddr, b1_ddr), ddr_mul(a1_ddr, b2_ddr)).x[0]) >
+         fabs(eps * b1_ddr.x[0] * b2_ddr.x[0])) {
+    dd_real c3_ddr = ddr_muld(x_ddr, c2 * c2);
+    c2 += d;
+    c4 += d;
+    a1_ddr = ddr_sub(ddr_muld(a2_ddr, c4), ddr_mul(a1_ddr, c3_ddr));
+    b1_ddr = ddr_sub(ddr_muld(b2_ddr, c4), ddr_mul(b1_ddr, c3_ddr));
+
+    c3_ddr = ddr_muld(x_ddr, c1 * c1);
+    c1 += d;
+    c4 += d;
+    a2_ddr = ddr_sub(ddr_muld(a1_ddr, c4), ddr_mul(a2_ddr, c3_ddr));
+    b2_ddr = ddr_sub(ddr_muld(b1_ddr, c4), ddr_mul(b2_ddr, c3_ddr));
+
+    if (fabs(b2_ddr.x[0]) > scalefactor) {
+      a1_ddr = ddr_mul_pwr2(a1_ddr, 1 / scalefactor);
+      b1_ddr = ddr_mul_pwr2(b1_ddr, 1 / scalefactor);
+      a2_ddr = ddr_mul_pwr2(a2_ddr, 1 / scalefactor);
+      b2_ddr = ddr_mul_pwr2(b2_ddr, 1 / scalefactor);
+    } else if (fabs(b2_ddr.x[0]) < 1 / scalefactor) {
+      a1_ddr = ddr_mul_pwr2(a1_ddr, scalefactor);
+      b1_ddr = ddr_mul_pwr2(b1_ddr, scalefactor);
+      a2_ddr = ddr_mul_pwr2(a2_ddr, scalefactor);
+      b2_ddr = ddr_mul_pwr2(b2_ddr, scalefactor);
+    }
+  }
+  return ddr_accurate_div(a2_ddr, b2_ddr);
+}
+
+static const dd_real _ddr_2_3rds = {{6.6666666666666662966e-01, 3.7007434154171882626e-17}};
+static const dd_real _ddr_sqrt2 = {{1.4142135623730951, -9.667293313452913e-17}};
+
+// Could move this into plink2_highprec.
+dd_real ddr_log1pmx(dd_real x_ddr) {
+  static const double minLog1Value = -0.79149064;
+  if (ddr_gtd(x_ddr, 1) || (x_ddr.x[0] < minLog1Value)) {
+    return ddr_sub(ddr_log1p(x_ddr), x_ddr);
+  }
+  const dd_real r_ddr = ddr_accurate_div(x_ddr, ddr_addd(x_ddr, 2));
+  const dd_real y_ddr = ddr_sqr(r_ddr);
+  if (fabs(x_ddr.x[0]) < 1e-2) {
+    // |y| < (1/199)^2 < 2^{-15}; first omitted term has magnitude less than
+    // ~2^{-70}|x| so this should be good enough for non-approx BASYM.
+    const dd_real _ddr_2_5ths = {{4.0000000000000002220e-01, -2.2204460492503132041e-17}};
+    const dd_real _ddr_2_7ths = {{2.8571428571428569843e-01, 1.5860328923216521126e-17}};
+    const dd_real _ddr_2_9ths = {{2.2222222222222220989e-01, 1.2335811384723960875e-17}};
+    dd_real sum_ddr = ddr_mul(_ddr_2_9ths, y_ddr);
+    sum_ddr = ddr_mul(ddr_add(sum_ddr, _ddr_2_7ths), y_ddr);
+    sum_ddr = ddr_mul(ddr_add(sum_ddr, _ddr_2_5ths), y_ddr);
+    sum_ddr = ddr_mul(ddr_add(sum_ddr, _ddr_2_3rds), y_ddr);
+    return ddr_mul(ddr_sub(sum_ddr, x_ddr), r_ddr);
+  }
+  // r := x/(x+2) is in [0.0944118, 1/3], y is in [0.0089135, 1/9], y/x is in
+  // [0.04275, 1/9]
+  // logcf term is ~1/3, so ratio between y^2 * logcfterm and x is around
+  // y(y/x)(1/3) which is never much more than 1/243.  So tol_logcf=2^{-60}
+  // should ensure final relative error < 2^{-67}, meeting the non-approx BASYM
+  // target.
+  const double tol_logcf = k2m60;
+  return ddr_mul(r_ddr,
+                 ddr_sub(ddr_mul(ddr_mul_pwr2(y_ddr, 2),
+                                 ddr_logcf_d2(y_ddr, 3, tol_logcf)),
+                         x_ddr));
+}
+
+// This term is relatively insignificant, could calculate to lower precision
+// (especially when approx=True).
+static inline dd_real bcorr_ddr(double a0, double b0) {
+  double abmin;
+  double abmax;
+  if (a0 < b0) {
+    abmin = a0;
+    abmax = b0;
+  } else {
+    abmin = b0;
+    abmax = a0;
+  }
+  return ddr_add(ddr_sub(ddr_stirlerr(ddr_maked(abmax)), ddr_stirlerr(ddr_maked(a0 + b0))),
+                 ddr_stirlerr(ddr_maked(abmin)));
+}
+
+// must be even
 CONSTI32(kBasymApproxIter, 20);
 
-dd_real basym_approx(double aa, double bb, dd_real ay_minus_bx_ddr, uint32_t inv, uint32_t midp_complement) {
+static const dd_real _ddr_half_e0_recip = {{0.443113462726379, -1.9166466249564497e-17}};  // sqrt(pi)/4
 
-  // TODO
-  return ddr_maked(0.0);
+dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
+  const double e1 = 0.3535533905932738;  // 2^{-3/2}
+  const double ln_e0 = 0.12078223763524522;
+
+  double a0[kBasymApproxIter + 1];
+  double b0[kBasymApproxIter + 1];
+  double c[kBasymApproxIter + 1];
+  double d[kBasymApproxIter + 1];
+
+  // This is the dominant term if we're relatively far from the mode; it's
+  // worth calculating to dd_real precision.
+  const dd_real t_ddr = ddr_add(ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, -a)), a),
+                                ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, b)), b));
+
+  const dd_real f_ddr = ddr_negate(t_ddr);
+
+  const dd_real z0_ddr = ddr_sqrt(f_ddr);
+  const double z = z0_ddr.x[0] * kSqrt2;
+  const double z2 = 2 * f_ddr.x[0];
+  double abmin;
+  double abmax;
+  if (a < b) {
+    abmin = a;
+    abmax = b;
+  } else {
+    abmin = b;
+    abmax = a;
+  }
+  const double h = abmin / abmax;
+  const double r1 = (b - a) / abmax;
+  const double w0 = 1.0 / sqrt(abmin * (h + 1));
+  const double r0_x2 = 2 / (h + 1);
+
+  a0[0] = r1 * (2.0 / 3);
+  c[0] = -a0[0] * 0.5;
+  d[0] = -c[0];
+  // This is the other potential leading term.
+  dd_real j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+  double j1 = e1;
+  dd_real sum_ddr = ddr_addd(j0_ddr, d[0] * w0 * j1);
+
+  double j0 = j0_ddr.x[0];
+
+  double s = 1.0;
+  const double h2 = h * h;
+  double hn = 1.0;
+  double w = w0;
+  double znm1 = z;
+  double zn = z2;
+  for (int32_t n = 2; n <= kBasymApproxIter; n += 2) {
+    hn *= h2;
+    a0[n - 1] = r0_x2 * (h * hn + 1) / (n + 2);
+    const int32_t np1 = n + 1;
+    s += hn;
+    a0[n] = r1 * 2 * s / (n + 3);
+
+    for (int32_t i = n; i <= np1; ++i) {
+      const double r = (-i - 1) * 0.5;
+      b0[0] = r * a0[0];
+      for (int32_t m = 2; m <= i; ++m) {
+        double bsum = 0;
+        for (int32_t j = 1; j < m; ++j) {
+          const int32_t mmj = m - j;
+          bsum += (j * r - mmj) * a0[j - 1] * b0[mmj - 1];
+        }
+        b0[m - 1] = r * a0[m - 1]  + bsum / m;
+      }
+      c[i - 1] = b0[i - 1] / (i + 1);
+
+      double dsum = 0;
+      for (int32_t j = 1; j < i; ++j) {
+        dsum += d[i - j - 1] * c[j - 1];
+      }
+      d[i - 1] = -(dsum + c[i - 1]);
+    }
+
+    j0 = e1 * znm1 + (n - 1) * j0;
+    j1 = e1 * zn + n * j1;
+    znm1 = z2 * znm1;
+    zn = z2 * zn;
+    w *= w0;
+    const double t0 = d[n - 1] * w * j0;
+    w *= w0;
+    const double t1 = d[n] * w * j1;
+    sum_ddr = ddr_add(sum_ddr, ddr_add2d(t0, t1));
+    // could use wider eps when |ln_e0| is large
+    // (narrowing this doesn't noticeably improve accuracy, we're limited by
+    // accumulated floating-point errors in intermediate results)
+    const double eps = 100 * k2m53;
+    if (fabs(t0) + fabs(t1) <= eps * sum_ddr.x[0]) {
+      break;
+    }
+  }
+
+  return ddr_add(ddr_sub(ddr_addd(t_ddr, ln_e0), bcorr_ddr(a, b)), ddr_log(sum_ddr));
+}
+
+dd_real basym(double a, double b, dd_real lambda_ddr) {
+  const dd_real e1_ddr = {{0.3535533905932738, -2.4168233283632284e-17}};  // 2^{-3/2}
+  const dd_real ln_e0_ddr = {{0.12078223763524522, 4.1797047492946264e-18}};  // log(2/sqrt(pi))
+
+  dd_real a0_ddr[kBasymApproxIter + 1];
+  dd_real b0_ddr[kBasymApproxIter + 1];
+  dd_real c_ddr[kBasymApproxIter + 1];
+  dd_real d_ddr[kBasymApproxIter + 1];
+
+  const dd_real t_ddr = ddr_add(ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, -a)), a),
+                                ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, b)), b));
+
+  const dd_real f_ddr = ddr_negate(t_ddr);
+
+  const dd_real z0_ddr = ddr_sqrt(f_ddr);
+  const dd_real z_ddr = ddr_mul(z0_ddr, _ddr_sqrt2);
+  const dd_real z2_ddr = ddr_mul_pwr2(f_ddr, 2);
+  double abmin;
+  double abmax;
+  if (a < b) {
+    abmin = a;
+    abmax = b;
+  } else {
+    abmin = b;
+    abmax = a;
+  }
+  const dd_real h_ddr = ddr_divd(ddr_maked(abmin), abmax);
+  const dd_real r1_ddr = ddr_divd(ddr_maked(b - a), abmax);
+  const dd_real hp1_ddr = ddr_addd(h_ddr, 1);
+  const dd_real w0_ddr = ddr_accurate_div(ddr_maked(1), ddr_sqrt(ddr_muld(hp1_ddr, abmin)));
+
+  a0_ddr[0] = ddr_mul(r1_ddr, _ddr_2_3rds);
+  d_ddr[0] = ddr_mul_pwr2(a0_ddr[0], 0.5);
+  c_ddr[0] = ddr_negate(d_ddr[0]);
+  // this is the other potential leading term
+  dd_real j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+
+  dd_real j1_ddr = e1_ddr;
+  dd_real sum_ddr = ddr_add(ddr_mul(ddr_mul(d_ddr[0], w0_ddr), j1_ddr), j0_ddr);
+
+  // to explore: do we still have enough precision if we just hardcode n=2
+  // iteration to use dd_reals, and then fall back to float64 afterwards?
+
+  const dd_real r0_x2_ddr = ddr_accurate_div(ddr_maked(2), hp1_ddr);
+  const dd_real r1_x2_ddr = ddr_mul_pwr2(r1_ddr, 2);
+
+  dd_real s_ddr = ddr_maked(1.0);
+  const dd_real h2_ddr = ddr_sqr(h_ddr);
+  dd_real hn_ddr = ddr_maked(1.0);
+  dd_real w_ddr = w0_ddr;
+  dd_real znm1_ddr = z_ddr;
+  dd_real zn_ddr = z2_ddr;
+  for (int32_t n = 2; n <= kBasymApproxIter; n += 2) {
+    hn_ddr = ddr_mul(hn_ddr, h2_ddr);
+    a0_ddr[n - 1] = ddr_divd(ddr_mul(r0_x2_ddr, ddr_addd(ddr_mul(h_ddr, hn_ddr), 1)), n+2);
+    const int32_t np1 = n+1;
+    s_ddr = ddr_add(s_ddr, hn_ddr);
+    a0_ddr[n] = ddr_divd(ddr_mul(r1_x2_ddr, s_ddr), n+3);
+
+    for (int32_t i = n; i <= np1; ++i) {
+      const double r = (-i - 1) * 0.5;
+      b0_ddr[0] = ddr_muld(a0_ddr[0], r);
+      for (int32_t m = 2; m <= i; ++m) {
+        dd_real bsum_ddr = ddr_maked(0);
+        for (int32_t j = 1; j < m; ++j) {
+          const int32_t mmj = m - j;
+          bsum_ddr = ddr_add(bsum_ddr, ddr_mul(ddr_muld(a0_ddr[j - 1], j * r - mmj), b0_ddr[mmj - 1]));
+        }
+        b0_ddr[m - 1] = ddr_add(ddr_muld(a0_ddr[m - 1], r), ddr_divd(bsum_ddr, m));
+      }
+      c_ddr[i - 1] = ddr_divd(b0_ddr[i - 1], i + 1);
+
+      dd_real dsum_ddr = ddr_maked(0);
+      for (int32_t j = 1; j < i; ++j) {
+        dsum_ddr = ddr_add(dsum_ddr, ddr_mul(d_ddr[i - j - 1], c_ddr[j - 1]));
+      }
+      d_ddr[i - 1] = ddr_negate(ddr_add(dsum_ddr, c_ddr[i - 1]));
+    }
+
+    j0_ddr = ddr_add(ddr_mul(e1_ddr, znm1_ddr), ddr_muld(j0_ddr, n - 1));
+    j1_ddr = ddr_add(ddr_mul(e1_ddr, zn_ddr), ddr_muld(j1_ddr, n));
+    znm1_ddr = ddr_mul(znm1_ddr, z2_ddr);
+    zn_ddr = ddr_mul(zn_ddr, z2_ddr);
+    w_ddr = ddr_mul(w_ddr, w0_ddr);
+    const dd_real t0_ddr = ddr_mul(ddr_mul(d_ddr[n - 1], w_ddr), j0_ddr);
+    w_ddr = ddr_mul(w_ddr, w0_ddr);
+    const dd_real t1_ddr = ddr_mul(ddr_mul(d_ddr[n], w_ddr), j1_ddr);
+    sum_ddr = ddr_add(sum_ddr, ddr_add(t0_ddr, t1_ddr));
+
+    // erfcx limited to ~18-digit precision
+    const double eps = 16 * k2m64;
+    if (fabs(t0_ddr.x[0]) + fabs(t1_ddr.x[0]) <= eps * sum_ddr.x[0]) {
+      break;
+    }
+  }
+
+  // printf("%.17g %.17g %.17g %.17g\n", ln_e0_ddr.x[0], t_ddr.x[0], bcorr_ddr(a, b).x[0], sum_ddr.x[0]);
+  return ddr_add(ddr_sub(ddr_add(t_ddr, ln_e0_ddr), bcorr_ddr(a, b)), ddr_log(sum_ddr));
 }
 
 // Adaptations of DiDonato and Morris's BFRAC and BASYM.  BFRAC is based on a
@@ -335,10 +742,10 @@ dd_real basym_approx(double aa, double bb, dd_real ay_minus_bx_ddr, uint32_t inv
 //   Computation of the Incomplete Beta Function Ratios.  ACM Transactions on
 //   Mathematical Software, 18.
 //
-// For most larger cases, the continued fraction converges more quickly than
-// binomial partial sums.  ibeta_largeab_approx() makes limited use of dd_real
-// precision to address the worst precision bottlenecks, while ibeta_largeab()
-// trades off speed for provably great precision.
+// For most larger cases, these expansions converge more quickly than binomial
+// partial sums.  ibeta_largeab_approx() makes limited use of dd_real precision
+// to address the worst precision bottlenecks, while ibeta_largeab() trades off
+// speed for provably great precision.
 //
 // (I still have work to do in understanding the derivation and properties of
 // these two expansions well enough to take a real shot at improving e.g.
@@ -349,15 +756,25 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   // min(aa,bb); and Lanczos sum becomes less accurate)
   // caller responsible for guaranteeing aq - bp >= 0
   //
+  // * In PbinomApprox(), (a,b) is initialized to (k+1,n-k) and inv is
+  //   initialized to !complement; then, if (a,p) <-> (b,q) is flipped to make
+  //   aq - bp >= 0, inv is flipped.
+  // * When inv is true, we return maybelog(1 - cdf(a-1)) instead of
+  //   maybelog(cdf(a-1)).
+  // * midp_complement is midp * (1 + complement).  When midp is true:
+  //   * if inv == !complement, 0.5*pmf(a-1) is subtracted from cdf(a-1) before
+  //     possible inversion.
+  //   * Otherwise, 0.5*pmf(a) is added to cdf(a-1) before possible inversion.
+  //
   // scipy.stats.binom.logcdf uses very similar C++ code, but is afflicted with
   // high overhead:
   //   >>> import exact_tests, scipy, timeit
   //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-  //   0.016760832993895747
+  //   0.016394874997786246
   //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-  //   0.017603792002773844
+  //   0.016445749999547843
   //   >>> timeit.timeit(lambda: exact_tests.pbinom(157000000, 419430500, 0.375, approx=True), number=10000)
-  //   0.016770166999776848
+  //   0.016285416997561697
   //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
   //   1.005605333019048
   //   >>> timeit.timeit(lambda: scipy.stats.binom.logcdf(157000000, 419430500, 0.375), number=10000)
@@ -372,14 +789,35 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   //   0.27791083394549787
 
   dd_real result_ln_ddr;
-  if (1) {
+  // have confirmed this is still a reasonable threshold
+  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
     // BFRAC
     result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
     const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], aq_minus_bp_ddr, inv, midp_complement));
     result_ln_ddr = ddr_addd(result_ln_ddr, result_incr);
   } else {
     // BASYM
-    result_ln_ddr = basym_approx(aa, bb, aq_minus_bp_ddr, inv, midp_complement);
+    result_ln_ddr = basym_approx(aa, bb, aq_minus_bp_ddr);
+    if (midp_complement) {
+      const double n = aa + bb - 1;
+      const uint32_t ab_flipped = (midp_complement == inv + 1);
+      const double k = aa - (!ab_flipped);
+      // may move binom_ln_prob_loader() into this file, but for now...
+      const double nmk = n - k;
+      dd_real ddrs[6];
+      ddrs[0] = ddr_lfact(n);
+      ddrs[1] = ddr_negate(ddr_lfact(k));
+      ddrs[2] = ddr_negate(ddr_lfact(nmk));
+      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
+      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), nmk);
+      ddrs[5] = _ddr_log05;
+      dd_real half_pmf_ddr = ddr_sort_and_add(6, ddrs);
+      if (ab_flipped) {
+        result_ln_ddr = ddr_logspace_sub(result_ln_ddr, half_pmf_ddr);
+      } else {
+        result_ln_ddr = ddr_logspace_add(result_ln_ddr, half_pmf_ddr);
+      }
+    }
   }
   if ((!inv) && return_log) {
     return result_ln_ddr.x[0];
@@ -456,47 +894,51 @@ double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real
   // is a synonym for q)
   //   log((x^a)(y^b) / Beta(a,b))
   // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
-  const double a_plus_b = aa + bb;
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
   dd_real result_ln_ddr;
-  // This should be consistent with use_tdr_for_binom_lnprob().
-  // bugfix (21 Aug 2026): this comparison went the wrong way
-  if (a_plus_b < S_CAST(double, 1LL << 36)) {
-    dd_real ddrs[5];
-    ddrs[0] = ddr_lfact(a_plus_b - 1);
-    ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
-    ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
-    if (p_is_half) {
-      ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
-    } else {
-      ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
-      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
-    }
-    result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-  } else {
-    td_real tdrs[5];
-    tdrs[0] = tdr_lfact(a_plus_b - 1);
-    tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
-    tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
-    if (p_is_half) {
-      tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
-    } else {
-      if (ddr_ltd(p_ddr, 0.5)) {
-        tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
-        tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
+  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
+    const double a_plus_b = aa + bb;
+    const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
+    // This should be consistent with use_tdr_for_binom_lnprob().
+    // bugfix (21 Aug 2026): this comparison went the wrong way
+    if (a_plus_b < S_CAST(double, 1LL << 36)) {
+      dd_real ddrs[5];
+      ddrs[0] = ddr_lfact(a_plus_b - 1);
+      ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
+      ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
+      if (p_is_half) {
+        ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
       } else {
-        tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
-        tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
+        ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
+        ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
       }
+      result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
+    } else {
+      td_real tdrs[5];
+      tdrs[0] = tdr_lfact(a_plus_b - 1);
+      tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
+      tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
+      if (p_is_half) {
+        tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
+      } else {
+        if (ddr_ltd(p_ddr, 0.5)) {
+          tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
+          tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
+        } else {
+          tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
+          tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
+        }
+      }
+      result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
     }
-    result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
+    // Could tighten this bound.
+    if ((result_ln_ddr.x[0] < -1418.0) && (inv || (!return_log))) {
+      return (return_log || (!inv))? 0.0 : 1.0;
+    }
+    const dd_real ff_ddr = ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
+    result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
+  } else {
+    result_ln_ddr = basym(aa, bb, aq_minus_bp_ddr);
   }
-  // Could tighten this bound.
-  if ((result_ln_ddr.x[0] < -1418.0) && (inv || (!return_log))) {
-    return (return_log || (!inv))? 0.0 : 1.0;
-  }
-  const dd_real ff_ddr = ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
-  result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
   if (!inv) {
     return return_log? result_ln_ddr.x[0] : ddr_exp(result_ln_ddr).x[0];
   }

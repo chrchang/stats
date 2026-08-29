@@ -796,6 +796,29 @@ dd_real ddr_log1p(const dd_real a) {
   }
 }
 
+dd_real ddr_logspace_add(dd_real a, dd_real b) {
+  // log(exp(a) + exp(b)) = a + log(1 + exp(b-a))
+  if (ddr_lt(a, b)) {
+    swap_ddr(&a, &b);
+  }
+  const dd_real diff = ddr_sub(b, a);
+  // (ilogb - 54) could be nan or -inf, that's ok
+  if (diff.x[0] < (ilogb(a.x[1] / a.x[0]) - 54) * kLn2) {
+    // exp(b-a) is too small to affect even lowest bit of a.x[1]
+    return a;
+  }
+  return ddr_add(a, ddr_log1p(ddr_exp(diff)));
+}
+
+dd_real ddr_logspace_sub(dd_real a, dd_real b) {
+  // log(exp(a) - exp(b)) = a + log(-expm1(b-a))
+  const dd_real diff = ddr_sub(b, a);
+  if (diff.x[0] < (ilogb(a.x[1] / a.x[0]) - 54) * kLn2) {
+    return a;
+  }
+  return ddr_add(a, ddr_log(ddr_negate(ddr_expm1(diff))));
+}
+
 // Assumes xx is a nonnegative integer < 2^52; if we ever need more range,
 // replace ddr_muld(logn_ddr, xx + 0.5) with a ddr_mul() operation.
 //
