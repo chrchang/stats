@@ -91,6 +91,7 @@ static const double k2p100 = k2p50 * k2p50;
 static const double k2p200 = k2p100 * k2p100;
 static const double k2p400 = k2p200 * k2p200;
 static const double k2p800 = k2p400 * k2p400;
+static const double k2p900 = k2p800 * k2p100;
 static const double kE = 2.7182818284590452;
 static const double kLn2 = 0.6931471805599453;
 static const double kLn10 = 2.3025850929940457;
@@ -113,6 +114,8 @@ static const double k2m44 = 1.0 / (1LL << 44);
 static const double k2m60 = 1.0 / (1LL << 60);
 // Square of this value underflows float64 (even without denormal flushing).
 static const double k2m537p5 = kSqrt2 / (k2p400 * k2p100 * (1LL << 38));
+
+static const double k2m924 = 1.0 / (k2p900 * (1 << 24));
 
 static const double kBigEpsilon = k2m21;  // must be >= sqrt(kSmallEpsilon)
 static const double kEpsilon = k2m30;

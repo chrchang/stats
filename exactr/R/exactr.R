@@ -17,8 +17,8 @@ is.boolean <- function(x) {
 #'   otherwise use a faster algorithm (which is still more accurate than R
 #'   4.6.1 pbinom() and scipy 1.18 stats.binom.cdf()).
 #'
-#' @details Based on the BFRAC component of Boost's TOMS 708 implementation,
-#' and the QD high-precision library.
+#' @details Based on the BFRAC and BASYM components of Boost's TOMS 708
+#' implementation, and the QD high-precision library.
 #'
 #' @return cdf(q).
 #'

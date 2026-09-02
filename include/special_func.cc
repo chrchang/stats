@@ -28,6 +28,91 @@ namespace plink2 {
 // float64- (and a few higher-precision) routines for evaluating special
 // functions.  Currently touches beta and inverse-error.
 
+// binom_ln_prob_loader() implements Catherine Loader's algorithm:
+//   https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
+// with dd_reals (similar in character to R ebd0()).  Relative error should be
+// better than ~2^{-90}?
+//
+// The key idea is to decompose the log-probability into a nonpositive term
+// corresponding to p_0 := n/k, and two more nonpositive terms of the form
+//   C * (x log x + 1 - x).
+// Since (x log x + 1 - x) can be accurately evaluated via series expansion for
+// x near 1, we never have significant cancellation.
+//
+// Some of the overflow-avoidance logic is derived from GPL-2 R code.
+dd_real loader_bd0(dd_real x_ddr, dd_real np_ddr) {
+  const dd_real x_minus_np_ddr = ddr_sub(x_ddr, np_ddr);
+  // x+np may overflow.
+  const dd_real half_x_plus_np_ddr = ddr_add(ddr_mul_pwr2(x_ddr, 0.5), ddr_mul_pwr2(np_ddr, 0.5));
+  if (fabs(x_minus_np_ddr.x[0]) >= 0.2 * half_x_plus_np_ddr.x[0]) {
+    dd_real log_x_div_np_ddr;
+    // Avoid potential x/np overflow.
+    if (x_ddr.x[0] * (1.0 / (k2p800 * k2p100)) < np_ddr.x[0]) {
+      log_x_div_np_ddr = ddr_log(ddr_accurate_div(x_ddr, np_ddr));
+    } else {
+      log_x_div_np_ddr = ddr_sub(ddr_log(x_ddr), ddr_log_extdomain(np_ddr));
+    }
+    // Avoid potential ddr_mul() overflow.
+    return ddr_mul_pwr2(ddr_sub(ddr_mul(ddr_mul_pwr2(x_ddr, 1.0 / 2048), log_x_div_np_ddr), ddr_mul_pwr2(x_minus_np_ddr, 1.0 / 2048)), 2048);
+  }
+  const dd_real double_v_ddr = ddr_accurate_div(x_minus_np_ddr, half_x_plus_np_ddr);
+  dd_real ej_ddr = ddr_mul(x_ddr, double_v_ddr);
+  const dd_real v_ddr = ddr_mul_pwr2(double_v_ddr, 0.5);
+  dd_real s_ddr = ddr_mul(x_minus_np_ddr, v_ddr);
+  const dd_real v2_ddr = ddr_sqr(v_ddr);
+  for (double j = 1; ; j += 1) {
+    ej_ddr = ddr_mul(ej_ddr, v2_ddr);
+    const dd_real s1_ddr = ddr_add(s_ddr, ddr_divd(ej_ddr, 2*j + 1));
+    if (ddr_eq(s1_ddr, s_ddr)) {
+      return s_ddr;
+    }
+    s_ddr = s1_ddr;
+  }
+}
+
+void binom_ln_prob_loader_part1(dd_real k_ddr, dd_real nmk_ddr, dd_real n_ddr, dd_real* stirlerr_ddr_ptr, dd_real* half_lf_ddr_ptr) {
+  const dd_real stirlerr_1_ddr = ddr_stirlerr(n_ddr);
+  dd_real stirlerr_2_ddr = ddr_stirlerr(k_ddr);
+  dd_real stirlerr_3_ddr = ddr_stirlerr(nmk_ddr);
+  if (stirlerr_2_ddr.x[0] > stirlerr_3_ddr.x[0]) {
+    swap_ddr(&stirlerr_2_ddr, &stirlerr_3_ddr);
+  }
+  *stirlerr_ddr_ptr = ddr_sub(ddr_sub(stirlerr_1_ddr, stirlerr_2_ddr), stirlerr_3_ddr);
+  // Avoid potential overflow/underflow in Loader's original code.  See R
+  // src/nmath/dbinom.c .
+  const dd_real lf_ddr =
+    ddr_add3(ddr_log1p(ddr_accurate_div(ddr_negate(k_ddr),
+                                        n_ddr)),
+             ddr_mul_pwr2(_ddr_half_log_2pi, 2),
+             ddr_log(k_ddr));
+  *half_lf_ddr_ptr = ddr_mul_pwr2(lf_ddr, 0.5);
+}
+
+dd_real binom_ln_prob_loader_part2(dd_real k_ddr, dd_real nmk_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr, dd_real stirlerr_ddr, dd_real half_lf_ddr) {
+  dd_real ddrs[3];
+  ddrs[0] = stirlerr_ddr;
+  ddrs[1] = ddr_negate(loader_bd0(k_ddr, ddr_mul(n_ddr, p_ddr)));
+  ddrs[2] = ddr_negate(loader_bd0(nmk_ddr, ddr_mul(n_ddr, q_ddr)));
+  const dd_real lc_ddr = ddr_sort_and_add(3, ddrs);
+  return ddr_sub(lc_ddr, half_lf_ddr);
+}
+
+dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr) {
+  // Assumes k <= n are nonnegative integers where ddr_sub(n_ddr, k_ddr)
+  // does not incur any error in representing n-k.
+  // Assumes 0 < p,q < 1, p+q=1; one of them may be denormal.
+  if (ddr_is_zero(k_ddr)) {
+    return ddr_mul(ddr_log_extdomain_maybehalf(q_ddr), n_ddr);
+  }
+  const dd_real nmk_ddr = ddr_sub(n_ddr, k_ddr);
+  if (ddr_is_zero(nmk_ddr)) {
+    return ddr_mul(ddr_log_extdomain_maybehalf(p_ddr), n_ddr);
+  }
+  dd_real stirlerr_ddr;
+  dd_real half_lf_ddr;
+  binom_ln_prob_loader_part1(k_ddr, nmk_ddr, n_ddr, &stirlerr_ddr, &half_lf_ddr);
+  return binom_ln_prob_loader_part2(k_ddr, nmk_ddr, n_ddr, p_ddr, q_ddr, stirlerr_ddr, half_lf_ddr);
+}
 
 // ibeta_...() and dependencies below are adapted from Boost 1.91.0.
 // This derived code is subject to the following license:
@@ -101,8 +186,7 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
   // Returns log((p^a)(q^b) / Beta(a,b))
   //       = log((p^a)(q^b)(a+b-1)! / ((a-1)!(b-1)!)).
   //
-  // This actually holds up better than the obvious ddr-based implementation
-  // when aa+bb approaches 2^52.
+  // todo: compare to binom_ln_prob_loader()-based approach
   double cc = aa + bb;
   const double gh = kLanczosDoubleG - 0.5;
   const dd_real agh_ddr = ddr_add2d(gh, aa);
@@ -121,9 +205,11 @@ dd_real ibeta_power_terms_d_ln(double aa, double bb, dd_real p_ddr, dd_real q_dd
     ddr_sqr(
       ddr_accurate_div(ddr_muld(ddr_mul2d(numer_a, numer_b), numer_c),
                        ddr_muld(ddr_mul2d(denom_a, denom_b), denom_c)));
+  // now multiplies by bgh later to avoid potential overflow
   const dd_real term2_ddr =
-    ddr_accurate_div(ddr_mul(agh_ddr, bgh_ddr),
-                     ddr_mul(cgh_ddr, _ddr_e));
+    ddr_mul(ddr_accurate_div(agh_ddr,
+                             ddr_mul(cgh_ddr, _ddr_e)),
+            bgh_ddr);
   dd_real result_ddr =
     ddr_mul_pwr2(ddr_log(ddr_mul(term1_ddr, term2_ddr)),
                  0.5);
@@ -159,10 +245,9 @@ double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double 
     // if xx is very small, precomputed xx * xx may underflow when actual
     // product here does not
     // (also possible for actual product to underflow)
-    const double shared_middle_term = mm * (bb - mm) * xx / denom;
-    const double cur_a = ((aa + mm - 1) / denom) * (aa + bb + mm - 1) * shared_middle_term * xx;
-    double cur_b = prefer_fma((aa + mm) / (aa + 2 * mm + 1), prefer_fma(mm, two_minus_x, ay_minus_bx_plus1), mm + shared_middle_term);
-    // cur_b += ((aa + mm) / (aa + 2 * mm + 1)) * prefer_fma(mm, two_minus_x, ay_minus_bx_plus1);
+    const double shared_frac = (bb - mm) / denom;
+    const double cur_a = ((aa + mm - 1) / denom) * ((aa + bb + mm - 1) * xx * shared_frac) * (mm * xx);
+    const double cur_b = prefer_fma((aa + mm) / (aa + 2 * mm + 1), prefer_fma(mm, two_minus_x, ay_minus_bx_plus1), mm + shared_frac * mm * xx);
     mm += 1.0;
     dd = prefer_fma(cur_a, dd, cur_b);
     // Algorithm should terminate when cur_a decreases to 0 due to bb == mm or
@@ -214,7 +299,7 @@ double ibeta_continued_fraction_recip_d(double aa, double bb, double xx, double 
 }
 
 /*
-double erfcx_internal(double x) {
+double erfcx(double x) {
   // e^(x^2) * erfc(x).
   //
   // This is based on Norbert Juffa's implementation from
@@ -420,9 +505,13 @@ dd_real erfcx_ddr(dd_real x_ddr) {
   if (x_ddr.x[0] < 0) {
     // don't need this for pbinom(), but it's nice to provide an erfcx()
     // library function
-    // ddr_exp(x) currently overflows at x=709, even though log(DBL_MAX) is a
-    // bit larger.
-    result_ddr = ddr_sub(ddr_mul_pwr2(ddr_exp(ddr_sqr(x_ddr)), 2), result_ddr);
+    const dd_real exponential_term_ddr = ddr_mul_pwr2(ddr_exp(ddr_sqr(x_ddr)), 2);
+    if (exponential_term_ddr.x[0] == INFINITY_D) {
+      // ddr_sub degrades infinity to NaN
+      result_ddr = exponential_term_ddr;
+    } else {
+      result_ddr = ddr_sub(exponential_term_ddr, result_ddr);
+    }
   }
   return result_ddr;
 }
@@ -518,18 +607,9 @@ dd_real ddr_log1pmx(dd_real x_ddr) {
 
 // This term is relatively insignificant, could calculate to lower precision
 // (especially when approx=True).
-static inline dd_real bcorr_ddr(double a0, double b0) {
-  double abmin;
-  double abmax;
-  if (a0 < b0) {
-    abmin = a0;
-    abmax = b0;
-  } else {
-    abmin = b0;
-    abmax = a0;
-  }
-  return ddr_add(ddr_sub(ddr_stirlerr(ddr_maked(abmax)), ddr_stirlerr(ddr_maked(a0 + b0))),
-                 ddr_stirlerr(ddr_maked(abmin)));
+static inline dd_real bcorr_ddr(dd_real abmin_ddr, dd_real abmax_ddr) {
+  return ddr_add(ddr_sub(ddr_stirlerr(abmax_ddr), ddr_stirlerr(ddr_add(abmin_ddr, abmax_ddr))),
+                 ddr_stirlerr(abmin_ddr));
 }
 
 // must be even
@@ -548,14 +628,14 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
 
   // This is the dominant term if we're relatively far from the mode; it's
   // worth calculating to dd_real precision.
+  // todo: try to calculate (t_ddr minus logpmf) accurately to support
+  // tail-likelihood calculation
   const dd_real t_ddr = ddr_add(ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, -a)), a),
                                 ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, b)), b));
 
   const dd_real f_ddr = ddr_negate(t_ddr);
 
   const dd_real z0_ddr = ddr_sqrt(f_ddr);
-  const double z = z0_ddr.x[0] * kSqrt2;
-  const double z2 = 2 * f_ddr.x[0];
   double abmin;
   double abmax;
   if (a < b) {
@@ -567,25 +647,26 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
   }
   const double h = abmin / abmax;
   const double r1 = (b - a) / abmax;
-  const double w0 = 1.0 / sqrt(abmin * (h + 1));
+  const double w0sqr = 1.0 / (abmin * (h + 1));
+  const double zw0sqr = w0sqr * 2 * f_ddr.x[0];
+  const double w0 = sqrt(w0sqr);
   const double r0_x2 = 2 / (h + 1);
 
   a0[0] = r1 * (2.0 / 3);
-  c[0] = -a0[0] * 0.5;
-  d[0] = -c[0];
+  d[0] = a0[0] * 0.5;
+  c[0] = -d[0];
   // This is the other potential leading term.
-  dd_real j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
-  double j1 = e1;
-  dd_real sum_ddr = ddr_addd(j0_ddr, d[0] * w0 * j1);
+  const dd_real initial_j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+  double j1w = e1 * w0;
+  dd_real sum_ddr = ddr_addd(initial_j0_ddr, d[0] * j1w);
 
-  double j0 = j0_ddr.x[0];
+  double j0w = initial_j0_ddr.x[0];
 
   double s = 1.0;
   const double h2 = h * h;
   double hn = 1.0;
-  double w = w0;
-  double znm1 = z;
-  double zn = z2;
+  double e1_znm1_w0n = e1 * z0_ddr.x[0] * w0sqr * kSqrt2;
+  double e1_zn_w0np1 = j1w * zw0sqr;
   for (int32_t n = 2; n <= kBasymApproxIter; n += 2) {
     hn *= h2;
     a0[n - 1] = r0_x2 * (h * hn + 1) / (n + 2);
@@ -600,27 +681,44 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
         double bsum = 0;
         for (int32_t j = 1; j < m; ++j) {
           const int32_t mmj = m - j;
-          bsum += (j * r - mmj) * a0[j - 1] * b0[mmj - 1];
+          bsum = prefer_fma(prefer_fma(j, r, -mmj) * a0[j - 1], b0[mmj - 1], bsum);
         }
-        b0[m - 1] = r * a0[m - 1]  + bsum / m;
+        b0[m - 1] = prefer_fma(r, a0[m - 1], bsum / m);
       }
       c[i - 1] = b0[i - 1] / (i + 1);
 
       double dsum = 0;
       for (int32_t j = 1; j < i; ++j) {
-        dsum += d[i - j - 1] * c[j - 1];
+        dsum = prefer_fma(d[i - j - 1], c[j - 1], dsum);
       }
       d[i - 1] = -(dsum + c[i - 1]);
     }
 
-    j0 = e1 * znm1 + (n - 1) * j0;
-    j1 = e1 * zn + n * j1;
-    znm1 = z2 * znm1;
-    zn = z2 * zn;
-    w *= w0;
-    const double t0 = d[n - 1] * w * j0;
-    w *= w0;
-    const double t1 = d[n] * w * j1;
+    // Under the conditions we're calling this function under (where abmin is
+    // close to abmax), z is proportional to sqrt(abmin) and w0 is proportional
+    // to 1/sqrt(abmin).
+    //
+    // Original algorithm kept track of w0^n and j (a degree-n polynomial in z)
+    // and multiplied by w0^n and then j; this blew up into 0 * inf = nan for
+    // very large abmin.
+    //
+    // To fix this, we replace {w, znm1, zn, j0, j1} in the recurrence with
+    // {e1_znm1_w0n, e1_zn_w0np1, j0w, j1w}.
+    // Previously we had
+    //   j0 = e1 * znm1 + (n - 1) * j0;
+    //   j1 = e1 * zn + n * j1;
+    //   znm1 = z2 * znm1;
+    //   zn = z2 * zn;
+    //   w *= w0;
+    //   const double t0 = d[n - 1] * w * j0;
+    //   w *= w0;
+    //   const double t1 = d[n] * w * j1;
+    j0w = prefer_fma(j0w, (n - 1) * w0sqr, e1_znm1_w0n);
+    j1w = prefer_fma(j1w, n * w0sqr, e1_zn_w0np1);
+    e1_znm1_w0n = zw0sqr * e1_znm1_w0n;
+    e1_zn_w0np1 = zw0sqr * e1_zn_w0np1;
+    const double t0 = d[n - 1] * j0w;
+    const double t1 = d[n] * j1w;
     sum_ddr = ddr_add(sum_ddr, ddr_add2d(t0, t1));
     // could use wider eps when |ln_e0| is large
     // (narrowing this doesn't noticeably improve accuracy, we're limited by
@@ -631,62 +729,63 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
     }
   }
 
-  return ddr_add(ddr_sub(ddr_addd(t_ddr, ln_e0), bcorr_ddr(a, b)), ddr_log(sum_ddr));
+  return ddr_add(ddr_sub(ddr_addd(t_ddr, ln_e0), bcorr_ddr(ddr_maked(abmin), ddr_maked(abmax))), ddr_log(sum_ddr));
 }
 
-dd_real basym(double a, double b, dd_real lambda_ddr) {
+CONSTI32(kBasymIter, 26);
+
+dd_real basym(dd_real a_ddr, dd_real b_ddr, dd_real lambda_ddr) {
   const dd_real e1_ddr = {{0.3535533905932738, -2.4168233283632284e-17}};  // 2^{-3/2}
   const dd_real ln_e0_ddr = {{0.12078223763524522, 4.1797047492946264e-18}};  // log(2/sqrt(pi))
 
-  dd_real a0_ddr[kBasymApproxIter + 1];
-  dd_real b0_ddr[kBasymApproxIter + 1];
-  dd_real c_ddr[kBasymApproxIter + 1];
-  dd_real d_ddr[kBasymApproxIter + 1];
+  dd_real a0_ddr[kBasymIter + 1];
+  dd_real b0_ddr[kBasymIter + 1];
+  dd_real c_ddr[kBasymIter + 1];
+  dd_real d_ddr[kBasymIter + 1];
 
-  const dd_real t_ddr = ddr_add(ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, -a)), a),
-                                ddr_muld(ddr_log1pmx(ddr_divd(lambda_ddr, b)), b));
+  const dd_real t_ddr = ddr_add(ddr_mul(ddr_log1pmx(ddr_negate(ddr_accurate_div(lambda_ddr, a_ddr))), a_ddr),
+                                ddr_mul(ddr_log1pmx(ddr_accurate_div(lambda_ddr, b_ddr)), b_ddr));
 
   const dd_real f_ddr = ddr_negate(t_ddr);
 
   const dd_real z0_ddr = ddr_sqrt(f_ddr);
-  const dd_real z_ddr = ddr_mul(z0_ddr, _ddr_sqrt2);
-  const dd_real z2_ddr = ddr_mul_pwr2(f_ddr, 2);
-  double abmin;
-  double abmax;
-  if (a < b) {
-    abmin = a;
-    abmax = b;
+  dd_real abmin_ddr;
+  dd_real abmax_ddr;
+  if (ddr_lt(a_ddr, b_ddr)) {
+    abmin_ddr = a_ddr;
+    abmax_ddr = b_ddr;
   } else {
-    abmin = b;
-    abmax = a;
+    abmin_ddr = b_ddr;
+    abmax_ddr = a_ddr;
   }
-  const dd_real h_ddr = ddr_divd(ddr_maked(abmin), abmax);
-  const dd_real r1_ddr = ddr_divd(ddr_maked(b - a), abmax);
+  const dd_real h_ddr = ddr_accurate_div(abmin_ddr, abmax_ddr);
+  const dd_real r1_ddr = ddr_accurate_div(ddr_sub(b_ddr, a_ddr), abmax_ddr);
   const dd_real hp1_ddr = ddr_addd(h_ddr, 1);
-  const dd_real w0_ddr = ddr_accurate_div(ddr_maked(1), ddr_sqrt(ddr_muld(hp1_ddr, abmin)));
+  const dd_real w0sqr_ddr = ddr_accurate_div(ddr_maked(1), ddr_mul(hp1_ddr, abmin_ddr));
+  const dd_real zw0sqr_ddr = ddr_mul(w0sqr_ddr, ddr_mul_pwr2(f_ddr, 2));
+  const dd_real w0_ddr = ddr_sqrt(w0sqr_ddr);
+  const dd_real r0_x2_ddr = ddr_accurate_div(ddr_maked(2), hp1_ddr);
+  const dd_real r1_x2_ddr = ddr_mul_pwr2(r1_ddr, 2);
 
   a0_ddr[0] = ddr_mul(r1_ddr, _ddr_2_3rds);
   d_ddr[0] = ddr_mul_pwr2(a0_ddr[0], 0.5);
   c_ddr[0] = ddr_negate(d_ddr[0]);
   // this is the other potential leading term
-  dd_real j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
-
-  dd_real j1_ddr = e1_ddr;
-  dd_real sum_ddr = ddr_add(ddr_mul(ddr_mul(d_ddr[0], w0_ddr), j1_ddr), j0_ddr);
+  dd_real j0w_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+  dd_real j1w_ddr = ddr_mul(e1_ddr, w0_ddr);
+  dd_real sum_ddr = ddr_add(ddr_mul(d_ddr[0], j1w_ddr), j0w_ddr);
 
   // to explore: do we still have enough precision if we just hardcode n=2
   // iteration to use dd_reals, and then fall back to float64 afterwards?
 
-  const dd_real r0_x2_ddr = ddr_accurate_div(ddr_maked(2), hp1_ddr);
-  const dd_real r1_x2_ddr = ddr_mul_pwr2(r1_ddr, 2);
-
+  // const dd_real z_ddr = ddr_mul(z0_ddr, _ddr_sqrt2);
+  // const dd_real z2_ddr = ddr_mul_pwr2(f_ddr, 2);
   dd_real s_ddr = ddr_maked(1.0);
   const dd_real h2_ddr = ddr_sqr(h_ddr);
   dd_real hn_ddr = ddr_maked(1.0);
-  dd_real w_ddr = w0_ddr;
-  dd_real znm1_ddr = z_ddr;
-  dd_real zn_ddr = z2_ddr;
-  for (int32_t n = 2; n <= kBasymApproxIter; n += 2) {
+  dd_real e1_znm1_w0n_ddr = ddr_mul(ddr_mul(z0_ddr, e1_ddr), ddr_mul(w0sqr_ddr, _ddr_sqrt2));
+  dd_real e1_zn_w0np1_ddr = ddr_mul(j1w_ddr, zw0sqr_ddr);
+  for (int32_t n = 2; n <= kBasymIter; n += 2) {
     hn_ddr = ddr_mul(hn_ddr, h2_ddr);
     a0_ddr[n - 1] = ddr_divd(ddr_mul(r0_x2_ddr, ddr_addd(ddr_mul(h_ddr, hn_ddr), 1)), n+2);
     const int32_t np1 = n+1;
@@ -713,14 +812,12 @@ dd_real basym(double a, double b, dd_real lambda_ddr) {
       d_ddr[i - 1] = ddr_negate(ddr_add(dsum_ddr, c_ddr[i - 1]));
     }
 
-    j0_ddr = ddr_add(ddr_mul(e1_ddr, znm1_ddr), ddr_muld(j0_ddr, n - 1));
-    j1_ddr = ddr_add(ddr_mul(e1_ddr, zn_ddr), ddr_muld(j1_ddr, n));
-    znm1_ddr = ddr_mul(znm1_ddr, z2_ddr);
-    zn_ddr = ddr_mul(zn_ddr, z2_ddr);
-    w_ddr = ddr_mul(w_ddr, w0_ddr);
-    const dd_real t0_ddr = ddr_mul(ddr_mul(d_ddr[n - 1], w_ddr), j0_ddr);
-    w_ddr = ddr_mul(w_ddr, w0_ddr);
-    const dd_real t1_ddr = ddr_mul(ddr_mul(d_ddr[n], w_ddr), j1_ddr);
+    j0w_ddr = ddr_add(ddr_mul(j0w_ddr, ddr_muld(w0sqr_ddr, n - 1)), e1_znm1_w0n_ddr);
+    j1w_ddr = ddr_add(ddr_mul(j1w_ddr, ddr_muld(w0sqr_ddr, n)), e1_zn_w0np1_ddr);
+    e1_znm1_w0n_ddr = ddr_mul(zw0sqr_ddr, e1_znm1_w0n_ddr);
+    e1_zn_w0np1_ddr = ddr_mul(zw0sqr_ddr, e1_zn_w0np1_ddr);
+    const dd_real t0_ddr = ddr_mul(d_ddr[n - 1], j0w_ddr);
+    const dd_real t1_ddr = ddr_mul(d_ddr[n], j1w_ddr);
     sum_ddr = ddr_add(sum_ddr, ddr_add(t0_ddr, t1_ddr));
 
     // erfcx limited to ~18-digit precision
@@ -731,7 +828,7 @@ dd_real basym(double a, double b, dd_real lambda_ddr) {
   }
 
   // printf("%.17g %.17g %.17g %.17g\n", ln_e0_ddr.x[0], t_ddr.x[0], bcorr_ddr(a, b).x[0], sum_ddr.x[0]);
-  return ddr_add(ddr_sub(ddr_add(t_ddr, ln_e0_ddr), bcorr_ddr(a, b)), ddr_log(sum_ddr));
+  return ddr_add(ddr_sub(ddr_add(t_ddr, ln_e0_ddr), bcorr_ddr(abmin_ddr, abmax_ddr)), ddr_log(sum_ddr));
 }
 
 // Adaptations of DiDonato and Morris's BFRAC and BASYM.  BFRAC is based on a
@@ -752,9 +849,10 @@ dd_real basym(double a, double b, dd_real lambda_ddr) {
 // these two expansions well enough to take a real shot at improving e.g.
 // the rather similar hypergeometric cdf calculation.)
 double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t midp_complement, uint32_t return_log) {
-  // normalized always true, min(aa,bb) >= 40, max(aa,bb) much larger
+  // normalized always true, min(aa,bb) >= 40, max(aa,bb) >= 256
   // (usually cheaper to sum tail binomial terms directly with smaller
   // min(aa,bb); and Lanczos sum becomes less accurate)
+  // now supports n up to 2^900
   // caller responsible for guaranteeing aq - bp >= 0
   //
   // * In PbinomApprox(), (a,b) is initialized to (k+1,n-k) and inv is
@@ -791,7 +889,8 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
 
   dd_real result_ln_ddr;
   // have confirmed this is still a reasonable threshold
-  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
+  const double abmin = MINV(aa, bb);
+  if ((abmin < 100) || (aq_minus_bp_ddr.x[0] > abmin * 0.03)) {
     // BFRAC
     result_ln_ddr = ibeta_power_terms_d_ln(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
     const double result_incr = log(ibeta_continued_fraction_recip_d(aa, bb, p_ddr.x[0], q_ddr.x[0], aq_minus_bp_ddr, inv, midp_complement));
@@ -803,16 +902,7 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
       const double n = aa + bb - 1;
       const uint32_t ab_flipped = (midp_complement == inv + 1);
       const double k = aa - (!ab_flipped);
-      // may move binom_ln_prob_loader() into this file, but for now...
-      const double nmk = n - k;
-      dd_real ddrs[6];
-      ddrs[0] = ddr_lfact(n);
-      ddrs[1] = ddr_negate(ddr_lfact(k));
-      ddrs[2] = ddr_negate(ddr_lfact(nmk));
-      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), nmk);
-      ddrs[5] = _ddr_log05;
-      dd_real half_pmf_ddr = ddr_sort_and_add(6, ddrs);
+      dd_real half_pmf_ddr = ddr_add(binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), p_ddr, q_ddr), _ddr_log05);
       if (ab_flipped) {
         result_ln_ddr = ddr_logspace_sub(result_ln_ddr, half_pmf_ddr);
       } else {
@@ -831,28 +921,39 @@ double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, 
   return return_log? ddr_log1p(neg_result_ddr).x[0] : ddr_addd(neg_result_ddr, 1).x[0];
 }
 
-dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr) {
+dd_real ibeta_continued_fraction_ddr(dd_real a_ddr, dd_real b_ddr, double n, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr) {
+  // min(a,b)>=2048, n=a+b-1 can be close to DBL_MAX, aq-bp guaranteed to be at
+  // least 0.03*min(a,b).
+  // Due to the latter, number of continued fraction iterations should be
+  // limited, but we need to be careful about overflow/underflow.
   const double cf_eps = k2m64 * (1.0 / (1 << 3));
   const dd_real aq_minus_bp_plus1_ddr = ddr_addd(aq_minus_bp_ddr, 1);
-  dd_real cc_ddr = ddr_divd(ddr_muld(aq_minus_bp_plus1_ddr, aa), aa + 1);
+  // c = (aq-bp+1) * (a/(a+1))
+  dd_real cc_ddr = ddr_mul(aq_minus_bp_plus1_ddr,
+                           ddr_accurate_div(a_ddr, ddr_addd(a_ddr, 1)));
   const dd_real two_minus_p_ddr = ddr_addd(q_ddr, 1);
   dd_real ff_ddr = cc_ddr;
   dd_real dd_ddr = ddr_maked(0);
   double mm = 1.0;
   while (1) {
-    const double denom = aa + 2 * mm - 1;
-    const dd_real shared_middle_term_ddr = ddr_divd(ddr_mul(ddr_mul2d(mm, bb - mm), p_ddr), denom);
-    // if p_ddr is very small, precomputed p_ddr * p_ddr may underflow when
-    // actual product here does not
-    // (also possible for actual product to underflow)
-    // (we probably just want to handle tiny p in its own function?)
-    const dd_real cur_a_ddr = ddr_divd(ddr_mul(ddr_mul(ddr_mul2d(aa + mm - 1, aa + bb + mm - 1), shared_middle_term_ddr), p_ddr), denom);
-    dd_real cur_b_ddr = ddr_addd(shared_middle_term_ddr, mm);
-    cur_b_ddr = ddr_add(cur_b_ddr, ddr_divd(ddr_muld(ddr_add(ddr_muld(two_minus_p_ddr, mm), aq_minus_bp_plus1_ddr), aa + mm), aa + 2 * mm + 1));
+    const dd_real denom_ddr = ddr_addd(a_ddr, 2*mm-1);
+    // m*(b-m)*p / (a+2m-1)
+    // Safest to just compute (b-m)/(a+2m-1) here and handle mp later.
+    const dd_real shared_frac_ddr = ddr_accurate_div(ddr_addd(b_ddr, -mm), denom_ddr);
+
+    // ((a+m-1)/(a+2m-1)) * ((n+m) * p * shared_frac) * mp
+    const dd_real cur_a_ddr = ddr_mul(ddr_mul(ddr_accurate_div(ddr_addd(a_ddr, mm-1), denom_ddr),
+                                              ddr_mul(ddr_mul(ddr_add2d(n, mm), p_ddr), shared_frac_ddr)),
+                                      ddr_muld(p_ddr, mm));
+
+    // (a+m)/(a+2m+1) * (m(2-p)+(aq-bp+1)) + m + shared_frac*m*p
+    const dd_real cur_b_ddr = ddr_add(ddr_mul(ddr_accurate_div(ddr_addd(a_ddr, mm), ddr_addd(a_ddr, 2*mm+1)),
+                                              ddr_add(aq_minus_bp_plus1_ddr, ddr_muld(two_minus_p_ddr, mm))),
+                                      ddr_addd(ddr_mul(ddr_muld(shared_frac_ddr, mm), p_ddr), mm));
+
     mm += 1.0;
     dd_ddr = ddr_add(ddr_mul(cur_a_ddr, dd_ddr), cur_b_ddr);
-    // Algorithm should terminate when cur_a decreases to 0 due to bb == mm or
-    // underflow.  At and before that point, cur_b is always positive.
+    // cur_b is at least around aq-bp, which is pretty large.
     /*
     if (dd == 0.0) {
       dd = kLentzFpmin;
@@ -890,56 +991,31 @@ dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_rea
   }
 }
 
-double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t return_log) {
-  // (a is a synonym for k+1, b is a synonym for n-k, x is a synonym for p, y
-  // is a synonym for q)
-  //   log((x^a)(y^b) / Beta(a,b))
-  // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
+double ibeta_largeab(dd_real a_ddr, dd_real b_ddr, double n, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t return_log) {
   dd_real result_ln_ddr;
-  // if (1) {
-  if (aq_minus_bp_ddr.x[0] > MINV(aa, bb) * 0.03) {
-    const double a_plus_b = aa + bb;
-    const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-    // This should be consistent with use_tdr_for_binom_lnprob().
-    // bugfix (21 Aug 2026): this comparison went the wrong way
-    if (a_plus_b < S_CAST(double, 1LL << 36)) {
-      dd_real ddrs[5];
-      ddrs[0] = ddr_lfact(a_plus_b - 1);
-      ddrs[1] = ddr_negate(ddr_lfact(aa - 1));
-      ddrs[2] = ddr_negate(ddr_lfact(bb - 1));
-      if (p_is_half) {
-        ddrs[3] = ddr_muld(_ddr_log05, a_plus_b);
-      } else {
-        ddrs[3] = ddr_muld(ddr_log_2arg(p_ddr, q_ddr), aa);
-        ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), bb);
-      }
-      result_ln_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-    } else {
-      td_real tdrs[5];
-      tdrs[0] = tdr_lfact(a_plus_b - 1);
-      tdrs[1] = tdr_negate(tdr_lfact(aa - 1));
-      tdrs[2] = tdr_negate(tdr_lfact(bb - 1));
-      if (p_is_half) {
-        tdrs[3] = tdr_muld(_tdr_log05, a_plus_b);
-      } else {
-        if (ddr_ltd(p_ddr, 0.5)) {
-          tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), aa);
-          tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), bb);
-        } else {
-          tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), aa);
-          tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), bb);
-        }
-      }
-      result_ln_ddr = ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
-    }
+  // caller currently ensures abmin >= 2048
+  if (aq_minus_bp_ddr.x[0] > MINV(a_ddr.x[0], b_ddr.x[0]) * 0.03) {
+    // (a is a synonym for k+1, b is a synonym for n-k, x is a synonym for p, y
+    // is a synonym for q)
+    // We want
+    //   log((x^a)(y^b) / Beta(a,b))
+    // = a log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!)
+    //
+    // Since
+    //   binom_ln_prob_loader(a-1, n, x, y)
+    // = (a-1) log x + b log y + log((a+b-1)!) - log((a-1)!) - log(b!)
+    // = (a-1) log x + b log y + log((a+b-1)!) - log((a-1)!) - log((b-1)!) - log b
+    // we just need to add log(bx) to it.
+    result_ln_ddr = ddr_add(binom_ln_prob_loader(ddr_addd(a_ddr, -1), ddr_maked(n), p_ddr, q_ddr),
+                            ddr_log(ddr_mul(b_ddr, p_ddr)));
     // Could tighten this bound.
     if ((result_ln_ddr.x[0] < -1418.0) && (inv || (!return_log))) {
       return (return_log || (!inv))? 0.0 : 1.0;
     }
-    const dd_real ff_ddr = ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, aq_minus_bp_ddr);
+    const dd_real ff_ddr = ibeta_continued_fraction_ddr(a_ddr, b_ddr, n, p_ddr, q_ddr, aq_minus_bp_ddr);
     result_ln_ddr = ddr_sub(result_ln_ddr, ddr_log(ff_ddr));
   } else {
-    result_ln_ddr = basym(aa, bb, aq_minus_bp_ddr);
+    result_ln_ddr = basym(a_ddr, b_ddr, aq_minus_bp_ddr);
   }
   if (!inv) {
     return return_log? result_ln_ddr.x[0] : ddr_exp(result_ln_ddr).x[0];

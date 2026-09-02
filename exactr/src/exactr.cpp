@@ -102,7 +102,7 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = N
     }
 
     // src/nmath/dbinom.c
-    const double n_round = nearbyint(n_float);
+    const double n_round = rint(n_float);
     // strangely, R has a test which requires n_float rather than just n_round
     // < 0, when that is not the case for e.g. pbinom().
     if ((p < 0) || (p > 1) || (n_float < 0) || nonint(n_float, n_round)) {
@@ -110,7 +110,7 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = N
       nans_produced = 1;
       continue;
     }
-    const double k_round = nearbyint(k_float);
+    const double k_round = rint(k_float);
     if (nonint_warn(k_float, k_round) || (k_float < 0) || (k_float == R_PosInf)) {
       results[ridx] = log? R_NegInf : 0.0;
       continue;
@@ -127,7 +127,7 @@ NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = N
       results[ridx] = log? R_NegInf : 0.0;
       continue;
     }
-    results[ridx] = plink2::BinomMassExtdomain(k_round, n_round, p, log);
+    results[ridx] = plink2::BinomMass(k_round, n_round, p, log);
   }
   // Imitate FINISH_Math3 macro in R src/library/stats/src/distn.c .
   if (nans_produced) {
@@ -189,7 +189,7 @@ NumericVector pbinom_cpp(NumericVector q, NumericVector size, NumericVector prob
     }
 
     // src/nmath/pbinom.c
-    const double n_round = nearbyint(n_float);
+    const double n_round = rint(n_float);
     plink2::td_real p_tdr = plink2::tdr_make1(p);
     if (prob_denom != 1.0) {
       p_tdr = plink2::tdr_divd(p_tdr, prob_denom);
@@ -209,17 +209,15 @@ NumericVector pbinom_cpp(NumericVector q, NumericVector size, NumericVector prob
       continue;
     }
 
-    if (n_round >= (1LL << 52)) {
-      stop("size values in [2^52, Inf) not currently supported");
+    if (n_round > plink2::k2p900) {
+      stop("size values in (2^900, Inf) not currently supported");
     }
 
-    const int64_t k = static_cast<int64_t>(k_floor);
-    const int64_t n = static_cast<int64_t>(n_round);
     double result;
     if (approx) {
-      result = plink2::PbinomApprox(k, n, p_tdr, !lower_tail, midp, log_p);
+      result = plink2::PbinomApprox(k_floor, n_round, p_tdr, !lower_tail, midp, log_p);
     } else {
-      result = plink2::Pbinom(k, n, p_tdr, !lower_tail, log_p);
+      result = plink2::Pbinom(k_floor, n_round, p_tdr, !lower_tail, log_p);
     }
     results[ridx] = result;
   }
@@ -283,7 +281,7 @@ NumericVector qbinom_cpp(NumericVector p, NumericVector size, NumericVector prob
     }
 
     // src/nmath/qbinom.c
-    const double n_round = nearbyint(n_float);
+    const double n_round = rint(n_float);
     if ((n_float == R_PosInf) || (prob_float < 0.0) || (prob_float > 1.0) || (n_round < 0)) {
       results[ridx] = R_NaN;
       nans_produced = 1;
@@ -434,9 +432,9 @@ NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericV
     }
 
     // src/nmath/dhyper.c
-    const double ac_round = nearbyint(ac_float);
-    const double bd_round = nearbyint(bd_float);
-    const double ab_round = nearbyint(ab_float);
+    const double ac_round = rint(ac_float);
+    const double bd_round = rint(bd_float);
+    const double ab_round = rint(ab_float);
     if ((ac_float < 0) || nonint(ac_float, ac_round) || (bd_float < 0) || nonint(bd_float, bd_round) || (ab_float < 0) || nonint(ab_float, ab_round) || (ab_float > ac_float + bd_float)) {
       results[ridx] = R_NaN;
       nans_produced = 1;
@@ -446,7 +444,7 @@ NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericV
       results[ridx] = log? R_NegInf : 0.0;
       continue;
     }
-    const double a_round = nearbyint(a_float);
+    const double a_round = rint(a_float);
     if (nonint_warn(a_float, a_round)) {
       results[ridx] = R_NaN;
       nans_produced = 1;
@@ -465,19 +463,16 @@ NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericV
       continue;
     }
 
-    if (ac_round + bd_round >= (1LL << 52)) {
+    if (!(plink2::ddr_leqd(plink2::ddr_add2d(ac_round, bd_round), DBL_MAX))) {
       // stats::dhyper() handles infinities in a fiddly manner which isn't
       // covered by tests, so I won't try to replicate that for now.
-      // As with dbinom(), if we need to handle larger finite cases I'd prefer
-      // to delegate those to Rmpfr.
-      stop("m+n values >= 2^52 not currently supported");
+      stop("m+n values > DBL_MAX not supported");
     }
 
-    const int64_t a = static_cast<int64_t>(a_round);
-    const int64_t b = static_cast<int64_t>(ab_round) - a;
-    const int64_t c = static_cast<int64_t>(ac_round) - a;
-    const int64_t d = static_cast<int64_t>(bd_round) - b;
-    results[ridx] = plink2::HypergeomMass(a, b, c, d, log);
+    const plink2::dd_real b_ddr = plink2::ddr_add2d(ab_round, -a_round);
+    const plink2::dd_real c_ddr = plink2::ddr_add2d(ac_round, -a_round);
+    const plink2::dd_real d_ddr = plink2::ddr_negate(plink2::ddr_addd(b_ddr, -bd_round));
+    results[ridx] = plink2::HypergeomMassDdr(plink2::ddr_maked(a_round), b_ddr, c_ddr, d_ddr, log);
   }
 
   // Imitate FINISH_Math4 macro in R src/library/stats/src/distn.c .
@@ -544,9 +539,9 @@ NumericVector phyper_cpp(NumericVector q, NumericVector m, NumericVector n, Nume
     }
 
     // src/nmath/phyper.c boundary checks
-    const double ac_round = nearbyint(ac_float);
-    const double bd_round = nearbyint(bd_float);
-    const double ab_round = nearbyint(ab_float);
+    const double ac_round = rint(ac_float);
+    const double bd_round = rint(bd_float);
+    const double ab_round = rint(ab_float);
     const double total = ac_round + bd_round;
     if ((ac_round < 0) || (bd_round < 0) || (total == R_PosInf) || (ab_round < 0) || (ab_round > total)) {
       results[ridx] = R_NaN;
@@ -654,9 +649,9 @@ NumericVector qhyper_cpp(NumericVector p, NumericVector m, NumericVector n, Nume
     }
 
     // src/nmath/qhyper.c boundary checks
-    const double ac_round = nearbyint(ac_float);
-    const double bd_round = nearbyint(bd_float);
-    const double ab_round = nearbyint(ab_float);
+    const double ac_round = rint(ac_float);
+    const double bd_round = rint(bd_float);
+    const double ab_round = rint(ab_float);
     const double total = ac_round + bd_round;
     if ((p_float == R_NegInf) || (p_float == R_PosInf) || (ac_round < 0) || (bd_round < 0) || (total == R_PosInf) || (ab_round < 0) || (ab_round > total)) {
       results[ridx] = R_NaN;

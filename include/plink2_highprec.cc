@@ -670,11 +670,12 @@ dd_real ddr_exp(const dd_real a) {
   const double k = 512.0;
   const double inv_k = 1.0 / k;
 
-  if (a.x[0] <= -709.0) {
+  // Give up at log(DBL_MAX) or its negation.
+  if (a.x[0] <= -709.782712893384) {
     return ddr_maked(0.0);
   }
 
-  if (a.x[0] >= 709.0) {
+  if (a.x[0] >= 709.782712893384) {
     return ddr_make(INFINITY_D, INFINITY_D);
   }
 
@@ -1109,11 +1110,11 @@ td_real tdr_exp(const td_real a) {
   const double k = 8192.0;
   const double inv_k = 1.0 / k;
 
-  if (a.x[0] <= -709.0) {
+  if (a.x[0] <= -709.782712893384) {
     return tdr_make1(0.0);
   }
 
-  if (a.x[0] >= 709.0) {
+  if (a.x[0] >= 709.782712893384) {
     return tdr_make(INFINITY_D, INFINITY_D, INFINITY_D);
   }
 

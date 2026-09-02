@@ -128,12 +128,9 @@ test_that("pbinom works", {
   expect_all_equal(pbinom(x0, size=3, prob=0.1), 0)
 
   expect_no_error(lapply(sample(10000, size=1000), function(M) {
-    ## Domain reduced for now due to 2^52 limit.
-    # n <- (M/100)*10^(2:20)
-    n <- (M/100)*10^(2:11)
+    n <- (M/100)*10^(2:20)
     if (anyNA(P <- pbinom(1,n,0.5))) {
-      # stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
-      stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
+      stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
     }
   }))
 
@@ -215,12 +212,9 @@ test_that("dhyper works", {
   ## Based on dhyper() tests in R 4.6.1 tests/d-p-q-r-tst-2.R and
   ## tests/print-tests.R .
   expect_no_error(lapply(sample(10000, size=1000), function(M) {
-    ## Domain reduced for now due to 2^52 limit.
-    # n <- (M/100)*10^(2:20)
-    n <- (M/100)*10^(2:11)
+    n <- (M/100)*10^(2:20)
     if (anyNA(P <- dhyper(n+1,n+5,n+5,n))) {
-      # stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
-      stop("NA for M=", M, "; 10ex=",paste((2:11)[is.na(P)], collapse=", "))
+      stop("NA for M=", M, "; 10ex=",paste((2:20)[is.na(P)], collapse=", "))
     }
   }))
 

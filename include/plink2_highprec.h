@@ -473,6 +473,19 @@ HEADER_INLINE dd_real ddr_add5(const dd_real a, const dd_real b, const dd_real c
 dd_real ddr_lfact(double xx);
 
 // Supports integer 0 <= n <= DBL_MAX.
+// Straightforward to support dd_real input.
+HEADER_INLINE dd_real ddr_lfact_extdomain(double xx) {
+  if (xx < (1LL << 52)) {
+    return ddr_lfact(xx);
+  }
+  // (n + 0.5) ln n - n + 0.5 ln 2*pi
+  // all other terms add up to <2^{-113} times the result
+  dd_real sum_ddr = ddr_subd(_ddr_half_log_2pi, xx);
+  const dd_real logn_ddr = ddr_log(ddr_maked(xx));
+  return ddr_add(sum_ddr, ddr_mul(logn_ddr, ddr_add2d(xx, 0.5)));
+}
+
+// Supports integer 0 <= n <= DBL_MAX.
 dd_real ddr_stirlerr(const dd_real n_ddr);
 
 HEADER_INLINE dd_real ddr_add_lfacts(const double a, const double b) {

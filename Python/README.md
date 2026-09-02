@@ -23,44 +23,44 @@ MPFR-comparison and benchmark scripts under utils/ .  E.g.
     n in [2^20, 2^21): errRMS=0  approxErrRMS=0  scipyErrRMS=1.01e-13
     n in [2^35, 2^36): errRMS=0  approxErrRMS=4.82e-17  scipyErrRMS=1.66e-11
     $ utils/pbinom_benchmark.py
-    n=(2^5)-1: base=7e-07  approx=3.21e-07  scipy=2.94e-05 sec/iter
-    n=(2^20)-1: base=2.8e-06  approx=1.53e-06  scipy=3.02e-05 sec/iter
-    n=(2^35)-1: base=1.47e-06  approx=1.4e-06  scipy=9.58e-05 sec/iter
+    n=(2^5)-1: base=7.54e-07  approx=3.12e-07  scipy=2.91e-05 sec/iter
+    n=(2^20)-1: base=2.94e-06  approx=1.24e-06  scipy=3.06e-05 sec/iter
+    n=(2^35)-1: base=1.63e-06  approx=1.12e-06  scipy=9.54e-05 sec/iter
 
     $ utils/binomtest_accuracy.py --z-score 1
     n in [2^5, 2^6): errRMS=1.44e-16  scipyErrRMS=1.96e-16
-    n in [2^20, 2^21): errRMS=5.4e-16  scipyErrRMS=6e-14
-    n in [2^35, 2^36): errRMS=5.83e-16  scipyErrRMS=7.53e-12
+    n in [2^20, 2^21): errRMS=3.03e-16  scipyErrRMS=6e-14
+    n in [2^35, 2^36): errRMS=7.32e-16  scipyErrRMS=7.53e-12
     $ utils/binomtest_benchmark.py --z-score 1  # ~100-250x speedup, better accuracy
-    n=(2^5)-1: base=9.58e-07  scipy=0.000238 sec/iter
-    n=(2^20)-1: base=4.23e-06  scipy=0.000557 sec/iter
-    n=(2^35)-1: base=5.92e-06  scipy=0.000883 sec/iter
+    n=(2^5)-1: base=1.02e-06  scipy=0.00023 sec/iter
+    n=(2^20)-1: base=4.14e-06  scipy=0.00053 sec/iter
+    n=(2^35)-1: base=5.98e-06  scipy=0.000852 sec/iter
 
     $ utils/phyper_accuracy.py --z-score -0.5  # scipy accuracy degrades quickly
     n in [2^5, 2^6): errRMS=0  approxErrRMS=1.72e-16  scipyErrRMS=2.84e-16
     n in [2^20, 2^21): errRMS=0  approxErrRMS=2.75e-15  scipyErrRMS=1.73e-10
     n in [2^35, 2^36): errRMS=0  approxErrRMS=4.13e-14  scipyErrRMS=1.05e-05
     $ utils/phyper_benchmark.py --z-score -0.5  # scipy speed is ok, except...
-    n=(2^5)-1: base=7.67e-07  approx=2e-07  scipy=3.54e-05 sec/iter
-    n=(2^20)-1: base=7.1e-05  approx=5.57e-06  scipy=4.44e-05 sec/iter
-    n=(2^35)-1: base=0.0145  approx=0.000869  scipy=0.00196 sec/iter
+    n=(2^5)-1: base=7.12e-07  approx=2.13e-07  scipy=3.46e-05 sec/iter
+    n=(2^20)-1: base=6.97e-05  approx=5.36e-06  scipy=4.34e-05 sec/iter
+    n=(2^35)-1: base=0.0146  approx=0.000851  scipy=0.00194 sec/iter
     $ utils/phyper_benchmark.py --z-score 0.0001  # ...it blows up for large n when z approaches 0.
-    n=(2^5)-1: base=7.75e-07  approx=2.33e-07  scipy=3.69e-05 sec/iter
-    n=(2^20)-1: base=7.61e-05  approx=5.68e-06  scipy=0.000512 sec/iter
-    n=(2^35)-1: base=0.0152  approx=0.000884  scipy=2.81 sec/iter
+    n=(2^5)-1: base=8.67e-07  approx=2.13e-07  scipy=3.68e-05 sec/iter
+    n=(2^20)-1: base=6.93e-05  approx=5.32e-06  scipy=0.000495 sec/iter
+    n=(2^35)-1: base=0.0149  approx=0.000908  scipy=2.7 sec/iter
     $ utils/phyper_benchmark.py
-    n=(2^5)-1: base=7.42e-07  approx=2.17e-07  scipy=3.6e-05 sec/iter
-    n=(2^20)-1: base=6.86e-05  approx=6.16e-06  scipy=0.00049 sec/iter
-    n=(2^35)-1: base=0.0146  approx=0.000855  scipy=14.9 sec/iter
+    n=(2^5)-1: base=1.48e-06  approx=2.33e-07  scipy=3.98e-05 sec/iter
+    n=(2^20)-1: base=7.82e-05  approx=5.33e-06  scipy=0.000522 sec/iter
+    n=(2^35)-1: base=0.0149  approx=0.00087  scipy=14.9 sec/iter
 
     $ utils/fisher_exact_22_accuracy.py --z-score -1
     n in [2^5, 2^6): errRMS=9.71e-17  scipyErrRMS=2.39e-16
     n in [2^20, 2^21): errRMS=1.33e-15  scipyErrRMS=1.85e-10
     n in [2^35, 2^36): errRMS=4.52e-13
     $ utils/fisher_exact_22_benchmark.py --z-score -1  # ~100-600x speedup, better accuracy
-    n=(2^5)-1: base=4.75e-07  scipy=0.000258 sec/iter
-    n=(2^20)-1: base=6.14e-06  scipy=0.000667 sec/iter
-    n=(2^35)-1: base=0.000864 sec/iter
+    n=(2^5)-1: base=4.5e-07  scipy=0.000331 sec/iter
+    n=(2^20)-1: base=5.97e-06  scipy=0.000986 sec/iter
+    n=(2^35)-1: base=0.000906 sec/iter
 
     $ utils/odds_ratio_accuracy.py --z-score 1
     n in [2^5, 2^6): estErrRMS=5.25e-16  ciLowErrRMS=7.12e-16  ciHighErrRMS=7.23e-16  scipyEstErrRMS=1.3e-15  scipyCiLowErrRMS=1.25e-14  scipyCiHighErrRMS=1.42e-15

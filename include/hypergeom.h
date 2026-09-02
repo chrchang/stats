@@ -51,12 +51,16 @@
 namespace plink2 {
 #endif
 
-HEADER_INLINE double HypergeomMass(int64_t m11, int64_t m12, int64_t m21, int64_t m22, uint32_t logp) {
-  const dd_real ln_prob_ddr = hypergeom_ln_prob_internal(m11, m12, m21, m22);
+HEADER_INLINE double HypergeomMassDdr(dd_real m11_ddr, dd_real m12_ddr, dd_real m21_ddr, dd_real m22_ddr, uint32_t logp) {
+  const dd_real ln_prob_ddr = hypergeom_ln_prob_loader(m11_ddr, m12_ddr, m21_ddr, m22_ddr);
   if (logp) {
     return ln_prob_ddr.x[0];
   }
   return ddr_exp(ln_prob_ddr).x[0];
+}
+
+HEADER_INLINE double HypergeomMass(double m11, double m12, double m21, double m22, uint32_t logp) {
+  return HypergeomMassDdr(ddr_maked(m11), ddr_maked(m12), ddr_maked(m21), ddr_maked(m22), logp);
 }
 
 double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, uint32_t m11_is_greater_alt, int32_t midp, uint32_t logp);

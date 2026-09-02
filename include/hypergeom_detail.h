@@ -28,21 +28,21 @@ namespace plink2 {
 // m11/m12/m21/m22 refer to cells in a 2x2 contingency table.
 
 // Slightly smaller than use_tdr_for_binom_lnprob() threshold since the sum has
-// more terms.
-HEADER_INLINE uint32_t use_tdr_for_hypergeom_lnprob(int64_t obs_tot) {
+// more terms.  (But this may become obsolete?)
+HEADER_INLINE uint32_t use_tdr_for_hypergeom_lnprob(double obs_tot) {
   return (obs_tot >= (1LL << 35));
 }
 
-// Returns log of
+// Returns accurate log of
 //
 //   (m11+m12)! (m21+m22)! (m11+m21)! (m12+m22)!
 //   -------------------------------------------
 //     m11! m12! m21! m22! (m11+m12+m21+m22)!
-dd_real hypergeom_ln_prob_internal(int64_t m11, int64_t m12, int64_t m21, int64_t m22);
+dd_real hypergeom_ln_prob_loader(dd_real m11_ddr, dd_real m12_ddr, dd_real m21_ddr, dd_real m22_ddr);
 
-void HypergeomMassMultiKPrecomp(int64_t mxx, int64_t m1x, int64_t mx1, td_real* lfact_m1x_tdr_ptr, td_real* lfact_m2x_tdr_ptr, td_real* lfact_mx1_tdr_ptr, td_real* lfact_mx2_tdr_ptr, td_real* lfact_mxx_tdr_ptr);
-
-double HypergeomMassJustK(int64_t m11, int64_t mxx, int64_t m1x, int64_t mx1, const td_real lfact_m1x_tdr, const td_real lfact_m2x_tdr, const td_real lfact_mx1_tdr, const td_real lfact_mx2_tdr, const td_real lfact_mxx_tdr, uint32_t logp);
+HEADER_INLINE dd_real hypergeom_ln_prob_d(double m11, double m12, double m21, double m22) {
+  return hypergeom_ln_prob_loader(ddr_maked(m11), ddr_maked(m12), ddr_maked(m21), ddr_maked(m22));
+}
 
 // Returns positive value if m22 = obs_m22 + m22_incr has higher probability
 // than m22 = obs_m22, 0 if identical probability, and negative value if lower

@@ -173,7 +173,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     const double pval = (left_sum - 0.5 * midp) / (left_sum + right_sum);
     return logp? log(pval) : pval;
   }
-  const dd_real starting_lnprob_ddr = hypergeom_ln_prob_internal(obs_m11, obs_m12, obs_m21, obs_m22);
+  const dd_real starting_lnprob_ddr = hypergeom_ln_prob_d(m11, m12, m21, m22);
   // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
   // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
   // when logp=false and we're flushing denormals to zero.  DBL_MIN is
@@ -403,7 +403,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
     }
     return ddr_log(prob_ddr).x[0];
   }
-  dd_real ln_prob_ddr = hypergeom_ln_prob_internal(obs_m11, obs_m12, obs_m21, obs_m22);
+  dd_real ln_prob_ddr = hypergeom_ln_prob_d(m11, m12, m21, m22);
   dd_real lik_ddr = ddr_maked(1.0);
   dd_real left_sum_ddr = lik_ddr;
   if (m22 > 0) {
@@ -500,7 +500,7 @@ int64_t Qhyper(dd_real p_or_lnp_ddr, int64_t ac, int64_t bd, int64_t ab, uint32_
   const double modal_dd = ceil((m2x + 1) * (mx2 + 1) / (mxx + 2)) - 1;
   const double m11_minus_m22 = a_minus_d;
   td_real lnprobf_tdr;
-  const uint32_t use_tdr = use_tdr_for_hypergeom_lnprob(abcd);
+  const uint32_t use_tdr = use_tdr_for_hypergeom_lnprob(mxx);
   if (!use_tdr) {
     lnprobf_tdr = tdr_make_dd(ddr_sub(ddr_sort_and_add_4_lfacts(m1x, m2x, mx1, mx2),
                                       ddr_lfact(mxx)));

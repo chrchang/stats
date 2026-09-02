@@ -2,7 +2,7 @@ Package: exactr
 Type: Package
 Title: Accurate and Efficient Exact Tests and Distributions
 Version: 0.1.0
-Date: 2026-08-xx
+Date: 2026-09-xx
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),
@@ -25,7 +25,6 @@ Encoding: UTF-8
 License: LGPL-3
 BugReports: https://github.com/chrchang/stats/issues
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 LinkingTo:
     Rcpp
 Imports:
@@ -33,3 +32,4 @@ Imports:
 Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

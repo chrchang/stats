@@ -24,247 +24,30 @@
 namespace plink2 {
 #endif
 
-// Should always have <1 ULP error; and ddr_exp(result) also has <1 ULP error
-// when it isn't < DBL_MIN.  Error analysis:
-//
-// * For p=0.5, dd_real calculation doesn't reach absolute error > 2^{-53}
-//   until n > ~2^39.
-//     ddr_lfact(2^39) ~= 2^39 * log(2^39)
-//                     ~= 2^39 * 39 * 0.693
-//                     ~= 2^44.
-//   Reviewing the operations required by ddr_lfact() (dominated by a ddr_log()
-//   call, which is in turn dominated by a ddr_exp() call), I'm pretty sure
-//   ddr_lfact()'s relative error < 2^{-98} for our domain (while I would be
-//   surprised if it was always < 2^{-101}).  We need to add one number near
-//   ddr_lfact(n) (or two numbers near ddr_lfact(n/2)) and subtract
-//   ddr_lfact(n); that translates to absolute error ~2^{-53}.
-//
-// * For other p, if (k ln p) + ((n-k) ln q) doesn't have significantly larger
-//   magnitude than the p=0.5 case, the p=0.5 error analysis applies.  If it
-//   does have significantly larger magnitude, absolute error can be larger but
-//   that's fine because we no longer have heavy subtractive cancellation.
-dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  if (!use_tdr_for_binom_lnprob(n)) {
-    dd_real ddrs[5];
-    ddrs[0] = ddr_lfact(n);
-    ddrs[1] = ddr_negate(ddr_lfact(k));
-    ddrs[2] = ddr_negate(ddr_lfact(n-k));
-    if (p_is_half) {
-      ddrs[3] = ddr_muld(_ddr_log05, n);
-    } else {
-      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
-    }
-    return ddr_sort_and_add(5 - p_is_half, ddrs);
+// Low-level interface for multiple-p vectorized dbinom().
+// (Loader's algorithm can't be sped up much in the multiple-k case.)
+void BinomMassMultiPPrecomp(double k, double n, dd_real* stirlerr_ddr_ptr, dd_real* half_lf_ddr_ptr) {
+  if ((k > 0) && (k < n)) {
+    binom_ln_prob_loader_part1(ddr_maked(k), ddr_add2d(n, -k), ddr_maked(n), stirlerr_ddr_ptr, half_lf_ddr_ptr);
   }
-  td_real tdrs[5];
-  tdrs[0] = tdr_lfact(n);
-  tdrs[1] = tdr_negate(tdr_lfact(k));
-  tdrs[2] = tdr_negate(tdr_lfact(n-k));
-  if (p_is_half) {
-    tdrs[3] = tdr_muld(_tdr_log05, n);
+}
+
+double BinomMassJustP(double k, double n, double p, dd_real stirlerr_ddr, dd_real half_lf_ddr, uint32_t logp) {
+  const dd_real n_ddr = ddr_maked(n);
+  const dd_real p_ddr = ddr_maked(p);
+  const dd_real q_ddr = ddr_add2d(1.0, -p);
+  dd_real ln_prob_ddr;
+  if (k == 0) {
+    ln_prob_ddr = ddr_mul(ddr_log_extdomain_maybehalf(q_ddr), n_ddr);
+  } else if (k == n) {
+    ln_prob_ddr = ddr_mul(ddr_log_extdomain_maybehalf(p_ddr), n_ddr);
   } else {
-    // I think this consistently squeezes out enough accuracy, even for n near
-    // 2^52, so no need for this function to take p_tdr?
-    //   d/dp[k ln p + (n-k) ln (1-p)]
-    // = k(1/p) + (n-k)(-1/(1-p))
-    // = k/p - (n-k)/(1-p)
-    // so if k/p ~= (n-k)/(1-p) (i.e. we're near the mode, and log-probability
-    // magnitude isn't huge), a relative error of 2^{-106} in representing p
-    // translates to sufficiently-low absolute error; and if we aren't near the
-    // mode, the final magnitude will be large (so higher absolute error is
-    // fine).
-    if (ddr_ltd(p_ddr, 0.5)) {
-      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
-      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
-    } else {
-      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
-      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
-    }
+    ln_prob_ddr = binom_ln_prob_loader_part2(ddr_maked(k), ddr_add2d(n, -k), n_ddr, p_ddr, q_ddr, stirlerr_ddr, half_lf_ddr);
   }
-  return ddr_make_td(tdr_sort_and_add(5 - p_is_half, tdrs));
-}
-
-// binom_ln_prob_loader() implements Catherine Loader's algorithm:
-//   https://www.r-project.org/doc/reports/CLoader-dbinom-2002.pdf
-// with dd_reals (similar in character to R ebd0()).  Relative error should be
-// better than ~2^{-90}?
-//
-// The key idea is to decompose the log-probability into a nonpositive term
-// corresponding to p_0 := n/k, and two more nonpositive terms of the form
-//   C * (x log x + 1 - x).
-// Since (x log x + 1 - x) can be accurately evaluated via series expansion for
-// x near 1, we never have significant cancellation.
-
-dd_real loader_bd0(dd_real x_ddr, dd_real np_ddr) {
-  const dd_real x_minus_np_ddr = ddr_sub(x_ddr, np_ddr);
-  // x+np may overflow.
-  const dd_real half_x_plus_np_ddr = ddr_add(ddr_mul_pwr2(x_ddr, 0.5), ddr_mul_pwr2(np_ddr, 0.5));
-  if (fabs(x_minus_np_ddr.x[0]) >= 0.2 * half_x_plus_np_ddr.x[0]) {
-    dd_real log_x_div_np_ddr;
-    // Avoid potential x/np overflow.
-    if (x_ddr.x[0] * (1.0 / (k2p800 * k2p100)) < np_ddr.x[0]) {
-      log_x_div_np_ddr = ddr_log(ddr_accurate_div(x_ddr, np_ddr));
-    } else {
-      log_x_div_np_ddr = ddr_sub(ddr_log(x_ddr), ddr_log_extdomain(np_ddr));
-    }
-    // Avoid potential ddr_mul() overflow.
-    return ddr_mul_pwr2(ddr_sub(ddr_mul(ddr_mul_pwr2(x_ddr, 1.0 / 2048), log_x_div_np_ddr), ddr_mul_pwr2(x_minus_np_ddr, 1.0 / 2048)), 2048);
+  if (logp) {
+    return ln_prob_ddr.x[0];
   }
-  const dd_real double_v_ddr = ddr_accurate_div(x_minus_np_ddr, half_x_plus_np_ddr);
-  dd_real ej_ddr = ddr_mul(x_ddr, double_v_ddr);
-  const dd_real v_ddr = ddr_mul_pwr2(double_v_ddr, 0.5);
-  dd_real s_ddr = ddr_mul(x_minus_np_ddr, v_ddr);
-  const dd_real v2_ddr = ddr_sqr(v_ddr);
-  for (double j = 1; ; j += 1) {
-    ej_ddr = ddr_mul(ej_ddr, v2_ddr);
-    const dd_real s1_ddr = ddr_add(s_ddr, ddr_divd(ej_ddr, 2*j + 1));
-    // Could stop at ~70-bit accuracy if we want a bit more speed.
-    if (ddr_eq(s1_ddr, s_ddr)) {
-      return s_ddr;
-    }
-    s_ddr = s1_ddr;
-  }
-}
-
-dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr) {
-  // Assumes k <= n are nonnegative integers where ddr_sub(n_ddr, k_ddr)
-  // does not incur any error in representing n-k.
-  // Assumes 0 < p,q < 1, p+q=1; one of them may be denormal.
-  if (ddr_is_zero(k_ddr)) {
-    return ddr_mul(ddr_log_extdomain_maybehalf(q_ddr), n_ddr);
-  }
-  const dd_real nmk_ddr = ddr_sub(n_ddr, k_ddr);
-  if (ddr_is_zero(nmk_ddr)) {
-    return ddr_mul(ddr_log_extdomain_maybehalf(p_ddr), n_ddr);
-  }
-  dd_real ddrs[4];
-  ddrs[0] = ddr_stirlerr(k_ddr);
-  ddrs[1] = ddr_stirlerr(nmk_ddr);
-  ddrs[2] = loader_bd0(k_ddr, ddr_mul(n_ddr, p_ddr));
-  ddrs[3] = loader_bd0(nmk_ddr, ddr_mul(n_ddr, q_ddr));
-  const dd_real log_denom_ddr = ddr_sort_and_add(4, ddrs);
-  const dd_real lc_ddr = ddr_sub(ddr_stirlerr(n_ddr), log_denom_ddr);
-  // Avoid potential overflow/underflow in Loader's original code.  See R
-  // src/nmath/dbinom.c .
-  const dd_real lf_ddr = ddr_add(ddr_add(ddr_log1p(ddr_accurate_div(ddr_negate(k_ddr), n_ddr)), ddr_mul_pwr2(_ddr_half_log_2pi, 2)), ddr_log(k_ddr));
-  return ddr_sub(lc_ddr, ddr_mul_pwr2(lf_ddr, 0.5));
-}
-
-// Low-level interface for vectorized dbinom() (multiple k, single n and p).
-void BinomMassMultiKPrecomp(int64_t n, td_real p_tdr, uint32_t* p_is_half_ptr, td_real* lfact_n_tdr_ptr, td_real* lnp_tdr_ptr, td_real* lnq_tdr_ptr) {
-  const dd_real p_ddr = ddr_make_td(p_tdr);
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  *p_is_half_ptr = p_is_half;
-  if (!use_tdr_for_binom_lnprob(n)) {
-    *lfact_n_tdr_ptr = tdr_make_dd(ddr_lfact(n));
-    if (p_is_half) {
-      *lnp_tdr_ptr = tdr_make_dd(_ddr_log05);
-      *lnq_tdr_ptr = *lnp_tdr_ptr;
-    } else {
-      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      *lnp_tdr_ptr = tdr_make_dd(ddr_log(p_ddr));
-      *lnq_tdr_ptr = tdr_make_dd(ddr_log_2arg(q_ddr, p_ddr));
-    }
-    return;
-  }
-  *lfact_n_tdr_ptr = tdr_lfact(n);
-  if (p_is_half) {
-    *lnp_tdr_ptr = _tdr_log05;
-    *lnq_tdr_ptr = _tdr_log05;
-  } else {
-    if (ddr_ltd(p_ddr, 0.5)) {
-      *lnp_tdr_ptr = tdr_log(tdr_make_dd(p_ddr));
-      *lnq_tdr_ptr = tdr_log1p(tdr_make_dd(ddr_negate(p_ddr)));
-    } else {
-      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      *lnp_tdr_ptr = tdr_log1p(tdr_make_dd(ddr_negate(q_ddr)));
-      *lnq_tdr_ptr = tdr_log(tdr_make_dd(q_ddr));
-    }
-  }
-}
-
-double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lfact_n_tdr, const td_real lnp_tdr, const td_real lnq_tdr, uint32_t logp) {
-  // this constant should be kept in sync with use_tdr_for_binom_lnprob()
-  if (!use_tdr_for_binom_lnprob(n)) {
-    dd_real ddrs[5];
-    ddrs[0] = ddr_make_td(lfact_n_tdr);
-    ddrs[1] = ddr_negate(ddr_lfact(k));
-    ddrs[2] = ddr_negate(ddr_lfact(n-k));
-    if (p_is_half) {
-      // Preserve this special case so that results don't deviate from
-      // BinomMass().
-      ddrs[3] = ddr_muld(_ddr_log05, n);
-    } else {
-      ddrs[3] = ddr_muld(ddr_make_td(lnp_tdr), k);
-      ddrs[4] = ddr_muld(ddr_make_td(lnq_tdr), n-k);
-    }
-    const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-    return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
-  }
-  td_real tdrs[5];
-  tdrs[0] = lfact_n_tdr;
-  tdrs[1] = tdr_negate(tdr_lfact(k));
-  tdrs[2] = tdr_negate(tdr_lfact(n-k));
-  if (p_is_half) {
-    tdrs[3] = tdr_muld(_tdr_log05, n);
-  } else {
-    tdrs[3] = tdr_muld(lnp_tdr, k);
-    tdrs[4] = tdr_muld(lnq_tdr, n-k);
-  }
-  const td_real lnresult_tdr = tdr_sort_and_add(5 - p_is_half, tdrs);
-  return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
-}
-
-void BinomMassMultiPPrecomp(int64_t k, int64_t n, td_real* lfact_n_tdr_ptr, td_real* neg_lfact_k_tdr_ptr, td_real* neg_lfact_nmk_tdr_ptr) {
-  if (!use_tdr_for_binom_lnprob(n)) {
-    *neg_lfact_k_tdr_ptr = tdr_make_dd(ddr_negate(ddr_lfact(k)));
-    *lfact_n_tdr_ptr = tdr_make_dd(ddr_lfact(n));
-    *neg_lfact_nmk_tdr_ptr = tdr_make_dd(ddr_negate(ddr_lfact(n-k)));
-    return;
-  }
-  *neg_lfact_k_tdr_ptr = tdr_negate(tdr_lfact(k));
-  *lfact_n_tdr_ptr = tdr_lfact(n);
-  *neg_lfact_nmk_tdr_ptr = tdr_negate(tdr_lfact(n-k));
-}
-
-double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n_tdr, const td_real neg_lfact_k_tdr, const td_real neg_lfact_nmk_tdr, uint32_t logp) {
-  const dd_real p_ddr = ddr_make_td(p_tdr);
-  const uint32_t p_is_half = ddr_is(p_ddr, 0.5);
-  if (!use_tdr_for_binom_lnprob(n)) {
-    dd_real ddrs[5];
-    ddrs[0] = ddr_make_td(lfact_n_tdr);
-    ddrs[1] = ddr_make_td(neg_lfact_k_tdr);
-    ddrs[2] = ddr_make_td(neg_lfact_nmk_tdr);
-    if (p_is_half) {
-      ddrs[3] = ddr_muld(_ddr_log05, n);
-    } else {
-      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      ddrs[3] = ddr_muld(ddr_log(p_ddr), k);
-      ddrs[4] = ddr_muld(ddr_log_2arg(q_ddr, p_ddr), n-k);
-    }
-    const dd_real lnresult_ddr = ddr_sort_and_add(5 - p_is_half, ddrs);
-    return logp? lnresult_ddr.x[0] : ddr_exp(lnresult_ddr).x[0];
-  }
-  td_real tdrs[5];
-  tdrs[0] = lfact_n_tdr;
-  tdrs[1] = neg_lfact_k_tdr;
-  tdrs[2] = neg_lfact_nmk_tdr;
-  if (p_is_half) {
-    tdrs[3] = tdr_muld(_tdr_log05, n);
-  } else {
-    if (ddr_ltd(p_ddr, 0.5)) {
-      tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(p_ddr)), k);
-      tdrs[4] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(p_ddr))), n-k);
-    } else {
-      const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-      tdrs[3] = tdr_muld(tdr_log1p(tdr_make_dd(ddr_negate(q_ddr))), k);
-      tdrs[4] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), n-k);
-    }
-  }
-  td_real lnresult_tdr = tdr_sort_and_add(5, tdrs);
-  return logp? lnresult_tdr.x[0] : ddr_exp(ddr_make_td(lnresult_tdr)).x[0];
+  return ddr_exp(ln_prob_ddr).x[0];
 }
 
 
@@ -282,6 +65,8 @@ double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n
 //
 // - Return value is positive if succ has higher probability than obs_succ, 0
 //   if identical probability, and negative if lower probability.
+//
+// (Possible to do better with td_real implementation of Loader's algorithm.)
 intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio_tdr, int64_t succ, td_real* starting_lnprobv_tdr_ptr, td_real* ln_odds_ratio_tdr_ptr, double* dbl_ptr) {
   // Binomial probability is
   //
@@ -311,51 +96,178 @@ intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio
   return CompareFactorialProducts(2, succ_odds_ratio_tdr, succ - obs_succ, obs_succ, numer_factorial_args, denom_factorial_args, starting_lnprobv_tdr_ptr, ln_odds_ratio_tdr_ptr, dbl_ptr);
 }
 
-double PbinomExtremeSuccP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp) {
-  // Need to be careful about underflow, but this case is otherwise
-  // straightforward since the pmf is a good-enough approximation of either the
-  // cdf or ccdf.
+double PbinomHugeTail(double obs_k, double n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp) {
+  // obs_k and n are integers, n >= 2^52, 0 <= min(obs_k, n - obs_k) <= 2048
+  // obs_k=n only possible when midp true
+  // p or q could be extreme
+  dd_real obs_k_ddr = ddr_maked(obs_k);
   dd_real p_ddr = ddr_make_td(p_tdr);
-  dd_real q_ddr = ddr_make_td(tdr_negate(tdr_addd(p_tdr, -1.0)));
+  dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   if (complement) {
-    obs_k = n - obs_k - (!midp);
-    if (obs_k < 0) {
-      return logp? -INFINITY_D : 0.0;
+    obs_k_ddr = ddr_add2d(n, -obs_k);
+    if (!midp) {
+      // This may be lost to floating-point error.
+      obs_k_ddr = ddr_addd(obs_k_ddr, -1);
     }
     swap_ddr(&p_ddr, &q_ddr);
   }
-  const double n_d = n;
+  double k = obs_k_ddr.x[0];
+  if (ddr_is_zero(p_ddr)) {
+    if ((k == 0) && midp) {
+      return logp? -kLn2 : 0.5;
+    }
+    return logp? 0.0 : 1.0;
+  }
+  if (ddr_is_zero(q_ddr)) {
+    if (k < n) {
+      return logp? -INFINITY_D : 0.0;
+    }
+    assert(midp);
+    return logp? -kLn2 : 0.5;
+  }
+  uint32_t calc_complement = 0;
+  if (k > 2048) {
+    // This updates obs_k_ddr/p_ddr/q_ddr.
+    calc_complement = 1;
+    if (!midp) {
+      // Ensure that if complement and calc_complement are both true, the
+      // previous -1 is lost to floating-point error iff this is.
+      obs_k_ddr = ddr_addd(obs_k_ddr, 1);
+    }
+    k = ddr_negate(ddr_addd(obs_k_ddr, -n)).x[0];
+    assert(k <= 2048);
+    obs_k_ddr = ddr_maked(k);
+    swap_ddr(&p_ddr, &q_ddr);
+  }
+  const double modal_k = floor(ddr_mul(p_ddr, ddr_add2d(n, 1)).x[0]);
+  const double starting_k = MINV(modal_k, k);
+  dd_real ln_prob_ddr = binom_ln_prob_loader(ddr_maked(starting_k), ddr_maked(n), p_ddr, q_ddr);
+  dd_real lik_ddr = ddr_maked(1.0);
+  dd_real sum_ddr;
+  if (starting_k < k) {
+    // We're actually to the right of the mode.  p must be tiny; need to be
+    // careful about overflow/underflow.
+    // Sum inwards from the mode.
+    dd_real pdq_ddr = p_ddr;
+    if (p_ddr.x[0] > 1.0 / (k2p800 * k2p100)) {
+      // Don't want to worry about NaN here.
+      pdq_ddr = ddr_accurate_div(p_ddr, q_ddr);
+    }
+    const double k_stop = k;
+    k = starting_k;
+    sum_ddr = ddr_maked(1);
+    do {
+      const dd_real nmk_ddr = ddr_add2d(n, -k);
+      k += 1;
+      lik_ddr = ddr_mul(lik_ddr, ddr_divd(ddr_mul(pdq_ddr, nmk_ddr), k));
+      if (k == k_stop) {
+        if (midp) {
+          lik_ddr = ddr_mul_pwr2(lik_ddr, 0.5);
+        }
+        sum_ddr = ddr_add(sum_ddr, lik_ddr);
+        break;
+      }
+      sum_ddr = ddr_add(sum_ddr, lik_ddr);
+    } while (lik_ddr.x[0] >= (k2m64 / 8));
+    k = starting_k;
+    lik_ddr = ddr_maked(1);
+  } else {
+    // Some obvious early-exit opportunities.
+    if (((!logp) || calc_complement) && (ln_prob_ddr.x[0] < -1085 * kLn2)) {
+      if (calc_complement) {
+        return logp? 0.0 : 1.0;
+      }
+      return 0.0;
+    }
+    sum_ddr = ddr_maked(1.0 - 0.5 * midp);
+  }
+  // Now sum outward until next term is less than ~2^{-67} of starting term.
+
+  // Next term is kq / ((n-k+1)p) times the current one.  Since k <= 2^11 and
+  // n >= 2^52, q < 2^{-27} guarantees the first multiplier < 2^{-67}; worth
+  // cheaply checking this up front so we don't have to worry about e.g.
+  // qdp_ddr underflow.
+  if ((k > 0) && (q_ddr.x[0] > 1.0 / (1 << 27))) {
+    const dd_real qdp_ddr = ddr_accurate_div(q_ddr, p_ddr);
+    do {
+      lik_ddr = ddr_mul(lik_ddr, ddr_accurate_div(ddr_muld(qdp_ddr, k), ddr_add2d(n, -k)));
+      k -= 1;
+      sum_ddr = ddr_add(sum_ddr, lik_ddr);
+    } while (lik_ddr.x[0] >= (k2m64 / 8));
+  }
+  if (!calc_complement) {
+    ln_prob_ddr = ddr_add(ln_prob_ddr, ddr_log(sum_ddr));
+    if (ln_prob_ddr.x[0] > 0) {
+      ln_prob_ddr = ddr_maked(0);
+    }
+    if (logp) {
+      return ln_prob_ddr.x[0];
+    }
+    return ddr_exp(ln_prob_ddr).x[0];
+  }
+  dd_real prob_ddr = ddr_negate(ddr_addd(ddr_mul(ddr_exp(ln_prob_ddr),
+                                                 sum_ddr),
+                                         -1));
+  if (ddr_gtd(prob_ddr, 1.0)) {
+    prob_ddr = ddr_maked(1);
+  }
+  if (!logp) {
+    return prob_ddr.x[0];
+  }
+  return ddr_log(prob_ddr).x[0];
+}
+
+double PbinomExtremeSuccP(double obs_k, double n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp) {
+  // min(p, 1-p) < 2^{-924}, n <= 2^900 (so n * min(p,1-p) < 2^{-24})
+  // Need to be careful about underflow, but this case is otherwise
+  // straightforward since the log-likelihood is either strictly and rapidly
+  // decreasing or strictly and rapidly increasing.
+  // If n >= 2^52, min(obs_k+1, n-obs_k) >= 40; this lets us simplify the
+  // p<0.5 branch.
+  dd_real p_ddr = ddr_make_td(p_tdr);
+  dd_real q_ddr = ddr_make_td(tdr_negate(tdr_addd(p_tdr, -1.0)));
+  dd_real k_ddr = ddr_maked(obs_k);
+  dd_real nmk_ddr = ddr_add2d(n, -obs_k);
+  if (complement) {
+    k_ddr = nmk_ddr;
+    nmk_ddr = ddr_maked(obs_k);
+    if (!midp) {
+      if (ddr_is_zero(k_ddr)) {
+        return logp? -INFINITY_D : 0.0;
+      }
+      k_ddr = ddr_addd(k_ddr, -1);
+      nmk_ddr = ddr_addd(nmk_ddr, 1);
+    }
+    swap_ddr(&p_ddr, &q_ddr);
+  }
   if (p_ddr.x[0] < 0.5) {
+    const double k = k_ddr.x[0];
     // pmf(0) = q^n
-    // pmf(1) = p * q^{n-1} * n ~= np
-    // pmf(2) = p^2 * q^{n-2} * n(n-1)/2 ~= p^2 * (n(n-1)/2)
-    // pmf(3 or greater) = underflow
-    if (midp && (obs_k == 0)) {
-      // Difference from 0.5 is too small to matter.
+    // pmf(1) = p * q^{n-1} * n ~= np when q>(1 - 2^{-924}), n<2^52
+    // pmf(2 or greater) = underflow unless n huge
+    if (midp && (k == 0)) {
+      // Since we can only get here when n < 2^52, difference from 0.5 is too
+      // small to matter.
       return logp? -kLn2 : 0.5;
     }
     if (!logp) {
       // Difference from 1 only representable if we're in log-space.
       return 1.0;
     }
-    // log(cdf(obs_k)) ~= -ccdf(obs_k) ~= -pmf(obs_k + 1)
-    // log(cdf(obs_k) - 0.5 * pmf(obs_k)) ~= -0.5 * pmf(obs_k)
-    const int64_t pmf_arg = obs_k + (!midp);
-    if (pmf_arg > 2) {
-      return 0.0;
+    // log(1-x) = -x - x^2/2 - ... ~= -x for small x.  If x underflows, final
+    // result is indistinguishable from 1 even in log-space.
+    if (k + (!midp) == 1) {
+      // n < 2^52, p < 2^{-924}
+      // log(cdf(0)) ~= -ccdf(0) ~= -pmf(1)
+      // log(cdf(1) - 0.5 * pmf(1)) ~= -0.5 * pmf(1)
+      return (0.5 * midp - 1) * ddr_muld(p_ddr, n).x[0];
     }
-    double pmf_val;
-    if (pmf_arg == 1) {
-      pmf_val = ddr_muld(p_ddr, n_d).x[0];
-    } else {
-      // pmf_arg = 2
-      // p^2 guaranteed to underflow, but p * (n(n-1)/2) * p might not.
-      pmf_val = ddr_mul(ddr_muld(p_ddr, n_d * (n_d - 1) * 0.5), p_ddr).x[0];
-    }
-    return (0.5 * midp - 1) * pmf_val;
+    // Either np < 2^{-24} and k >= 39, or np < 2^{-872} and k+(!midp) >= 2.
+    // In both cases, we underflow.
+    return 0;
   }
-  const int64_t nmk = n - obs_k;
-  if (nmk == 0) {
+
+  if (ddr_is_zero(nmk_ddr)) {
     if (!midp) {
       return logp? 0 : 1;
     }
@@ -364,38 +276,32 @@ double PbinomExtremeSuccP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t comp
   if (ddr_is_zero(q_ddr)) {
     return logp? -INFINITY_D : 0.0;
   }
-  if (nmk == 1) {
-    const double pval = (1 - 0.5 * midp) * ddr_muld(q_ddr, n_d).x[0];
+  if (nmk_ddr.x[0] == 1) {
+    const double pval = (1 - 0.5 * midp) * ddr_muld(q_ddr, n).x[0];
     return logp? log(pval) : pval;
   }
+  // cdf(obs_k) guaranteed to underflow...
   if (!logp) {
-    if (nmk > 2) {
-      return 0;
-    }
-    // this may underflow, so don't conditionally take log
-    return (1 - 0.5 * midp) * ddr_mul(ddr_muld(q_ddr, n_d * (n_d - 1) * 0.5), q_ddr).x[0];
+    return 0;
   }
-  // log(cdf(obs_k)) ~= log(pmf(obs_k))
-  //                  = log(p^{obs_k} q^{nmk} (n choose nmk))
-  //                 ~= log(q^{nmk} (n choose nmk))
-  dd_real retval_ddr;
-  if (use_tdr_for_binom_lnprob(n)) {
-    dd_real ddrs[4];
-    ddrs[0] = ddr_lfact(n_d);
-    ddrs[1] = ddr_negate(ddr_lfact(obs_k));
-    ddrs[2] = ddr_negate(ddr_lfact(nmk));
-    ddrs[3] = ddr_muld(ddr_log(q_ddr), nmk);
-    retval_ddr = ddr_sort_and_add(4, ddrs);
-  } else {
-    td_real tdrs[4];
-    tdrs[0] = tdr_lfact(n_d);
-    tdrs[1] = tdr_negate(tdr_lfact(obs_k));
-    tdrs[2] = tdr_negate(tdr_lfact(nmk));
-    tdrs[3] = tdr_muld(tdr_log(tdr_make_dd(q_ddr)), nmk);
-    retval_ddr = ddr_make_td(tdr_sort_and_add(4, tdrs));
-  }
+  // but log(cdf(obs_k)) does not, instead it's a large-magnitude negative
+  // number.
+  // log(cdf(obs_k)) = log(pmf(obs_k) + pmf(obs_k - 1) + ...)
+  //                 = log(pmf(obs_k)) + log(1 + pmf(obs_k - 1)/pmf(obs_k) + ...)
+  // pmf(obs_k) = p^{obs_k} q^{nmk} (n choose nmk)
+  // pmf(obs_k - 1)/pmf(obs_k) = (q/p)(obs_k / (n - obs_k + 1))
+  //                          ~= q(obs_k / (n - obs_k + 1))
+  //                          <= 2^{-24} / 40, so this term matters in edge
+  //                             case but subsequent terms too small
+  dd_real retval_ddr = binom_ln_prob_loader(k_ddr, nmk_ddr, p_ddr, q_ddr);
   if (midp) {
     retval_ddr = ddr_sub(retval_ddr, _ddr_log2);
+  }
+  if (retval_ddr.x[0] > -(1LL << 38)) {
+    // Pbinom() currently targets epsilon=2^{-67}.  If retval < -(2^38), this
+    // term always has relative contribution smaller than that.  If not, it's
+    // safe to compute this term with float64 precision.
+    retval_ddr = ddr_addd(retval_ddr, q_ddr.x[0] * k_ddr.x[0] / (nmk_ddr.x[0] + 1));
   }
   return retval_ddr.x[0];
 }
@@ -496,7 +402,7 @@ int64_t QbinomExtremeSuccP(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_
 dd_real binom_ln_prob_approx(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr, double* nonlog_denom_ptr) {
   if (!((n > 512) && (MINV(k+1, n-k) >= 40))) {
     *nonlog_denom_ptr = 1;
-    return binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+    return binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), p_ddr, q_ddr);
   }
   double aa = k + 1;
   double bb = n - k;
@@ -577,17 +483,17 @@ dd_real binom_ltail_lik_simple_ddr(double k, double nmk, dd_real lik_ddr, dd_rea
   return tailsum_ddr;
 }
 
-dd_real binom_ltail_lik_bfrac_ddr(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr) {
+dd_real binom_ltail_lik_bfrac_ddr(double obs_k, double n, dd_real p_ddr, dd_real q_ddr) {
   double aa = obs_k + 1;
   double bb = n - obs_k;
-  const dd_real p_nmk_ddr = ddr_muld(p_ddr, bb);
-  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  const dd_real orig_p_nmk_ddr = ddr_muld(p_ddr, bb);
+  dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), orig_p_nmk_ddr);
   if (ay_minus_bx_ddr.x[0] < 0.0) {
     swap_f64(&aa, &bb);
     swap_ddr(&p_ddr, &q_ddr);
     ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
   }
-  return ddr_accurate_div(p_nmk_ddr, ibeta_continued_fraction_ddr(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr));
+  return ddr_accurate_div(orig_p_nmk_ddr, ibeta_continued_fraction_ddr(ddr_maked(aa), ddr_maked(bb), n, p_ddr, q_ddr, ay_minus_bx_ddr));
 }
 
 void materialize_oddsratio_p_q_tdr(uint32_t succ_flipped, td_real* p_tdr_ptr, td_real* q_tdr_ptr, td_real* succ_odds_ratio_tdr_ptr) {

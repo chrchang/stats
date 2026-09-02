@@ -22,9 +22,21 @@
 namespace plink2 {
 #endif
 
-// These functions are specialized to the range min(a,b)>=40, a+b<=2^52,
+// Assumes k <= n are nonnegative integers where ddr_sub(n_ddr, k_ddr) does not
+// incur any error in representing n-k.
+// Assumes 0 < p,q < 1, p+q=1; one of them may be denormal.
+//
+// Note that ibeta_power_terms_d_ln() trades off a tiny bit of accuracy for a
+// significant speed improvement.
+void binom_ln_prob_loader_part1(dd_real k_ddr, dd_real nmk_ddr, dd_real n_ddr, dd_real* stirlerr_ddr_ptr, dd_real* half_lf_ddr_ptr);
+
+dd_real binom_ln_prob_loader_part2(dd_real k_ddr, dd_real nmk_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr, dd_real stirlerr_ddr, dd_real half_lf_ddr);
+
+dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr);
+
+// The following functions are specialized to the range min(a,b)>=40,
 // min(p,q)>2^{-960}.  (The Boost source code is a good starting point for
-// handling other ranges.)
+// handling other ranges; R is also good when GPL-2 is not a problem.)
 
 // Returns log((p^a)(q^b) / Beta(a,b))
 //       = log((p^a)(q^b)(a+b-1)! / ((a-1)!(b-1)!)).
@@ -40,16 +52,18 @@ dd_real erfcx_ddr(dd_real x_ddr);
 
 double log1pmx(double x);
 
+dd_real basym(dd_real a_ddr, dd_real b_ddr, dd_real lambda_ddr);
+
 // Evaluates regularized incomplete beta function with ordinary (usually off by
 // several ULPs) accuracy.
 double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t midp_complement, uint32_t return_log);
 
 // High-accuracy variant of ibeta_continued_fraction_recip_d().
-dd_real ibeta_continued_fraction_ddr(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr);
+dd_real ibeta_continued_fraction_ddr(dd_real a_ddr, dd_real b_ddr, double n, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr);
 
 // Evaluates regularized incomplete beta function with high (<1 ULP error)
 // accuracy.
-double ibeta_largeab(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t return_log);
+double ibeta_largeab(dd_real a_ddr, dd_real b_ddr, double n, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t return_log);
 
 
 double QuantileToZscoreD(double p_or_lnp, uint32_t p_is_log);

@@ -45,24 +45,23 @@ namespace plink2 {
 // For large cases, we also utilize Catherine Loader's dbinom() algorithm and
 // the BFRAC+BASYM components of DiDonato and Morris's pbinom() algorithm.
 
-double LnBinomCoeff(int64_t n, int64_t k);
+// Assumes 0 <= k <= n, k log n < DBL_MAX/2.
+double LnBinomCoeff(double n, double k);
 
-double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp);
+// Assumes 0 <= k <= n <= DBL_MAX, 0 < p < 1.  Denormal p ok.
+double BinomMass(double k, double n, double p, uint32_t logp);
 
-// Unlike BinomMass(), this supports n >= 2^52 and denormal p.
-double BinomMassExtdomain(double k, double n, double p, uint32_t logp);
+double PbinomApprox(double obs_k, double n, td_real p_tdr, int32_t complement, int32_t midp, uint32_t logp);
 
-double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
-
-HEADER_INLINE double BinomOneSidedP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
-  const int64_t k_decr = succ_is_greater_alt && (!midp);
+HEADER_INLINE double BinomOneSidedP(double obs_k, double n, td_real p_tdr, uint32_t succ_is_greater_alt, int32_t midp, uint32_t logp) {
+  const int32_t k_decr = succ_is_greater_alt && (!midp);
   if (k_decr && (obs_k == 0)) {
     return logp? 0.0 : 1.0;
   }
   return PbinomApprox(obs_k - k_decr, n, p_tdr, succ_is_greater_alt, midp, logp);
 }
 
-double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint32_t logp);
+double Pbinom(double obs_k, double n, td_real p_tdr, int32_t complement, uint32_t logp);
 
 int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_t log_target);
 

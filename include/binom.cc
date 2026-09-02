@@ -27,8 +27,8 @@
 namespace plink2 {
 #endif
 
-// Currently assumes 0 <= n < 2^52, k in [0, n].
-// Not difficult to support n up to DBL_MAX.  WLOG let k <= n/2.  Then,
+// Supports 0 <= k <= n <= DBL_MAX.
+// WLOG let k <= n/2.  Then,
 //     log(n!/(k!(n-k)!))
 //   =   0.5*log(2*pi) + (n+0.5)*log(n)     - n     + stirlerr(n)
 //     - 0.5*log(2*pi) - (n-k+0.5)*log(n-k) + (n-k) - stirlerr(n-k)
@@ -50,23 +50,22 @@ namespace plink2 {
 // (We could compute stirlerr(n-k)-stirlerr(n) in a way that avoids
 // cancellation between the leading terms, but that would be inconsequential
 // here.)
-double LnBinomCoeff(int64_t n, int64_t k) {
+double LnBinomCoeff(double n, double k) {
   if ((k == 0) || (k == n)) {
     return 0;
   }
-  if (!use_tdr_for_binom_lnprob(n)) {
-    return ddr_sub(ddr_lfact(n),
-                   ddr_add_lfacts(k, n-k)).x[0];
-  }
-  return tdr_sub(tdr_lfact(n),
-                 tdr_add(tdr_lfact(k), tdr_lfact(n-k))).x[0];
+  const dd_real nmk_ddr = ddr_add2d(n, -k);
+  dd_real ddrs[4];
+  ddrs[0] = ddr_muld(ddr_subd(ddr_log(ddr_maked(n)), 1), k);
+  ddrs[1] = ddr_mul(ddr_addd(nmk_ddr, 0.5), ddr_log1p(ddr_accurate_div(ddr_maked(k), nmk_ddr)));
+  ddrs[2] = ddr_negate(ddr_lfact_extdomain(k));
+  ddrs[3] = ddr_sub(ddr_stirlerr(ddr_maked(n)), ddr_stirlerr(nmk_ddr));
+  return ddr_sort_and_add(4, ddrs).x[0];
 }
 
-// Assumes 0 <= k <= n < 2^52, 0 < p < 1.
-double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp) {
-  const dd_real p_ddr = ddr_make_td(p_tdr);
-  const dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-  const dd_real ln_prob_ddr = binom_ln_prob_internal(k, n, p_ddr, q_ddr);
+// Assumes 0 <= k <= n <= DBL_MAX, 0 < p < 1.
+double BinomMass(double k, double n, double p, uint32_t logp) {
+  const dd_real ln_prob_ddr = binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), ddr_maked(p), ddr_add2d(1.0, -p));
   if (logp) {
     return ln_prob_ddr.x[0];
   }
@@ -77,36 +76,35 @@ double BinomMass(int64_t k, int64_t n, td_real p_tdr, uint32_t logp) {
   return ddr_exp(ln_prob_ddr).x[0];
 }
 
-double BinomMassExtdomain(double k, double n, double p, uint32_t logp) {
-  const dd_real ln_prob_ddr = binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), ddr_maked(p), ddr_add2d(1.0, -p));
-  if (logp) {
-    return ln_prob_ddr.x[0];
-  }
-  return ddr_exp(ln_prob_ddr).x[0];
-}
-
-// Assumes 0 <= obs_succ <= obs_tot < 2^52 and 0 < p < 1.
+// Assumes n is an integer in [0, 2^960] and 0 < p < 1.
 //
 // See Pbinom() below for a higher-accuracy variant of this function; this one
 // is limited by the float64 precision of the Lanczos and
 // continued-fraction-coefficient calculations, and everything else here is
 // tuned to that level of relative error.
-double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp) {
-  if ((obs_k < 0) || (obs_k > n)) {
+double PbinomApprox(double obs_k, double n, td_real p_tdr, int32_t complement, int32_t midp, uint32_t logp) {
+  if ((obs_k < 0) || ((obs_k >= n) && ((!midp) || (obs_k > n)))) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? -INFINITY_D : 0.0;
   }
-  if ((p_tdr.x[0] < k2m537p5) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m537p5))) {
+  obs_k = floor(obs_k);
+  const uint32_t in_middle = (MINV(obs_k + 1, n - obs_k) >= 40);
+  if ((n >= (1LL << 52)) && (!in_middle)) {
+    return PbinomHugeTail(obs_k, n, p_tdr, complement, midp, logp);
+  }
+  if ((p_tdr.x[0] < k2m924) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m924))) {
     return PbinomExtremeSuccP(obs_k, n, p_tdr, complement, midp, logp);
   }
   dd_real p_ddr = ddr_make_td(p_tdr);
   dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
-  if ((n > 512) && (MINV(obs_k + 1, n - obs_k) >= 40)) {
-    double aa = obs_k + 1;
-    double bb = n - obs_k;
-    dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  if ((n > 512) && in_middle) {
+    const dd_real a_ddr = ddr_add2d(obs_k, 1);
+    const dd_real b_ddr = ddr_add2d(n, -obs_k);
+    dd_real ay_minus_bx_ddr = ddr_sub(ddr_mul(q_ddr, a_ddr), ddr_mul(p_ddr, b_ddr));
+    double aa = a_ddr.x[0];
+    double bb = b_ddr.x[0];
     uint32_t inv = !complement;
     if (ay_minus_bx_ddr.x[0] < 0.0) {
       swap_f64(&aa, &bb);
@@ -114,26 +112,11 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    // TODO: check if BASYM accuracy can be improved enough to be worth it.
-    // Boost 1.91 doesn't use BASYM at all, and the formula it uses clearly
-    // doesn't meet our goal.
-    // R 4.6 does use BASYM.  That performs very well in many large cases, but
-    // Brown BW, Levy LB (1994) "Certification of Algorithm 708:
-    // Significant-Digit Computation of the Incomplete Beta", notes that it can
-    // be weaker when a ~= b.  E.g. with R 4.6,
-    //   stats::pbinom(1e9, 2e9, 0.499999)
-    // has relative error is ~3.68e-12, while the corresponding exactr
-    // approx=True call has relative error ~2.90e-15.
-    // But if dd_real arithmetic and perhaps a few more asymptotic-expansion
-    // terms is enough to fix that, that would unblock exactr::pbinom() support
-    // for n >= 2^52.
+    // don't see a point in passing in a_ddr and b_ddr
     return ibeta_largeab_approx(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, midp * (1 + complement), logp);
   }
   if (complement) {
     obs_k = n - obs_k - (!midp);
-    if (obs_k < 0) {
-      return logp? -INFINITY_D : 0.0;
-    }
     swap_ddr(&p_ddr, &q_ddr);
   }
   const double pdq = ddr_accurate_div(p_ddr, q_ddr).x[0];
@@ -211,8 +194,7 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
   if (ln_first_inward_mult > 673.739 * k2m52) {
     overflow_steps_lower_bound = 673.739 / ln_first_inward_mult;
   }
-  const double nd = n;
-  const double modal_k = nd * pdq / (1 + pdq);
+  const double modal_k = n * pdq / (1 + pdq);
   if (k + overflow_steps_lower_bound > modal_k) {
     double lik = 1;
     double right_sum = 0;
@@ -243,29 +225,18 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
     const double pval = (left_sum - 0.5 * midp) / (left_sum + right_sum);
     return logp? log(pval) : pval;
   }
-  const dd_real pdq_ddr = ddr_maked(pdq);
-  const dd_real starting_lnprobv_ddr =
-    ddr_sub(ddr_muld(ddr_log(pdq_ddr), k),
-            ddr_add_lfacts(k, nmk));
-  dd_real ln_nmk_ddr = _ddr_log05;
-  if (pdq != 1.0) {
-    // log(1 / (1 + pdq)) = -log(1 + pdq)
-    ln_nmk_ddr = ddr_negate(ddr_log(ddr_addd(pdq_ddr, 1.0)));
-  }
-  const dd_real lnprobf_ddr =
-    ddr_add(ddr_lfact(nd), ddr_muld(ln_nmk_ddr, nd));
-  const dd_real starting_lnprob_ddr = ddr_add(lnprobf_ddr, starting_lnprobv_ddr);
+  const dd_real starting_lnprob_ddr = binom_ln_prob_loader(ddr_maked(k), ddr_maked(n), p_ddr, q_ddr);
   // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
   // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
   // when logp=false and we're flushing denormals to zero.  DBL_MIN is
   // 2^{-1022}.
   //
   // 2^{-1074} is the smallest positive denormal, and (1 + epsilon) * 2^{-1075}
-  // is the smallest number that should be rounded up to it, so -1074 can be
-  // replaced with -1127 if we want this function to return denormals.
+  // is the smallest number that should be rounded up to it, so -1127 can be
+  // replaced with -1074 if we don't want this function to return denormals.
   //
   // (Yes, a tighter bound could be established for left_sum if it matters.)
-  if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
+  if ((!logp) && (starting_lnprob_ddr.x[0] < -1127 * kLn2)) {
     return 0;
   }
   double lik = 1;
@@ -283,39 +254,47 @@ double PbinomApprox(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement
   return join_log_and_nonlog(starting_lnprob_ddr, left_sum, logp);
 }
 
-// Assumes 0 <= n < 2^52, 2^{-960} <= p < 1.
+// Assumes n is an integer in [0, 2^960], 0 < p < 1.
 // Should consistently achieve <1 ULP relative error; almost always <0.6 ULP.
 //
 // See PbinomApprox() above for the faster variant of this function which
 // doesn't try to get the last few bits right.
-double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint32_t logp) {
-  if ((obs_k < 0) || (obs_k > n - S_CAST(int64_t, complement))) {
+double Pbinom(double obs_k, double n, td_real p_tdr, int32_t complement, uint32_t logp) {
+  if ((obs_k < 0) || (obs_k >= n)) {
     if ((obs_k < 0) == complement) {
       return logp? 0.0 : 1.0;
     }
     return logp? -INFINITY_D : 0.0;
   }
-  if ((p_tdr.x[0] < k2m537p5) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m537p5))) {
+  obs_k = floor(obs_k);
+  const uint32_t in_middle = (MINV(obs_k, n - obs_k) >= 2048);
+  if ((n >= (1LL << 52)) && (!in_middle)) {
+    return PbinomHugeTail(obs_k, n, p_tdr, complement, 0, logp);
+  }
+  if ((p_tdr.x[0] < k2m924) || ((p_tdr.x[0] == 1) && (p_tdr.x[1] > -k2m924))) {
     return PbinomExtremeSuccP(obs_k, n, p_tdr, complement, 0, logp);
   }
   dd_real p_ddr = ddr_make_td(p_tdr);
   dd_real q_ddr = ddr_negate(ddr_make_td(tdr_addd(p_tdr, -1.0)));
   // Benchmarked various values of both thresholds, this seems good on my Mac
-  if ((n > 131072) && (MINV(obs_k, n - obs_k) >= 2048)) {
-    double aa = obs_k + 1;
-    double bb = n - obs_k;
-    dd_real ay_minus_bx_ddr = ddr_sub(ddr_muld(q_ddr, aa), ddr_muld(p_ddr, bb));
+  if ((n > 131072) && in_middle) {
+    dd_real a_ddr = ddr_add2d(obs_k, 1);
+    dd_real b_ddr = ddr_add2d(n, -obs_k);
+    dd_real ay_minus_bx_ddr = ddr_sub(ddr_mul(q_ddr, a_ddr), ddr_mul(p_ddr, b_ddr));
     uint32_t inv = !complement;
     if (ay_minus_bx_ddr.x[0] < 0.0) {
-      swap_f64(&aa, &bb);
+      swap_ddr(&a_ddr, &b_ddr);
       swap_ddr(&p_ddr, &q_ddr);
       ay_minus_bx_ddr = ddr_negate(ay_minus_bx_ddr);
       inv = !inv;
     }
-    return ibeta_largeab(aa, bb, p_ddr, q_ddr, ay_minus_bx_ddr, inv, logp);
+    return ibeta_largeab(a_ddr, b_ddr, n, p_ddr, q_ddr, ay_minus_bx_ddr, inv, logp);
   }
   if (complement) {
     obs_k = n - obs_k - 1;
+    if (obs_k < 0) {
+      return logp? -INFINITY_D : 0.0;
+    }
     swap_ddr(&p_ddr, &q_ddr);
   }
   const dd_real pdq_ddr = ddr_accurate_div(p_ddr, q_ddr);
@@ -441,8 +420,7 @@ double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint
   if (ln_first_inward_mult > 673.739 * k2m52) {
     overflow_steps_lower_bound = 673.739 / ln_first_inward_mult;
   }
-  const double nd = n;
-  const double modal_k = nd * p_ddr.x[0];
+  const double modal_k = n * p_ddr.x[0];
   if (k + overflow_steps_lower_bound > modal_k) {
     // (ok, this duplicated code belongs in its own function...)
     dd_real lik_ddr = ddr_maked(1.0);
@@ -519,8 +497,8 @@ double Pbinom(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, uint
     }
     return ddr_log(prob_ddr).x[0];
   }
-  dd_real ln_prob_ddr = binom_ln_prob_internal(obs_k, n, p_ddr, q_ddr);
-  if ((!logp) && (ln_prob_ddr.x[0] < -1074 * kLn2)) {
+  dd_real ln_prob_ddr = binom_ln_prob_loader(ddr_maked(obs_k), ddr_maked(n), p_ddr, q_ddr);
+  if ((!logp) && (ln_prob_ddr.x[0] < -1127 * kLn2)) {
     return 0.0;
   }
   dd_real lik_ddr = ddr_maked(1.0);
@@ -635,7 +613,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
   // 1. Refine guess so that DBL_MIN * targetp < pmf(k) <= targetp.
   // 2. Compute pmf(k) to high accuracy.
   // 3. Sum left-tail (<= k) likelihoods, using adjacent-term ratios for small
-  //    cases and BFRAC for large cases.
+  //    cases and BFRAC/BASYM for large cases.
   // 4. Sum inward or outward until we find the crossing point.
   const dd_real pdq_ddr = ddr_accurate_div(succp_ddr, failp_ddr);
   const dd_real qdp_ddr = ddr_accurate_div(failp_ddr, succp_ddr);
@@ -707,7 +685,7 @@ int64_t Qbinom(dd_real targetp_or_lnp_ddr, int64_t n, td_real succp_tdr, uint32_
     dd_real tailsum_ddr;
     // Use Pbinom benchmark result for now, could tune this separately later.
     if ((n > 131072) && (k >= 2048)) {
-      tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(S_CAST(int64_t, k), n, succp_ddr, failp_ddr));
+      tailsum_ddr = ddr_mul(tailenter_lik_ddr, binom_ltail_lik_bfrac_ddr(k, n, succp_ddr, failp_ddr));
     } else {
       tailsum_ddr = binom_ltail_lik_simple_ddr(k, nmk, tailenter_lik_ddr, qdp_ddr, 1.0 / (1 << 14));
     }

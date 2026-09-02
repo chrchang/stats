@@ -30,8 +30,8 @@ Cumulative distribution function for binomial distribution with parameters
 \code{size} and \code{prob}.
 }
 \details{
-Based on the BFRAC component of Boost's TOMS 708 implementation,
-and the QD high-precision library.
+Based on the BFRAC and BASYM components of Boost's TOMS 708
+implementation, and the QD high-precision library.
 }
 \references{
 DiDonato AR, Morris AH (1992) Algorithm 708: Significant digit

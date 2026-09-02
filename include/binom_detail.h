@@ -25,31 +25,21 @@ namespace plink2 {
 
 // Support routines specific to the binomial distribution.
 
-// Ok to draw this line anywhere <= 2^39 (see binom_ln_prob_internal error
+// binom_ln_prob_internal(), which performed basic log-factorial arithmetic,
+// has been replaced by the smarter binom_ln_prob_loader() in special_func.h .
+
+
+// Ok to draw this line anywhere <= 2^39 (see old binom_ln_prob_internal error
 // analysis).  I've set this to 2^36 since that's roughly where I could no
-// longer easily find 1 ULP deviations from the MPFR-based pbinom
+// longer easily find 1 ULP deviations from the MPFR-based pbinom()
 // implementation.
 HEADER_INLINE uint32_t use_tdr_for_binom_lnprob(int64_t obs_tot) {
   return (obs_tot >= (1LL << 36));
 }
 
-// Should always have <1 ULP error; and ddr_exp(result) also has <1 ULP error
-// when it isn't < DBL_MIN.
-//
-// This implementation is a bit slow, but it's relatively simple and reliable.
-// (ibeta_power_terms_d_ln() trades off a tiny bit of accuracy for a
-// significant speed improvement.)
-dd_real binom_ln_prob_internal(int64_t k, int64_t n, dd_real p_ddr, dd_real q_ddr);
+void BinomMassMultiPPrecomp(double k, double n, dd_real* stirlerr_ddr_ptr, dd_real* half_lf_ddr_ptr);
 
-dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr);
-
-void BinomMassMultiKPrecomp(int64_t n, td_real p_tdr, uint32_t* p_is_half_ptr, td_real* lfact_n_tdr_ptr, td_real* lnp_tdr_ptr, td_real* lnq_tdr_ptr);
-
-double BinomMassJustK(int64_t k, int64_t n, uint32_t p_is_half, const td_real lfact_n_tdr, const td_real lnp_tdr, const td_real lnq_tdr, uint32_t logp);
-
-void BinomMassMultiPPrecomp(int64_t k, int64_t n, td_real* lfact_n_tdr_ptr, td_real* neg_lfact_k_tdr_ptr, td_real* neg_lfact_nmk_tdr_ptr);
-
-double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n_tdr, const td_real neg_lfact_k_tdr, const td_real neg_lfact_nmk_tdr, uint32_t logp);
+double BinomMassJustP(double k, double n, double p, dd_real stirlerr_ddr, dd_real half_lf_ddr, uint32_t logp);
 
 // - succ_odds_ratio_tdr must be p/(1-p), where p is the expected success rate.
 //
@@ -67,9 +57,12 @@ double BinomMassJustP(td_real p_tdr, int64_t k, int64_t n, const td_real lfact_n
 //   if identical probability, and negative if lower probability.
 intptr_t BinomCompare(int64_t obs_succ, int64_t obs_tot, td_real succ_odds_ratio_tdr, int64_t succ, td_real* starting_lnprobv_tdr_ptr, td_real* ln_odds_ratio_tdr_ptr, double* dbl_ptr);
 
+// n >= 2^52, min(obs_k, n - obs_k) <= 2048
+double PbinomHugeTail(double obs_k, double n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
+
 // Returns binomial distribution tail-sum when p or q is extremely small (can
 // be zero).
-double PbinomExtremeSuccP(int64_t obs_k, int64_t n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
+double PbinomExtremeSuccP(double obs_k, double n, td_real p_tdr, uint32_t complement, int32_t midp, uint32_t logp);
 
 // Returns smallest k for which cdf(k) >= targetp, when succp or failp is
 // positive but extremely small.  Also assumes n > 0.
@@ -92,7 +85,7 @@ double binom_tail_lik_bfrac(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_d
 // High-accuracy versions of the above.
 dd_real binom_ltail_lik_simple_ddr(double k, double nmk, dd_real lik_ddr, dd_real qdp_ddr, double allowed_ulp_err);
 
-dd_real binom_ltail_lik_bfrac_ddr(int64_t obs_k, int64_t n, dd_real p_ddr, dd_real q_ddr);
+dd_real binom_ltail_lik_bfrac_ddr(double obs_k, double n, dd_real p_ddr, dd_real q_ddr);
 
 // For BinomTwoSidedP(), extends succ_odds_ratio_tdr and the incomplete one of
 // {p_tdr, q_tdr} when they have only been evaluated to dd_real precision so
