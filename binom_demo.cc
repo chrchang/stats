@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
     } else if (argc != 2) {
       fputs(
 "Binomial test                                 https://github.com/chrchang/stats\n"
-"(C) 2013-2026 Christopher Chang     GNU Lesser General Public License version 3\n\n"
+"(C) 2013-2026 Christopher Chang            GNU General Public License version 3\n\n"
 "  binom_demo <succ ct> <total obs ct> <expected succ rate> ['+' | '-'] ['midp']\n"
 "  binom_demo <filename> ['midp']\n\n"
 "Rates can be entered as fractions (e.g. '3/10', no spaces allowed).  When a\n"

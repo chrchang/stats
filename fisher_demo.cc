@@ -152,7 +152,7 @@ int32_t main(int argc, char** argv) {
     main_std_help:
       fputs(
 "Fisher 2x2 and 2x3 exact test                 https://github.com/chrchang/stats\n"
-"(C) 2013-2026 Christopher Chang     GNU Lesser General Public License version 3\n\n"
+"(C) 2013-2026 Christopher Chang            GNU General Public License version 3\n\n"
 "  fisher_demo <m11> <m12> <m21> <m22> ['+' | '-'] ['midp']\n"
 "  fisher_demo <m11> <m12> <m21> <m22> <m31> <m32> ['midp']\n"
 "  fisher_demo <filename> ['midp']\n\n"

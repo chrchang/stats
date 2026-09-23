@@ -37,7 +37,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.9.4",
+    version="0.9.5",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
     description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",
@@ -49,7 +49,7 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GNU Lesser General Public License v3.0 only (LGPL-3.0-only)",
+        "License :: OSI Approved :: GNU General Public License v3.0 only (GPL-3.0-only)",
         "Operating System :: OS Independent",
     ],
     package_dir={"": "src"},

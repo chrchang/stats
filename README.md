@@ -35,4 +35,4 @@ Test program usage examples:
 Licensing:
 - include/plink2_highprec's adaptation of a subset of the QD library is under
   the include/LICENSE.QD BSD-3-Clause-LBNL license.
-- Other code is covered by LGPL-3.0-only (see the COPYING.LESSER file).
+- Other code is covered by GPL-3.0-only (see the COPYING file).

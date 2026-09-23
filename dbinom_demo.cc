@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
     if (argc != 4) {
       fputs(
 "Binomial log-probability                      https://github.com/chrchang/stats\n"
-"(C) 2013-2026 Christopher Chang     GNU Lesser General Public License version 3\n\n"
+"(C) 2013-2026 Christopher Chang            GNU General Public License version 3\n\n"
 "  dbinom_demo <succ ct> <total obs ct> <expected succ rate>\n", stdout);
       reterr = kPglRetSkipped;
     } else {

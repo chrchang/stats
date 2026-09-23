@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exact-tests"
-version = "0.9.4"
+version = "0.9.5"
 authors = [
   { name="Christopher Chang", email="chrchang@alumni.caltech.edu" },
 ]
@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-license = "LGPL-3.0-only"
+license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 
 [project.urls]

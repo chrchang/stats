@@ -1,17 +1,17 @@
 // Fisher's Exact Test library, copyright (C) 2013-2026 Christopher Chang.
 //
-// This library is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by the
-// Free Software Foundation; either version 3 of the License, or (at your
-// option) any later version.
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
 //
-// This library is distributed in the hope that it will be useful, but WITHOUT
+// This program is distributed in the hope that it will be useful, but WITHOUT
 // ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-// FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
-// for more details.
+// FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+// more details.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with this library.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "fisher.h"
 
@@ -31,10 +31,6 @@ namespace plink2 {
 // They're defined as int64_ts instead of uint64_ts since signed int <->
 // floating-point conversions are sometimes faster than the same-width unsigned
 // int <-> floating-point conversions.
-//
-// possible todo: add support for R fisher.test's 'or' (null-hypothesis odds
-// ratio) parameter.  This is straightforward for logp=False, and there should
-// be no practical need for logp=True (which isn't supported by R) there.
 double Fisher22TwoSidedP(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, int32_t midp, uint32_t logp) {
   // Normalize: m11 >= m22, m12 >= m21, m11*m22 <= m12*m21.
   // Note that the first two are reversed from PLINK 1.9, to get rid of
