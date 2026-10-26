@@ -293,7 +293,7 @@ double PbinomExtremeSuccP(double obs_k, double n, td_real p_tdr, uint32_t comple
   //                          ~= q(obs_k / (n - obs_k + 1))
   //                          <= 2^{-24} / 40, so this term matters in edge
   //                             case but subsequent terms too small
-  dd_real retval_ddr = binom_ln_prob_loader(k_ddr, nmk_ddr, p_ddr, q_ddr);
+  dd_real retval_ddr = binom_ln_prob_loader(k_ddr, ddr_maked(n), p_ddr, q_ddr);
   if (midp) {
     retval_ddr = ddr_sub(retval_ddr, _ddr_log2);
   }

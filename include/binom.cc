@@ -150,11 +150,11 @@ double PbinomApprox(double obs_k, double n, td_real p_tdr, int32_t complement, i
       k -= 1;
       const double preadd = left_sum;
       left_sum += lik;
-      if (left_sum == preadd) {
+      if (!(left_sum > preadd)) {
         break;
       }
     }
-    if (left_sum == INFINITY_D) {
+    if (!(left_sum < INFINITY_D)) {
       return logp? 0 : 1;
     }
     // Now compute the right-sum to the precision limit.

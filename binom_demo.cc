@@ -46,8 +46,10 @@ BoolErr ScanmovU64(const char** str_iterp, uint64_t* valp) {
   *valp = ctou32(*str_iter++) - 48;
   if (*valp >= 10) {
     if (unlikely(*valp != 0xfffffffbU)) {
+      // currently doesn't accept "-0", etc.
       return 1;
     }
+    // accept leading '+'
     *valp = ctou32(*str_iter++) - 48;
     if (unlikely(*valp >= 10)) {
       return 1;
@@ -55,8 +57,11 @@ BoolErr ScanmovU64(const char** str_iterp, uint64_t* valp) {
   }
   while (!(*valp)) {
     *valp = ctou32(*str_iter++) - 48;
-    if (unlikely((*valp) >= 10)) {
-      return 1;
+    // bugfix (26 Oct 2026): we must accept "0"...
+    if ((*valp) >= 10) {
+      *valp = 0;
+      *str_iterp = &(str_iter[-1]);
+      return 0;
     }
   }
   *str_iterp = str_iter;
