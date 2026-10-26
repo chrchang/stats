@@ -413,11 +413,11 @@ double P_FNCHypergeo(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t 
       m22 -= 1;
       const double preadd = left_sum;
       left_sum += lik;
-      if (left_sum == preadd) {
+      if (!(left_sum > preadd)) {
         break;
       }
     }
-    if (left_sum == INFINITY_D) {
+    if (!(left_sum < INFINITY_D)) {
       return logp? 0 : 1;
     }
 
@@ -467,12 +467,12 @@ double P_FNCHypergeo(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t 
       m21 -= 1;
       const double preadd = right_sum;
       right_sum += lik;
-      if (right_sum <= preadd) {
+      if (!(right_sum > preadd)) {
         right_sum = preadd;
         break;
       }
     }
-    if (right_sum == INFINITY_D) {
+    if (!(right_sum < INFINITY_D)) {
       return 0;
     }
 

@@ -790,7 +790,7 @@ void Fisher23LnStartingRank(int32_t obs_m11, int32_t obs_m12, int32_t obs_m21, i
         break;
       }
     }
-    const double first_inward_mult = m11 * m22 / ((m12 + 1) * (m21 + 1));
+    const double first_inward_mult = S_CAST(double, obs_m11) * S_CAST(double, obs_m22) / ((S_CAST(double, obs_m12) + 1) * (S_CAST(double, obs_m21) + 1));
     if ((first_inward_mult <= 1) || (delta * log(first_inward_mult) < 612)) {
       // Jump back to starting table, and iterate inward until we find the
       // start of the other tail.
@@ -1180,7 +1180,7 @@ void Fisher23LnPLeftTailsum(dd_real starting_lnprobv_ddr, uint32_t obs_m11, uint
         const double lnlik_incr = log(prev_numer / (m12 * m21));
         last_lnp += lnlik_incr;
         m11 -= 1;
-        m21 -= 1;
+        m22 -= 1;
         cur_eps += 3 * k2m52;
         if (lnlik_incr <= -2) {
           cur_eps += (trunc(-lnlik_incr) - 1) * k2m52;
