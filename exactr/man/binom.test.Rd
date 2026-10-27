@@ -73,5 +73,5 @@ the fraction exactly by specifying e.g. \code{p}=1 and \code{p.denom}=3.
 \references{
 Clopper CJ, Pearson ES (1934) The use of confidence or fiducial
 limits illustrated in the case of the binomial.  Biometrika, 26.
-\url{https://doi.org/10.2307/2331986}.
+\doi{10.2307/2331986}.
 }

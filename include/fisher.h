@@ -69,15 +69,31 @@ HEADER_INLINE void Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t
 
 double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp);
 
+// obs[] is in row-major order: obs[0..(col_ct-1)] is the first row, and
+// obs[col_ct..(2*col_ct-1)] is the second row.  Entries must be nonnegative
+// and sum to less than 2^31.
+// Returns log-[mid]p-value, or NaN on allocation failure.
+// If there are more than 3 nonempty columns, and a cheap upper bound on the
+// log-p-value is less than ln_p_cutoff, that upper bound is returned instead.
+// (The bound is ln(observed table probability) + ln(bound on number of tables
+// with the same margins), and since the p-value is at least the observed
+// table probability, it overshoots by less than the latter term, which is
+// roughly (k-1) * ln(n).  So this mainly helps when the p-value is tiny.)
+// Pass -DBL_MAX to always compute the exact value.
+// Complexity is roughly O(n^{(k-1)/2}) where k is the number of nonempty
+// columns, so this is mainly useful for small k.
+double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff);
+
+// obs[] is a 3x3 table in row-major order.  Entries must be nonnegative and
+// sum to less than 2^31.  Other semantics are the same as for Fisher2xkLnP().
+// Complexity is roughly O(n^2).
+double Fisher33LnP(const int32_t* obs, uint32_t midp, double ln_p_cutoff);
+
 // Probable todos:
-// - Function implementing 2xk for k>2, recursion can just follow how
-//   Fisher23LnP builds on 2x2
-// - Function implementing jxk for 3<=j<=k; recursive function can take a
-//   parameter specifying the column number in the bottom row to iterate over
-//   (bottom-row values further to the right are locked during the function
-//   call).  I expect the function would rarely be worth using over simulation
-//   when j>3 (complexity is roughly O(n^{(j-1)(k-1)/2})), but O(n^2) for j=k=3
-//   seems likely to be a good deal.
+// - Larger jxk tables.  Fisher33LnP()'s implementation generalizes to 3xk,
+//   but it's usually slower than the network algorithm for k > 3; merging
+//   subproblems with the same remaining row totals (as the network algorithm
+//   does) would probably be necessary for that to be worthwhile.
 
 #ifdef __cplusplus
 }

@@ -324,3 +324,46 @@ test_that("fisher.test works", {
                 ), nrow=6, byrow=TRUE)
   expect_error(fisher.test(d))
 })
+
+test_that("fisher.test works on 2xk and 3x3 tables", {
+  ## Reference values were computed by exact enumeration with rational
+  ## arithmetic.
+  t24 <- matrix(c(3, 10, 4, 7, 9, 2, 4, 1), nrow = 2, byrow = TRUE)
+  expect_equal(fisher.test(t24)$p.value, 0.007673597307624796, tolerance = 1e-12)
+  expect_equal(fisher.test(t24, midp = TRUE)$p.value, 0.00715611580507905, tolerance = 1e-12)
+  expect_equal(fisher.test(t(t24), midp = TRUE)$p.value, 0.00715611580507905, tolerance = 1e-12)
+  t52 <- matrix(c(5, 1, 2, 8, 3, 3, 6, 0, 1, 4), ncol = 2, byrow = TRUE)
+  expect_equal(fisher.test(t52)$p.value, 0.004501551251436071, tolerance = 1e-12)
+  t33 <- matrix(c(3, 1, 4, 1, 5, 9, 2, 6, 5), nrow = 3, byrow = TRUE)
+  expect_equal(fisher.test(t33)$p.value, 0.282360228768354, tolerance = 1e-12)
+  expect_equal(fisher.test(t33, midp = TRUE)$p.value, 0.2760652637970296, tolerance = 1e-12)
+  ft33 <- fisher.test(matrix(c(8, 0, 1, 0, 7, 2, 1, 1, 9), nrow = 3), log.p = TRUE)
+  expect_equal(ft33$log.p.value, log(6.011127956704347e-07), tolerance = 1e-12)
+  expect_equal(fisher.test(matrix(2, 3, 3), midp = TRUE)$p.value, 0.9787502413552833, tolerance = 1e-12)
+
+  ## Agreement with stats::fisher.test() (which has a relative tolerance of
+  ## 1e-7 when deciding which tables are at least as extreme).
+  set.seed(11)
+  for (i in 1:5) {
+    m <- matrix(rpois(8, 30), nrow = 2)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+    m <- matrix(rpois(9, 20), nrow = 3)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+  }
+
+  ## Large table; regression value from this implementation.
+  big33 <- matrix(c(400, 520, 580, 510, 470, 520, 600, 480, 420), nrow = 3, byrow = TRUE)
+  expect_equal(fisher.test(big33, log.p = TRUE)$log.p.value, -31.139221226132207, tolerance = 1e-10)
+
+  ## p-values which underflow (these use the early-exit path when log.p is
+  ## FALSE).
+  for (m in list(matrix(c(300, 0, 300, 0, 0, 300, 0, 300), nrow = 2, byrow = TRUE),
+                 diag(300, 3))) {
+    expect_identical(fisher.test(m)$p.value, 0)
+    expect_lt(fisher.test(m, log.p = TRUE)$log.p.value, -745.2)
+  }
+
+  ## Still forwarded to stats::fisher.test().
+  expect_error(fisher.test(matrix(1, 3, 4), midp = TRUE))
+  expect_error(fisher.test(matrix(1, 2, 9), midp = FALSE, simulate.p.value = TRUE, B = 10), NA)
+})

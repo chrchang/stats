@@ -610,6 +610,7 @@ PACKAGE_URL=''
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+FP_CONTRACT_FLAGS
 CXXCPP
 OBJEXT
 EXEEXT
@@ -2035,6 +2036,14 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
+: ${R_HOME=`R RHOME`}
+if test -z "${R_HOME}"; then
+  as_fn_error $? "could not determine R_HOME" "$LINENO" 5
+fi
+CXX=`"${R_HOME}/bin/R" CMD config CXX`
+CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
+CXXFLAGS=`"${R_HOME}/bin/R" CMD config CXXFLAGS`
+
 ac_ext=cpp
 ac_cpp='$CXXCPP $CPPFLAGS'
 ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
@@ -3211,8 +3220,36 @@ ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
 ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
 ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
 
-CPPFLAGS=`"${R_HOME}/bin/R" CMD config CPPFLAGS`
-CXXFLAGS=`"${R_HOME}/bin/R" CMD config CXXFLAGS`
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether ${CXX} accepts -ffp-contract=off" >&5
+printf %s "checking whether ${CXX} accepts -ffp-contract=off... " >&6; }
+fp_contract_save_CXXFLAGS="${CXXFLAGS}"
+CXXFLAGS="${CXXFLAGS} -ffp-contract=off -Werror"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_compile "$LINENO"
+then :
+  FP_CONTRACT_FLAGS="-ffp-contract=off"
+                   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+else case e in #(
+  e) FP_CONTRACT_FLAGS=""
+                   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; } ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+CXXFLAGS="${fp_contract_save_CXXFLAGS}"
+
 
 ac_config_files="$ac_config_files src/Makevars"
 

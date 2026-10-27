@@ -75,6 +75,36 @@ def test_fisher():
     # todo: test exception-throwing cases
 
 
+# Reference values were computed by exact enumeration with rational
+# arithmetic.
+fisher_2xk_33_cases = [
+    ([[3, 10, 4, 7], [9, 2, 4, 1]], False, 0.007673597307624796),
+    ([[3, 10, 4, 7], [9, 2, 4, 1]], True, 0.00715611580507905),
+    ([[5, 1], [2, 8], [3, 3], [6, 0], [1, 4]], False, 0.004501551251436071),
+    ([[3, 1, 4], [1, 5, 9], [2, 6, 5]], False, 0.282360228768354),
+    ([[3, 1, 4], [1, 5, 9], [2, 6, 5]], True, 0.2760652637970296),
+    ([[8, 0, 1], [0, 7, 2], [1, 1, 9]], False, 6.011127956704347e-07),
+    ([[2, 2, 2], [2, 2, 2], [2, 2, 2]], True, 0.9787502413552833),
+    ]
+
+
+def test_fisher_2xk_33():
+    for table, midp, expected in fisher_2xk_33_cases:
+        pval = exact_tests.fisher_exact(table, midp=midp)
+        assert pval == pytest.approx(expected, rel=1e-12, abs=0), str(table)
+        logp = exact_tests.fisher_exact(table, midp=midp, logp=True)
+        assert logp == pytest.approx(math.log(expected), rel=1e-12, abs=1e-14), str(table)
+    # p-values which underflow (these use the early-exit path when logp isn't
+    # requested).
+    for table in ([[300, 0, 300, 0], [0, 300, 0, 300]], [[300, 0, 0], [0, 300, 0], [0, 0, 300]]):
+        assert exact_tests.fisher_exact(table) == 0.0
+        assert exact_tests.fisher_exact(table, logp=True) < -745
+    with pytest.raises(RuntimeError):
+        exact_tests.fisher_exact([[1, 2, 3], [4, 5, 6], [7, 8, 9], [1, 2, 3]])
+    with pytest.raises(RuntimeError):
+        exact_tests.fisher_exact([[1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4]])
+
+
 def test_cond_odds_ratio():
     for test_case in scipy_fisher22_cases:
         if len(test_case) < 8:

@@ -1,11 +1,13 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t
-from libc.math cimport INFINITY, rint
+from libc.math cimport INFINITY, rint, log
+from libc.float cimport DBL_MAX, DBL_MIN
+from libc.stdlib cimport malloc, free
 import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.9.6"
+__version__ = "0.10.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -78,6 +80,10 @@ cdef extern from "../include/fisher.h" namespace "plink2":
     void Fisher22OddsRatioCI(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22, double low_p, double high_p, double* low_resultp, double* high_resultp) nogil
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
+
+    double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) nogil
+
+    double Fisher33LnP(const int32_t* obs, uint32_t midp, double ln_p_cutoff) nogil
 
 
 cdef extern from "../include/plink2_float.h" namespace "plink2":
@@ -896,6 +902,8 @@ hypergeom = _HypergeomDist()
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
 # lists.  For 2x2 tests, values must be nonnegative integers which add up
 # to <2^52.  For tests on larger tables, they must add up to <2^31.
+# Currently supported table shapes are 2xk, kx2, and 3x3.  (Runtime of the
+# 2xk test grows quickly with k, so it's mainly useful for small k.)
 #
 # alternative must be one of the following:
 #   "two-sided": default, must be this if table is larger than 2x2.
@@ -939,6 +947,18 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
         return flush_if_denormal(ln_result)
     cdef int32_t m13
     cdef int32_t m23
+    cdef uint32_t k
+    cdef uint32_t idx
+    cdef int64_t a
+    cdef int64_t b
+    cdef int32_t* obs_buf
+    cdef int32_t obs33[9]
+    # When logp isn't requested, the return value is exp_flush(ln_result),
+    # which is zero whenever exp(ln_result) < DBL_MIN.  So we can let the
+    # 2xk/3x3 functions return early (with an upper bound on ln_result) when
+    # they can cheaply determine that the log-p-value is below a cutoff
+    # slightly smaller than ln(DBL_MIN); the result is unchanged.
+    cdef double ln_p_cutoff = -DBL_MAX if logp else (log(DBL_MIN) - 1e-9)
     if (nrow == 2 and ncol == 3) or (nrow == 3 and ncol == 2):
         if nrow == 2:
             m13 = table[0][2]
@@ -952,8 +972,49 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
             raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
         with nogil:
             ln_result = Fisher23LnP(m11, m12, m13, m21, m22, m23, midp)
+    elif nrow == 2 or ncol == 2:
+        k = ncol if nrow == 2 else nrow
+        obs_buf = <int32_t*>malloc(2 * k * sizeof(int32_t))
+        if not obs_buf:
+            raise MemoryError()
+        try:
+            total = 0
+            for idx in range(k):
+                if nrow == 2:
+                    a = table[0][idx]
+                    b = table[1][idx]
+                else:
+                    a = table[idx][0]
+                    b = table[idx][1]
+                if a < 0 or b < 0 or a > 0x7fffffff or b > 0x7fffffff:
+                    raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+                total += a + b
+                obs_buf[idx] = <int32_t>a
+                obs_buf[k + idx] = <int32_t>b
+            if total > 0x7fffffff:
+                raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+            with nogil:
+                ln_result = Fisher2xkLnP(obs_buf, k, midp, ln_p_cutoff)
+        finally:
+            free(obs_buf)
+        if ln_result != ln_result:
+            raise MemoryError()
+    elif nrow == 3 and ncol == 3:
+        total = 0
+        for idx in range(9):
+            a = table[idx // 3][idx % 3]
+            if a < 0 or a > 0x7fffffff:
+                raise RuntimeError("3x3 table entries must be nonnegative and sum to <2^31")
+            total += a
+            obs33[idx] = <int32_t>a
+        if total > 0x7fffffff:
+            raise RuntimeError("3x3 table entries must be nonnegative and sum to <2^31")
+        with nogil:
+            ln_result = Fisher33LnP(obs33, midp, ln_p_cutoff)
+        if ln_result != ln_result:
+            raise MemoryError()
     else:
-         raise RuntimeError("tables larger than 2x3 not yet supported")
+         raise RuntimeError("only 2xk, kx2, and 3x3 tables are currently supported")
     if logp:
         return ln_result
     return exp_flush(ln_result)

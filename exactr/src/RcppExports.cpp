@@ -135,6 +135,32 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// fisher2xk_test_pval
+double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p);
+RcppExport SEXP _exactr_fisher2xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher2xk_test_pval(x, midp, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fisher33_test_pval
+double fisher33_test_pval(IntegerMatrix x, bool midp, bool log_p);
+RcppExport SEXP _exactr_fisher33_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher33_test_pval(x, midp, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
 // fisher22_2sided_pval
 double fisher22_2sided_pval(double x11, double x12, double x21, double x22, bool midp, bool log_p);
 RcppExport SEXP _exactr_fisher22_2sided_pval(SEXP x11SEXP, SEXP x12SEXP, SEXP x21SEXP, SEXP x22SEXP, SEXP midpSEXP, SEXP log_pSEXP) {
@@ -227,6 +253,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 8},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
     {"_exactr_fisher23_test_pval", (DL_FUNC) &_exactr_fisher23_test_pval, 3},
+    {"_exactr_fisher2xk_test_pval", (DL_FUNC) &_exactr_fisher2xk_test_pval, 3},
+    {"_exactr_fisher33_test_pval", (DL_FUNC) &_exactr_fisher33_test_pval, 3},
     {"_exactr_fisher22_2sided_pval", (DL_FUNC) &_exactr_fisher22_2sided_pval, 6},
     {"_exactr_fisher22_1sided_pval_ex", (DL_FUNC) &_exactr_fisher22_1sided_pval_ex, 8},
     {"_exactr_fisher22_2sided_pval_ex", (DL_FUNC) &_exactr_fisher22_2sided_pval_ex, 8},

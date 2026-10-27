@@ -10,6 +10,9 @@
 #include "include/plink2_float.h"
 #include "include/plink2_highprec.h"
 
+#include <float.h>
+#include <vector>
+
 #include <Rcpp.h>
 using namespace Rcpp;
 
@@ -732,6 +735,69 @@ double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p) {
     stop("problem instance too large (2x3 table entries must sum to less than 2^31)");
   }
   const double ln_pval = plink2::Fisher23LnP(m11, m12, m13, m21, m22, m23, midp);
+  if (log_p) {
+    return ln_pval;
+  }
+  return exp(ln_pval);
+}
+
+// When the caller wants a p-value rather than a log-p-value, we return
+// exp(ln_pval), which is zero whenever ln_pval < ln(2^{-1075}).  So we can let
+// the 2xk/3x3 functions return early (with an upper bound on ln_pval) when they
+// can cheaply determine that the log-p-value is below a cutoff slightly
+// smaller than that; the result is unchanged.
+static const double kLnPCutoffNonlog = -1075 * plink2::kLn2 - 1e-9;
+
+//' @title Fisher 2xk test log-p-value
+//' @description Implements main p-value calculation for 2xk and kx2 tables.
+//' @noRd
+// [[Rcpp::export]]
+double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
+  const bool two_rows = (x.nrow() == 2);
+  const uint32_t k = two_rows? x.ncol() : x.nrow();
+  std::vector<int32_t> obs(2 * k);
+  int64_t tot = 0;
+  for (uint32_t idx = 0; idx != k; ++idx) {
+    const int32_t a = two_rows? x(0, idx) : x(idx, 0);
+    const int32_t b = two_rows? x(1, idx) : x(idx, 1);
+    obs[idx] = a;
+    obs[k + idx] = b;
+    tot += static_cast<int64_t>(a) + b;
+  }
+  if (tot >= (1LL << 31)) {
+    stop("problem instance too large (2xk table entries must sum to less than 2^31)");
+  }
+  const double ln_pval = plink2::Fisher2xkLnP(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
+  if (ln_pval != ln_pval) {
+    stop("out of memory");
+  }
+  if (log_p) {
+    return ln_pval;
+  }
+  return exp(ln_pval);
+}
+
+//' @title Fisher 3x3 test log-p-value
+//' @description Implements main p-value calculation for 3x3 tables.
+//' @noRd
+// [[Rcpp::export]]
+double fisher33_test_pval(IntegerMatrix x, bool midp, bool log_p) {
+  int32_t obs[9];
+  int64_t tot = 0;
+  for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+    for (uint32_t col_idx = 0; col_idx != 3; ++col_idx) {
+      const int32_t val = x(row_idx, col_idx);
+      obs[row_idx * 3 + col_idx] = val;
+      tot += val;
+    }
+  }
+  if (tot >= (1LL << 31)) {
+    stop("problem instance too large (3x3 table entries must sum to less than 2^31)");
+  }
+  const double ln_pval = plink2::Fisher33LnP(obs, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
+  if (ln_pval != ln_pval) {
+    stop("out of memory");
+  }
   if (log_p) {
     return ln_pval;
   }

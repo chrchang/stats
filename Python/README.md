@@ -2,7 +2,7 @@ exact-tests
 ===========
 
 This package implements the binomial, Hardy-Weinberg equilibrium, and Fisher's
-(2x2 and 2x3 so far) exact tests, along with corresponding discrete
+(2x2, 2xk, and 3x3 so far) exact tests, along with corresponding discrete
 distributions (binomial, hypergeometric).  scipy- and R-style interfaces are
 provided.  cdf-like functions offer a fast 'approx' mode.
 
@@ -121,4 +121,6 @@ exact_tests.binomtest(2, 29, "0.1", midp=True)
 exact_tests.binomtest(100, 10000, "0.000001", logp=True)
 exact_tests.fisher_exact([[4, 0], [0, 4]], alternative="greater", midp=True)
 exact_tests.fisher_exact([[10000, 20000], [30000, 40000], [50000, 60000]], logp=True)
+exact_tests.fisher_exact([[3, 10, 4, 7], [9, 2, 4, 1]], midp=True)
+exact_tests.fisher_exact([[400, 520, 580], [510, 470, 520], [600, 480, 420]], logp=True)
 ```

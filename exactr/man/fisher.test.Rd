@@ -30,13 +30,14 @@ factor object.}
 
 \item{workspace}{an integer specifying the size of the workspace used in the
 network algorithm.  In units of 4 bytes.  Only used for non-simulated
-p-values on larger-than-2x3 tables.  This also increases the internal
-stack size which allows larger problems to be solved, sometimes needing
-hours.  In such cases, \code{simulate.p.values = TRUE} may be more reasonable.}
+p-values on tables handled by \code{FEXACT} (see 'Details').  This also
+increases the internal stack size which allows larger problems to be
+solved, sometimes needing hours.  In such cases,
+\code{simulate.p.values = TRUE} may be more reasonable.}
 
-\item{hybrid}{a logical.  Only used for larger-than-2x3 tables, in which
-cases it indicates whether the exact probabilities (default) or a hybrid
-approximation thereof should be computed.}
+\item{hybrid}{a logical.  Only used for tables handled by \code{FEXACT}, in
+which cases it indicates whether the exact probabilities (default) or a
+hybrid approximation thereof should be computed.}
 
 \item{hybridPars}{a numeric vector of length 3, by default describing
 "Cochran's conditions" for the validity of the chi-squared approximation,
@@ -44,8 +45,8 @@ see 'Details'.}
 
 \item{control}{a list with named components for low-level algorithm control.
 At present the only one used is "\code{mult}", a positive integer >= 2 with
-default 30 used only for larger-than-2x3 tables.  This says how many times
-as much space should be allocated to paths as to keys: see file
+default 30 used only for tables handled by \code{FEXACT}.  This says how many
+times as much space should be allocated to paths as to keys: see file
 '\code{fexact.c}' in the base R stats source code.}
 
 \item{or}{the hypothesized odds ratio; or numerator if or.denom specified.
@@ -68,7 +69,7 @@ Monte Carlo simulation, in larger-than-2x3 tables.}
 Carlo test when \code{simulate.p.value} is true.}
 
 \item{midp}{logical; if TRUE, midp-value is returned in place of p-value.
-Not yet supported for larger-than-2x3 tables.}
+Not yet supported for tables handled by \code{FEXACT}.}
 
 \item{log.p}{logical; if TRUE, log.p.value is calculated and returned.
 (p.value is still returned.)  log.p.value usually remains accurate when
@@ -99,12 +100,15 @@ both \code{x} and \code{y} must be vectors or factors of the same length.
 Incomplete cases are removed, vectors are coerced into factor objects, and
 the contingency table is computed from these.
 
-For \code{or=1} two-sided tests on 2x2 tables, and 2x3 tables, computations are
-based on the algorithm described in Chang et al. (2015).  For other tests
-on 2x2 tables, p-values are obtained directly using the (central or
-non-central) hypergeometric distribution.
+For \code{or=1} two-sided tests on 2x2 tables, 2x3 tables, 2xk tables with at
+most 6 nonempty columns (or any number of them when \code{midp = TRUE}), and
+3x3 tables, computations are based on the algorithm described in Chang et
+al. (2015) and extensions of it.  (When \code{simulate.p.value = TRUE}, all
+tables larger than 2x3 are instead handled by the base R code.)  For
+other tests on 2x2 tables, p-values are obtained directly using the
+(central or non-central) hypergeometric distribution.
 
-For larger tables, computations are based on a C version of the FORTRAN
+For other tables, computations are based on a C version of the FORTRAN
 subroutine \code{FEXACT} which implements the network developed by Mehta and
 Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 FORTRAN code can be obtained from \url{https://netlib.org/toms/643}.  Note the
@@ -124,7 +128,7 @@ and take as "more extreme" all tables with probabilities less than or
 equal to that of the observed table, the p-value being the sum of such
 probabilities.
 
-For larger-than-2x3 tables and \code{hybrid = TRUE}, asymptotic chi-squared
+For tables handled by \code{FEXACT} and \code{hybrid = TRUE}, asymptotic chi-squared
 probabilities are only used of the 'Cochran conditions' (or modified
 version thereof) specified by
 \code{hybridPars = c(expect = 5, percent = 80, Emin = 1)} are satisfied, that
@@ -148,29 +152,29 @@ replicates (\code{B = 2000}) implies a minimum p-value of about 0.0005
 \references{
 Fisher RA (1935) The logic of inductive inference.  Journal of
 the Royal Statistical Society Series A, 98.
-\url{https://doi.org/10.2307/2342435}.
+\doi{10.2307/2342435}.
 
 Chang CC, Chow CC, Tellier LCAM, Vattikuti S, Purcell SM, Lee JJ
 (2015) Second-generation PLINK: rising to the challenge of larger and
 richer datasets.  GigaScience, 4.
-\url{https://doi.org/10.1186/s13742-015-0047-8}.
+\doi{10.1186/s13742-015-0047-8}.
 
 Mehta CR and Patel NR (1983) A network algorithm for performing
 Fisher's exact test in \code{r}x\code{c} contingency tables.  Journal of the
 American Statistical Association, 78.
-\url{https://doi.org/10.1080/01621459.1983.10477989}.
+\doi{10.1080/01621459.1983.10477989}.
 
 Mehta CR and Patel NR (1986) Algorithm 643: FEXACT, a FORTRAN
 subroutine for Fisher's exact test on unordered \code{r}x\code{c} contingency
 tables.  ACM Transactions on Mathematical Software, 12.
-\url{https://doi.org/10.1145/6497.214326}.
+\doi{10.1145/6497.214326}.
 
 Clarkson DB, Fan Y, Joe H (1993) A Remark on Algorithm 643:
 FEXACT: An Algorithm for Performing Fisher's Exact Test in \code{r}x\code{c}
 Contingency Tables.  ACM Transactions on Mathematical Software, 19.
-\url{https://doi.org/10.1145/168173.168412}.
+\doi{10.1145/168173.168412}.
 
 Patefield WM (1981) Algorithm AS 159: An efficient method of
 generating \code{r}x\code{c} tables with given row and column totals.  Applied
-Statistics, 30.  \url{https://doi.org/10.2307/2346669}.
+Statistics, 30.  \doi{10.2307/2346669}.
 }

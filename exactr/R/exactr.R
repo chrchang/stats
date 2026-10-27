@@ -140,7 +140,7 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'
 #' @references Clopper CJ, Pearson ES (1934) The use of confidence or fiducial
 #'   limits illustrated in the case of the binomial.  Biometrika, 26.
-#'   <https://doi.org/10.2307/2331986>.
+#'   \doi{10.2307/2331986}.
 #'
 #' @export
 binom.test <- function(x, n, p=0.5,
@@ -365,19 +365,20 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @param y a factor object; ignored if `x` is a matrix.
 #' @param workspace an integer specifying the size of the workspace used in the
 #'   network algorithm.  In units of 4 bytes.  Only used for non-simulated
-#'   p-values on larger-than-2x3 tables.  This also increases the internal
-#'   stack size which allows larger problems to be solved, sometimes needing
-#'   hours.  In such cases, `simulate.p.values = TRUE` may be more reasonable.
-#' @param hybrid a logical.  Only used for larger-than-2x3 tables, in which
-#'   cases it indicates whether the exact probabilities (default) or a hybrid
-#'   approximation thereof should be computed.
+#'   p-values on tables handled by `FEXACT` (see 'Details').  This also
+#'   increases the internal stack size which allows larger problems to be
+#'   solved, sometimes needing hours.  In such cases,
+#'   `simulate.p.values = TRUE` may be more reasonable.
+#' @param hybrid a logical.  Only used for tables handled by `FEXACT`, in
+#'   which cases it indicates whether the exact probabilities (default) or a
+#'   hybrid approximation thereof should be computed.
 #' @param hybridPars a numeric vector of length 3, by default describing
 #'   "Cochran's conditions" for the validity of the chi-squared approximation,
 #'   see 'Details'.
 #' @param control a list with named components for low-level algorithm control.
 #'   At present the only one used is "`mult`", a positive integer >= 2 with
-#'   default 30 used only for larger-than-2x3 tables.  This says how many times
-#'   as much space should be allocated to paths as to keys: see file
+#'   default 30 used only for tables handled by `FEXACT`.  This says how many
+#'   times as much space should be allocated to paths as to keys: see file
 #'   '`fexact.c`' in the base R stats source code.
 #' @param or the hypothesized odds ratio; or numerator if or.denom specified.
 #'   Only used in the 2x2 case.
@@ -393,7 +394,7 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @param B an integer specifying the number of replicates used in the Monte
 #'   Carlo test when `simulate.p.value` is true.
 #' @param midp logical; if TRUE, midp-value is returned in place of p-value.
-#'   Not yet supported for larger-than-2x3 tables.
+#'   Not yet supported for tables handled by `FEXACT`.
 #' @param log.p logical; if TRUE, log.p.value is calculated and returned.
 #'   (p.value is still returned.)  log.p.value usually remains accurate when
 #'   p.value underflows to zero; a warning is printed when that is not the
@@ -406,12 +407,15 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   Incomplete cases are removed, vectors are coerced into factor objects, and
 #'   the contingency table is computed from these.
 #'
-#'   For `or=1` two-sided tests on 2x2 tables, and 2x3 tables, computations are
-#'   based on the algorithm described in Chang et al. (2015).  For other tests
-#'   on 2x2 tables, p-values are obtained directly using the (central or
-#'   non-central) hypergeometric distribution.
+#'   For `or=1` two-sided tests on 2x2 tables, 2x3 tables, 2xk tables with at
+#'   most 6 nonempty columns (or any number of them when `midp = TRUE`), and
+#'   3x3 tables, computations are based on the algorithm described in Chang et
+#'   al. (2015) and extensions of it.  (When `simulate.p.value = TRUE`, all
+#'   tables larger than 2x3 are instead handled by the base R code.)  For
+#'   other tests on 2x2 tables, p-values are obtained directly using the
+#'   (central or non-central) hypergeometric distribution.
 #'
-#'   For larger tables, computations are based on a C version of the FORTRAN
+#'   For other tables, computations are based on a C version of the FORTRAN
 #'   subroutine `FEXACT` which implements the network developed by Mehta and
 #'   Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 #'   FORTRAN code can be obtained from <https://netlib.org/toms/643>.  Note the
@@ -432,7 +436,7 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   equal to that of the observed table, the p-value being the sum of such
 #'   probabilities.
 #'
-#'   For larger-than-2x3 tables and `hybrid = TRUE`, asymptotic chi-squared
+#'   For tables handled by `FEXACT` and `hybrid = TRUE`, asymptotic chi-squared
 #'   probabilities are only used of the 'Cochran conditions' (or modified
 #'   version thereof) specified by
 #'   `hybridPars = c(expect = 5, percent = 80, Emin = 1)` are satisfied, that
@@ -465,31 +469,31 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'
 #' @references Fisher RA (1935) The logic of inductive inference.  Journal of
 #'   the Royal Statistical Society Series A, 98.
-#'   <https://doi.org/10.2307/2342435>.
+#'   \doi{10.2307/2342435}.
 #'
 #' @references Chang CC, Chow CC, Tellier LCAM, Vattikuti S, Purcell SM, Lee JJ
 #'   (2015) Second-generation PLINK: rising to the challenge of larger and
 #'   richer datasets.  GigaScience, 4.
-#'   <https://doi.org/10.1186/s13742-015-0047-8>.
+#'   \doi{10.1186/s13742-015-0047-8}.
 #'
 #' @references Mehta CR and Patel NR (1983) A network algorithm for performing
 #'   Fisher's exact test in `r`x`c` contingency tables.  Journal of the
 #'   American Statistical Association, 78.
-#'   <https://doi.org/10.1080/01621459.1983.10477989>.
+#'   \doi{10.1080/01621459.1983.10477989}.
 #'
 #' @references Mehta CR and Patel NR (1986) Algorithm 643: FEXACT, a FORTRAN
 #'   subroutine for Fisher's exact test on unordered `r`x`c` contingency
 #'   tables.  ACM Transactions on Mathematical Software, 12.
-#'   <https://doi.org/10.1145/6497.214326>.
+#'   \doi{10.1145/6497.214326}.
 #'
 #' @references Clarkson DB, Fan Y, Joe H (1993) A Remark on Algorithm 643:
 #'   FEXACT: An Algorithm for Performing Fisher's Exact Test in `r`x`c`
 #'   Contingency Tables.  ACM Transactions on Mathematical Software, 19.
-#'   <https://doi.org/10.1145/168173.168412>.
+#'   \doi{10.1145/168173.168412}.
 #'
 #' @references Patefield WM (1981) Algorithm AS 159: An efficient method of
 #'   generating `r`x`c` tables with given row and column totals.  Applied
-#'   Statistics, 30.  <https://doi.org/10.2307/2346669>.
+#'   Statistics, 30.  \doi{10.2307/2346669}.
 #'
 #' @export
 fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
@@ -502,9 +506,13 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   ## 4.6.0, since it is designed to be a drop-in replacement.
   ##
   ## Start with check for conditions that currently require us to rely on the
-  ## stats::fisher.test() fallback.  Specifically, if either:
-  ##   nr + nc > 5
-  ##   nr == 2, nc == 2, and or != 1
+  ## stats::fisher.test() fallback.  Specifically, if the table is larger than
+  ## 2x3 and any of the following hold:
+  ##   simulate.p.value = TRUE
+  ##   it's neither 2xk/kx2 nor 3x3
+  ##   it's 2xk/kx2 with more than 7 nonempty columns/rows, and midp = FALSE
+  ##     (our 2xk algorithm's runtime grows quickly with k, so the network
+  ##     algorithm is usually faster beyond this point)
   ## we just forward to stats::fisher.test().
 
   expr.x <- substitute(x)
@@ -539,7 +547,17 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   if (!is.boolean(log.p)) {
     stop("'log.p' must be a single boolean value")
   }
-  if (nr + nc > 5) {
+  use.2xk <- FALSE
+  use.33 <- FALSE
+  if ((nr + nc > 5) && !identical(simulate.p.value, TRUE) && is.numeric(xmat) && !anyNA(xmat)) {
+    if ((nr == 3) && (nc == 3)) {
+      use.33 <- TRUE
+    } else if (min(nr, nc) == 2) {
+      nz.ct <- if (nr == 2) sum(colSums(xmat) != 0) else sum(rowSums(xmat) != 0)
+      use.2xk <- isTRUE(midp) || (nz.ct <= 6)
+    }
+  }
+  if ((nr + nc > 5) && !use.2xk && !use.33) {
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
     }
@@ -615,7 +633,7 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   }
 
   if (hybrid) {
-    warning("'hybrid' is ignored for 2x2 and 2x3 tables")
+    warning("'hybrid' is ignored for 2x2, 2x3, small 2xk, and 3x3 tables")
   }
   if (midp) {
     METHOD <- paste(METHOD, "(midp)")
@@ -623,8 +641,15 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
 
   RVAL <- NULL
   if (!have.2x2) {
-    ## 2x3 case, otherwise we would have forwarded to stats::fisher.test().
-    P_OR_LNPVAL <- fisher23_test_pval(x, midp, log.p)
+    ## 2x3, 2xk, or 3x3 case, otherwise we would have forwarded to
+    ## stats::fisher.test().
+    if (use.33) {
+      P_OR_LNPVAL <- fisher33_test_pval(x, midp, log.p)
+    } else if (use.2xk) {
+      P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p)
+    } else {
+      P_OR_LNPVAL <- fisher23_test_pval(x, midp, log.p)
+    }
     if (log.p) {
       RVAL <- list(p.value = exp(P_OR_LNPVAL),
                    log.p.value = P_OR_LNPVAL)

@@ -97,6 +97,20 @@ fisher23_test_pval <- function(x, midp, log_p) {
     .Call(`_exactr_fisher23_test_pval`, x, midp, log_p)
 }
 
+#' @title Fisher 2xk test log-p-value
+#' @description Implements main p-value calculation for 2xk and kx2 tables.
+#' @noRd
+fisher2xk_test_pval <- function(x, midp, log_p) {
+    .Call(`_exactr_fisher2xk_test_pval`, x, midp, log_p)
+}
+
+#' @title Fisher 3x3 test log-p-value
+#' @description Implements main p-value calculation for 3x3 tables.
+#' @noRd
+fisher33_test_pval <- function(x, midp, log_p) {
+    .Call(`_exactr_fisher33_test_pval`, x, midp, log_p)
+}
+
 #' @title Fisher 2x2 two-sided test p-value
 #' @description Implements main two-sided p-value calculation for 2x2 tables.
 #' @noRd

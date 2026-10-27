@@ -7,7 +7,7 @@ discrete distributions (binomial, hypergeometric).
 
 As of this writing, these functions are more accurate, and often simultaneously
 more efficient, than their scipy counterparts; see the MPFR-comparison and
-benchmark scripts under Python/utils/ .  (R package to be provided soon.)
+benchmark scripts under Python/utils/ .
 
 The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).
