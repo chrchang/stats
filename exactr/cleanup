@@ -4,3 +4,4 @@ rm -f src/Makevars
 rm -rf autom4te.cache
 rm -f src/*.o
 rm -f src/*.a
+rm -f tools/include/include/*.o

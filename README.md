@@ -1,9 +1,9 @@
 stats
 =====
 
-Implementations of the binomial, Hardy-Weinberg equilibrium,
-and Fisher's exact tests (2x2 and 2x3 so far), along with corresponding
-discrete distributions (binomial, hypergeometric).
+Implementations of the binomial, Hardy-Weinberg equilibrium, and Fisher's exact
+exact tests (2xk and 3x3 so far), along with corresponding discrete
+distributions (binomial, hypergeometric).
 
 As of this writing, these functions are more accurate, and often simultaneously
 more efficient, than their scipy counterparts; see the MPFR-comparison and
