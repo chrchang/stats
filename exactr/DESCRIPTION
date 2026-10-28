@@ -16,10 +16,9 @@ Authors@R: c(person(given="Christopher",
              person("The Regents of the University of California, through Lawrence Berkeley National Laboratory",
                     role = c("cph"),
                     comment = "QD library"))
-Description: Implements binomial and Fisher's (2xk and 3x3 so far) exact tests.
-    Accuracy of these functions compares favorably
-    to their counterparts in the R 4.6 standard library; exact-test functions
-    are also much faster.
+Description: Implements binomial and Fisher's (2x2..2x6 and 3x3 so far) exact
+    tests.  Accuracy and speed of these functions compare favorably to their
+    counterparts in the R 4.6 standard library.
 Encoding: UTF-8
 License: GPL-3
 BugReports: https://github.com/chrchang/stats/issues
