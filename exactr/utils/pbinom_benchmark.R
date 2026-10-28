@@ -2,11 +2,11 @@
 .script_dir <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
 source(file.path(.script_dir, "common.R"))
 
-description <- "This collects benchmark results for exactr::pbinom() and stats::pbinom()."
+description <- "This collects benchmark results for exactr:::pbinom() and stats::pbinom()."
 
 pbinom_benchmark <- function(p, z, pow2s, num_trials_per_pow2, logp) {
   pq <- p * (1 - p)
-  warmup <- exactr::pbinom(1, 2, 0.5)
+  warmup <- exactr:::pbinom(1, 2, 0.5)
   warmup <- stats::pbinom(1, 2, 0.5)
   for (pow2 in pow2s) {
     n <- 2^pow2 - 1
@@ -17,8 +17,8 @@ pbinom_benchmark <- function(p, z, pow2s, num_trials_per_pow2, logp) {
     } else if (k > n) {
       k <- n
     }
-    secs_noapprox <- seconds_per_iter(function() exactr::pbinom(k, n, p, log.p = logp), num_trials_per_pow2)
-    secs_approx <- seconds_per_iter(function() exactr::pbinom(k, n, p, log.p = logp, approx = TRUE), num_trials_per_pow2)
+    secs_noapprox <- seconds_per_iter(function() exactr:::pbinom(k, n, p, log.p = logp), num_trials_per_pow2)
+    secs_approx <- seconds_per_iter(function() exactr:::pbinom(k, n, p, log.p = logp, approx = TRUE), num_trials_per_pow2)
     secs_stats <- seconds_per_iter(function() stats::pbinom(k, n, p, log.p = logp), num_trials_per_pow2)
     cat("n=(2^", pow2, ")-1: base=", format_g3(secs_noapprox), "  approx=", format_g3(secs_approx), "  stats=", format_g3(secs_stats), " sec/iter\n", sep = "")
   }

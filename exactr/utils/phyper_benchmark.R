@@ -2,10 +2,10 @@
 .script_dir <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
 source(file.path(.script_dir, "common.R"))
 
-description <- "This collects benchmark results for exactr::phyper() and stats::phyper()."
+description <- "This collects benchmark results for exactr:::phyper() and stats::phyper()."
 
 phyper_benchmark <- function(ab, ac, z, pow2s, num_trials_per_pow2, logp, omit_stats) {
-  warmup <- exactr::phyper(1, 2, 2, 2)
+  warmup <- exactr:::phyper(1, 2, 2, 2)
   if (!omit_stats) {
     warmup <- stats::phyper(1, 2, 2, 2)
   }
@@ -15,8 +15,8 @@ phyper_benchmark <- function(ab, ac, z, pow2s, num_trials_per_pow2, logp, omit_s
     a <- tbl[1]
     cur_ab <- tbl[1] + tbl[2]
     cur_ac <- tbl[1] + tbl[3]
-    secs_noapprox <- seconds_per_iter(function() exactr::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp), num_trials_per_pow2)
-    secs_approx <- seconds_per_iter(function() exactr::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp, approx = TRUE), num_trials_per_pow2)
+    secs_noapprox <- seconds_per_iter(function() exactr:::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp), num_trials_per_pow2)
+    secs_approx <- seconds_per_iter(function() exactr:::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp, approx = TRUE), num_trials_per_pow2)
     print_str <- paste0("n=(2^", pow2, ")-1: base=", format_g3(secs_noapprox), "  approx=", format_g3(secs_approx))
     if (!omit_stats) {
       secs_stats <- seconds_per_iter(function() stats::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp), num_trials_per_pow2)

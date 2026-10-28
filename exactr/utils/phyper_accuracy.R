@@ -3,11 +3,11 @@
 source(file.path(.script_dir, "common.R"))
 source(file.path(.script_dir, "mpfr_impls.R"))
 
-description <- "Primary mode checks exactr::phyper(approx=FALSE) and stats::phyper()'s
+description <- "Primary mode checks exactr:::phyper(approx=FALSE) and stats::phyper()'s
 accuracy against a simple MPFR-based implementation (slow!).
 
-\"--bits 0\" mode checks exactr::phyper(approx=TRUE) and stats::phyper(),
-treating exactr::phyper(approx=FALSE) as ground truth."
+\"--bits 0\" mode checks exactr:::phyper(approx=TRUE) and stats::phyper(),
+treating exactr:::phyper(approx=FALSE) as ground truth."
 
 phyper_accuracy_test <- function(ab, ac, z, pow2s, num_trials_per_pow2, bits, logp, omit_stats) {
   for (pow2 in pow2s) {
@@ -20,8 +20,8 @@ phyper_accuracy_test <- function(ab, ac, z, pow2s, num_trials_per_pow2, bits, lo
       a <- tbl[1]
       cur_ab <- tbl[1] + tbl[2]
       cur_ac <- tbl[1] + tbl[3]
-      got_noapprox <- flush_if_denormal(exactr::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp))
-      got_approx <- flush_if_denormal(exactr::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp, approx = TRUE))
+      got_noapprox <- flush_if_denormal(exactr:::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp))
+      got_approx <- flush_if_denormal(exactr:::phyper(a, cur_ac, n - cur_ac, cur_ab, log.p = logp, approx = TRUE))
       if (bits == 0) {
         want <- got_noapprox
       } else {

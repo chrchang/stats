@@ -2,12 +2,13 @@ stats
 =====
 
 Implementations of the binomial, Hardy-Weinberg equilibrium, and Fisher's exact
-exact tests (2xk and 3x3 so far), along with corresponding discrete
+exact tests (2x2..2x6 and 3x3 so far), along with corresponding discrete
 distributions (binomial, hypergeometric).
 
 As of this writing, these functions are more accurate, and often simultaneously
 more efficient, than their scipy counterparts; see the MPFR-comparison and
-benchmark scripts under Python/utils/ .
+benchmark scripts under Python/utils/ .  The exact test functions also
+outperform their counterparts in the R standard library.
 
 The central building block is a high-precision log-factorial function utilizing
 the QD library (https://github.com/BL-highprecision/QD ).

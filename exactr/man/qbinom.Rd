@@ -29,3 +29,4 @@ Probability point function for binomial distribution with parameters
 Starts with CLT-based initial guess, follows with Newton iteration
 to find a close-enough pmf value before evaluating cdf.
 }
+\keyword{internal}

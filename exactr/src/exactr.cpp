@@ -63,7 +63,7 @@ plink2::td_real make_prob_tdr(double prob, double prob_denom) {
 //'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 //'   Symposium on Computer Arithmetic.
 //'
-//' @export
+//' @keywords internal
 // [[Rcpp::export]]
 NumericVector dbinom(NumericVector x, NumericVector size, NumericVector prob = NumericVector::create(0.5), bool log = false) {
   // Imitate SETUP_Math3 macro in R src/library/stats/src/distn.c .
@@ -390,7 +390,7 @@ double binom_2sided_pval(double x_round, double size_round, double prob, bool mi
 //' @param k the number of balls drawn from the urn, must be in \[0, m+n\].
 //' @param log logical; if TRUE, probabilities are returned as logarithms.
 //' @return pmf(x).
-//' @export
+//' @keywords internal
 // [[Rcpp::export]]
 NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericVector k, bool log = false) {
   // Imitate SETUP_Math4 macro in R src/library/stats/src/distn.c .

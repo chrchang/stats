@@ -58,6 +58,9 @@ hwe_demo: $(OBJ) hwe_demo.o
 clean:
 	rm -f *.o
 	rm -f include/*.o
+	rm -f exactr/src/*.o
+	rm -f exactr/src/*.a
+	rm -f exactr/src/*.so
 	rm -f binom_demo
 	rm -f dbinom_demo
 	rm -f fisher_demo

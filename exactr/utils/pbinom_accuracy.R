@@ -3,11 +3,11 @@
 source(file.path(.script_dir, "common.R"))
 source(file.path(.script_dir, "mpfr_impls.R"))
 
-description <- "Primary mode checks exactr::pbinom(approx=FALSE) and stats::pbinom()'s
+description <- "Primary mode checks exactr:::pbinom(approx=FALSE) and stats::pbinom()'s
 accuracy against a simple MPFR-based implementation (slow!).
 
-\"--bits 0\" mode checks exactr::pbinom(approx=TRUE) and stats::pbinom(),
-treating exactr::pbinom(approx=FALSE) as ground truth."
+\"--bits 0\" mode checks exactr:::pbinom(approx=TRUE) and stats::pbinom(),
+treating exactr:::pbinom(approx=FALSE) as ground truth."
 
 pbinom_accuracy_test <- function(p, z, pow2s, num_trials_per_pow2, bits, logp) {
   pq <- p * (1 - p)
@@ -24,8 +24,8 @@ pbinom_accuracy_test <- function(p, z, pow2s, num_trials_per_pow2, bits, logp) {
       } else if (k > n) {
         k <- n
       }
-      got_noapprox <- flush_if_denormal(exactr::pbinom(k, n, p, log.p = logp))
-      got_approx <- flush_if_denormal(exactr::pbinom(k, n, p, log.p = logp, approx = TRUE))
+      got_noapprox <- flush_if_denormal(exactr:::pbinom(k, n, p, log.p = logp))
+      got_approx <- flush_if_denormal(exactr:::pbinom(k, n, p, log.p = logp, approx = TRUE))
       got_stats <- stats::pbinom(k, n, p, log.p = logp)
       if (bits == 0) {
         want <- got_noapprox

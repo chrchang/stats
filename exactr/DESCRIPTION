@@ -1,8 +1,8 @@
 Package: exactr
 Type: Package
-Title: Accurate and Efficient Exact Tests and Distributions
+Title: Accurate and Efficient Exact Tests
 Version: 0.1.0
-Date: 2026-10-27
+Date: 2026-10-28
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),
@@ -16,9 +16,8 @@ Authors@R: c(person(given="Christopher",
              person("The Regents of the University of California, through Lawrence Berkeley National Laboratory",
                     role = c("cph"),
                     comment = "QD library"))
-Description: Implements the binomial and Fisher's (2x2, 2xk, and 3x3 so far)
-    exact tests, along with corresponding discrete distributions
-    (binomial, hypergeometric).  Accuracy of these functions compares favorably
+Description: Implements binomial and Fisher's (2xk and 3x3 so far) exact tests.
+    Accuracy of these functions compares favorably
     to their counterparts in the R 4.6 standard library; exact-test functions
     are also much faster.
 Encoding: UTF-8

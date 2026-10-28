@@ -23,7 +23,7 @@
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @export
+#' @keywords internal
 dbinom <- function(x, size, prob = as.numeric( c(0.5)), log = FALSE) {
     .Call(`_exactr_dbinom`, x, size, prob, log)
 }
@@ -69,7 +69,7 @@ binom_2sided_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom
 #' @param k the number of balls drawn from the urn, must be in \[0, m+n\].
 #' @param log logical; if TRUE, probabilities are returned as logarithms.
 #' @return pmf(x).
-#' @export
+#' @keywords internal
 dhyper <- function(x, m, n, k, log = FALSE) {
     .Call(`_exactr_dhyper`, x, m, n, k, log)
 }

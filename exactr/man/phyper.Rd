@@ -40,3 +40,4 @@ Hida Y, Li XS, Bailey DH (2001) Algorithms for quad-double
 precision floating point arithmetic.  Proceedings of the 15th IEEE
 Symposium on Computer Arithmetic.
 }
+\keyword{internal}

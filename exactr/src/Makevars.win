@@ -1,52 +1,11 @@
 INCL = ../tools/include
-PKG_CPPFLAGS = -DNO_UNALIGNED -I$(INCL)
+PKG_CPPFLAGS = -DNO_UNALIGNED -ffp-contract=off -I$(INCL)
 PKG_LIBS = -L. -lSTATS
 
-LIBSTATS_SOURCES = ${INCL}/include/binom.cc ${INCL}/include/binom_detail.cc ${INCL}/include/fisher.cc ${INCL}/include/hypergeom.cc ${INCL}/include/hypergeom_detail.cc ${INCL}/include/nchypergeom_fisher.cc $(INCL)/include/plink2_base.cc $(INCL)/include/plink2_float.cc $(INCL)/include/plink2_highprec.cc $(INCL)/include/special_func.cc
+LIBSTATS_SOURCES = $(INCL)/include/binom.cc $(INCL)/include/binom_detail.cc $(INCL)/include/fisher.cc $(INCL)/include/hypergeom.cc $(INCL)/include/hypergeom_detail.cc $(INCL)/include/nchypergeom_fisher.cc $(INCL)/include/plink2_base.cc $(INCL)/include/plink2_float.cc $(INCL)/include/plink2_highprec.cc $(INCL)/include/special_func.cc
 LIBSTATS = $(LIBSTATS_SOURCES:.cc=.o)
 
 $(SHLIB): libSTATS.a
-
-# Rtools' gcc supports -ffp-contract=off, which the double-double arithmetic in
-# plink2_highprec requires (see include/plink2_float.h).  As in Makevars.in,
-# it's applied via explicit rules rather than PKG_CXXFLAGS.
-FP_CONTRACT_FLAGS = -ffp-contract=off
-
-exactr.o: exactr.cpp
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c exactr.cpp -o $@
-
-RcppExports.o: RcppExports.cpp
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c RcppExports.cpp -o $@
-
-$(INCL)/include/binom.o: $(INCL)/include/binom.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/binom.cc -o $@
-
-$(INCL)/include/binom_detail.o: $(INCL)/include/binom_detail.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/binom_detail.cc -o $@
-
-$(INCL)/include/fisher.o: $(INCL)/include/fisher.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/fisher.cc -o $@
-
-$(INCL)/include/hypergeom.o: $(INCL)/include/hypergeom.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/hypergeom.cc -o $@
-
-$(INCL)/include/hypergeom_detail.o: $(INCL)/include/hypergeom_detail.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/hypergeom_detail.cc -o $@
-
-$(INCL)/include/nchypergeom_fisher.o: $(INCL)/include/nchypergeom_fisher.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/nchypergeom_fisher.cc -o $@
-
-$(INCL)/include/plink2_base.o: $(INCL)/include/plink2_base.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/plink2_base.cc -o $@
-
-$(INCL)/include/plink2_float.o: $(INCL)/include/plink2_float.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/plink2_float.cc -o $@
-
-$(INCL)/include/plink2_highprec.o: $(INCL)/include/plink2_highprec.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/plink2_highprec.cc -o $@
-
-$(INCL)/include/special_func.o: $(INCL)/include/special_func.cc
-	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(FP_CONTRACT_FLAGS) -c $(INCL)/include/special_func.cc -o $@
 
 libSTATS.a: $(LIBSTATS)
 	$(AR) rcs libSTATS.a $(LIBSTATS)

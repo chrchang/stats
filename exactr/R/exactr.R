@@ -30,7 +30,7 @@ is.boolean <- function(x) {
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @export
+#' @keywords internal
 pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
     stop("'q' must be a numeric vector")
@@ -71,7 +71,7 @@ pbinom <- function(q, size, prob=0.5, lower.tail=TRUE, log.p=FALSE, approx=FALSE
 #'
 #' @return ppf(p).
 #'
-#' @export
+#' @keywords internal
 qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
     stop("'p' must be a numeric vector")
@@ -286,7 +286,7 @@ binom.test <- function(x, n, p=0.5,
 #'   precision floating point arithmetic.  Proceedings of the 15th IEEE
 #'   Symposium on Computer Arithmetic.
 #'
-#' @export
+#' @keywords internal
 phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
     stop("'q' must be a numeric vector")
@@ -331,7 +331,7 @@ phyper <- function(q, m, n, k, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
 #'
 #' @return ppf(p).
 #'
-#' @export
+#' @keywords internal
 qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
   if (!is.numeric(p)) {
     stop("'p' must be a numeric vector")
