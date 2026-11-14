@@ -952,7 +952,7 @@ uint32_t HweThreshMidp(int32_t obs_hets, int32_t obs_hom1, int32_t obs_hom2, dou
     homc_t2 -= 1;
     scaled_one_plus_eps += kExactTestBias * 2 * k2m52;
     if (lik2 < scaled_one_plus_eps) {
-      if (lik2 <= 2 - scaled_one_plus_eps) {
+      if (lik2 <= 2 * kExactTestBias - scaled_one_plus_eps) {
         tail_sum2 = lik2;
         break;
       }

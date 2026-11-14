@@ -70,6 +70,22 @@ longer sufficient to specify \code{p}=1/3, because that incurs too much
 rounding error.  For reliable tie recognition in that scenario, represent
 the fraction exactly by specifying e.g. \code{p}=1 and \code{p.denom}=3.
 }
+\examples{
+## Conover (1971), p. 97f.
+## Under (the assumption of) simple Mendelian inheritance, a cross
+##  between plants of two particular genotypes produces progeny 1/4 of
+##  which are "dwarf" and 3/4 of which are "giant", respectively.
+##  In an experiment to determine if this assumption is reasonable, a
+##  cross results in progeny having 243 dwarf and 682 giant plants.
+##  If "giant" is taken as success, the null hypothesis is that p =
+##  3/4 and the alternative that p != 3/4.
+binom.test(c(682, 243), p = 3/4)
+binom.test(c(682, 243), p = 3, p.denom = 4)
+binom.test(682, 682 + 243, p = 3/4)
+## Large case where R 4.6 binom.test has less than 4 digits of accuracy.
+binom.test(10079999, 21000000, p = 0.48)
+
+}
 \references{
 Clopper CJ, Pearson ES (1934) The use of confidence or fiducial
 limits illustrated in the case of the binomial.  Biometrika, 26.

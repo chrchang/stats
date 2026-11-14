@@ -142,6 +142,21 @@ qbinom <- function(p, size, prob=0.5, lower.tail=TRUE, log.p=FALSE) {
 #'   limits illustrated in the case of the binomial.  Biometrika, 26.
 #'   \doi{10.2307/2331986}.
 #'
+#' @examples
+#' ## Conover (1971), p. 97f.
+#' ## Under (the assumption of) simple Mendelian inheritance, a cross
+#' ##  between plants of two particular genotypes produces progeny 1/4 of
+#' ##  which are "dwarf" and 3/4 of which are "giant", respectively.
+#' ##  In an experiment to determine if this assumption is reasonable, a
+#' ##  cross results in progeny having 243 dwarf and 682 giant plants.
+#' ##  If "giant" is taken as success, the null hypothesis is that p =
+#' ##  3/4 and the alternative that p != 3/4.
+#' binom.test(c(682, 243), p = 3/4)
+#' binom.test(c(682, 243), p = 3, p.denom = 4)
+#' binom.test(682, 682 + 243, p = 3/4)
+#' ## Large case where R 4.6 binom.test has less than 4 digits of accuracy.
+#' binom.test(10079999, 21000000, p = 0.48)
+#'
 #' @export
 binom.test <- function(x, n, p=0.5,
                        alternative=c("two.sided", "less", "greater"),
@@ -494,6 +509,38 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @references Patefield WM (1981) Algorithm AS 159: An efficient method of
 #'   generating `r`x`c` tables with given row and column totals.  Applied
 #'   Statistics, 30.  \doi{10.2307/2346669}.
+#'
+#' @examples
+#' ## Agresti (1990, p. 61f; 2002, p. 91) Fisher's Tea Drinker
+#' ## A British woman claimed to be able to distinguish whether milk or
+#' ##  tea was added to the cup first.  To test, she was given 8 cups of
+#' ##  tea, in four of which milk was added first.  The null hypothesis
+#' ##  is that there is no association between the true order of pouring
+#' ##  and the woman's guess, the alternative that there is a positive
+#' ##  association (that the odds ratio is greater than 1).
+#' TeaTasting <-
+#' matrix(c(3, 1, 1, 3),
+#'        nrow = 2,
+#'        dimnames = list(Guess = c("Milk", "Tea"),
+#'                        Truth = c("Milk", "Tea")))
+#' fisher.test(TeaTasting, alternative = "greater")
+#' ## => p = 0.2429, association could not be established
+#'
+#' ## Fisher (1962, 1970), Criminal convictions of like-sex twins
+#' Convictions <- matrix(c(2, 10, 15, 3), nrow = 2,
+#' 	                 dimnames = list(c("Dizygotic", "Monozygotic"),
+#'		                         c("Convicted", "Not convicted")))
+#' Convictions
+#' fisher.test(Convictions, alternative = "less")
+#' fisher.test(Convictions, conf.int = FALSE)
+#' (fisher.test(Convictions, conf.level = 0.95) -> ft)$conf.int
+#'  fisher.test(Convictions, conf.level = 0.99)$conf.int
+#'
+#' ## Some r x c tables which were out of reach for R 4.6's algorithm, but
+#' ## complete within ~a second with the new algorithm.
+#' result <- fisher.test(matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow=2))
+#' result$p.value
+#' fisher.test(matrix(c(3000, 2000, 1000, 2000, 1300, 600, 1000, 700, 400), nrow=3))
 #'
 #' @export
 fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,

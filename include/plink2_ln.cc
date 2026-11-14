@@ -108,6 +108,10 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
       cur_char_code = ctou32(*(++str_iter));
     }
     cur_digit = cur_char_code - 48;
+    if (cur_digit >= 10) {
+      // dangling exponent marker
+      return nullptr;
+    }
     int64_t cur_exp = 0;
     while (cur_digit < 10) {
       // 2^48 / 10
@@ -227,6 +231,10 @@ CXXCONST_CP ScanadvLn(const char* str_iter, double* ln_ptr) {
       cur_char_code = ctou32(*(++str_iter));
     }
     cur_digit = cur_char_code - 48;
+    if (cur_digit >= 10) {
+      // dangling exponent marker
+      return nullptr;
+    }
     int64_t cur_exp = 0;
     while (cur_digit < 10) {
       if (cur_exp >= 281474976710656LL) {

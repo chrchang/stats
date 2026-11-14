@@ -149,6 +149,38 @@ algorithm of Patefield (1981) is used.)  Note that the default number of
 replicates (\code{B = 2000}) implies a minimum p-value of about 0.0005
 (1/(\code{B}+1)).
 }
+\examples{
+## Agresti (1990, p. 61f; 2002, p. 91) Fisher's Tea Drinker
+## A British woman claimed to be able to distinguish whether milk or
+##  tea was added to the cup first.  To test, she was given 8 cups of
+##  tea, in four of which milk was added first.  The null hypothesis
+##  is that there is no association between the true order of pouring
+##  and the woman's guess, the alternative that there is a positive
+##  association (that the odds ratio is greater than 1).
+TeaTasting <-
+matrix(c(3, 1, 1, 3),
+       nrow = 2,
+       dimnames = list(Guess = c("Milk", "Tea"),
+                       Truth = c("Milk", "Tea")))
+fisher.test(TeaTasting, alternative = "greater")
+## => p = 0.2429, association could not be established
+
+## Fisher (1962, 1970), Criminal convictions of like-sex twins
+Convictions <- matrix(c(2, 10, 15, 3), nrow = 2,
+	                 dimnames = list(c("Dizygotic", "Monozygotic"),
+	                         c("Convicted", "Not convicted")))
+Convictions
+fisher.test(Convictions, alternative = "less")
+fisher.test(Convictions, conf.int = FALSE)
+(fisher.test(Convictions, conf.level = 0.95) -> ft)$conf.int
+ fisher.test(Convictions, conf.level = 0.99)$conf.int
+
+## Some r x c tables which were out of reach for R 4.6's algorithm.
+result <- fisher.test(matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow=2))
+result$p.value
+fisher.test(matrix(c(3000, 2000, 1000, 2000, 1300, 600, 1000, 700, 400), nrow=3))
+
+}
 \references{
 Fisher RA (1935) The logic of inductive inference.  Journal of
 the Royal Statistical Society Series A, 98.

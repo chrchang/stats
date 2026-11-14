@@ -1,12 +1,20 @@
 Package: exactr
 Type: Package
 Title: Accurate and Efficient Exact Tests
-Version: 0.1.0
-Date: 2026-10-28
+Version: 0.1.1
+Date: 2026-11-13
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),
                     email="chrchang@alumni.caltech.edu"),
+             person(given="Shaun",
+                    family="Purcell",
+                    role = c("ctb", "cph"),
+                    comment = "Author of included PLINK library"),
+             person(given="Benjamin",
+                    family="Demaille",
+                    role = c("ctb", "cph"),
+                    comment = "Author of included PLINK library"),
              person("Boost Software License Contributors",
                     role = c("cph"),
                     comment = "Boost C++ Libraries"),
@@ -17,7 +25,10 @@ Authors@R: c(person(given="Christopher",
                     role = c("cph"),
                     comment = "QD library"))
 Description: Implements binomial and Fisher's (2x2..2x6 and 3x3 so far) exact
-    tests.  Accuracy and speed of these functions compare favorably to their
+    tests.  This is based on high-accuracy log-likelihood arithmetic from Hida
+    Y, Li XS, Bailey DH (2001) <doi:10.1109/ARITH.2001.930115> and the Fisher's
+    exact test algorithm in Chang et al. (2015) <doi:10.1186/s13742-015-0047-8>.
+    Accuracy and speed of these functions compare favorably to their
     counterparts in the R 4.6 standard library.
 Encoding: UTF-8
 License: GPL-3
@@ -30,4 +41,4 @@ Imports:
 Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-Config/roxygen2/version: 8.1.0
+Config/roxygen2/version: 8.1.1
