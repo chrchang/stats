@@ -5,7 +5,7 @@ import math
 import snphwe
 import timeit
 """
-This collects benchmark results for exact_tests.HWE_exact().
+This collects benchmark results for exact_tests.snphwe().
 
 Note that you may need to downgrade setuptools (v80.10.2 is ok) to get snphwe
 to work.

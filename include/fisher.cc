@@ -1653,6 +1653,65 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
 //    since their permutations may be summed in closed form instead of
 //    visited.  (Symmetry between columns 0 and 1 isn't exploited.)
 
+// Lazily-filled cache of ddr_lfact() values, for arguments in
+// [256, 256 + size).  (ddr_lfact() already uses a lookup table for smaller
+// arguments, but computes larger values from scratch, which costs ~200ns.)
+// Unfilled entries are zero, which can't collide with a real value since
+// ddr_lfact(n) > 0 for n >= 2.  Each entry is computed by ddr_lfact() itself,
+// so results are identical to the uncached computation.
+// The Fisher2xkLnP() and Fisher3xkLnP() searches evaluate log-factorials of
+// many nearby arguments repeatedly, so this is worthwhile there; it isn't for
+// Fisher23LnP(), which only makes a constant number of ddr_lfact() calls.
+typedef struct LfactCacheStruct {
+  dd_real* vals;
+  uint32_t size;
+} LfactCache;
+
+// Memory use is 16 * this many bytes.  Since the buffer is calloc'ed, pages
+// that are never touched usually aren't committed.
+static const uint32_t kLfactCacheMaxSize = 1U << 22;
+
+// Arguments are assumed to be in [0, tot].  On allocation failure, the cache
+// is disabled instead of reporting an error.
+static void LfactCacheInit(int64_t tot, LfactCache* cachep) {
+  cachep->vals = nullptr;
+  cachep->size = 0;
+  if (tot < 256) {
+    return;
+  }
+  const uint32_t size = MINV(S_CAST(uint64_t, tot - 255), kLfactCacheMaxSize);
+  cachep->vals = S_CAST(dd_real*, calloc(size, sizeof(dd_real)));
+  if (cachep->vals) {
+    cachep->size = size;
+  }
+}
+
+static inline void LfactCacheCleanup(LfactCache* cachep) {
+  free(cachep->vals);
+}
+
+static inline dd_real CachedLfact(LfactCache* cachep, double xx) {
+  const double offset_xx = xx - 256;
+  if ((offset_xx >= 0) && (offset_xx < S_CAST(double, cachep->size))) {
+    dd_real* valp = &(cachep->vals[S_CAST(uint32_t, offset_xx)]);
+    if (valp->x[0] == 0.0) {
+      *valp = ddr_lfact(xx);
+    }
+    return *valp;
+  }
+  return ddr_lfact(xx);
+}
+
+// Same as ddr_sort_and_add_lfacts(), except that it uses the cache.
+static dd_real CachedSortAndAddLfacts(LfactCache* cachep, uint32_t ct, double* args) {
+  STD_SORT(ct, double_cmp, args);
+  dd_real sum_ddr = CachedLfact(cachep, args[0]);
+  for (uint32_t uii = 1; uii < ct; ++uii) {
+    sum_ddr = ddr_add(sum_ddr, CachedLfact(cachep, args[uii]));
+  }
+  return sum_ddr;
+}
+
 typedef struct Fisher2xkCtxStruct {
   uint32_t col_ct;
   const int32_t* col_tots;
@@ -1673,6 +1732,7 @@ typedef struct Fisher2xkCtxStruct {
   const uint32_t* sym_ns;
   uint64_t* fac_args_buf;
   double* lfact_args_buf;
+  LfactCache* lfact_cachep;
   dd_real starting_lnprobv_ddr;
   td_real starting_lnprobv_tdr;
   // Normally nullptr.  When Fisher2xkLevel2() is used on a subproblem of a
@@ -1818,7 +1878,7 @@ static dd_real Fisher2xkLnLik(Fisher2xkCtx* ctxp) {
     lfact_args[2 * col_idx] = cur_r1[col_idx];
     lfact_args[2 * col_idx + 1] = col_tots[col_idx] - cur_r1[col_idx];
   }
-  return ddr_sub(ddr_negate(ddr_sort_and_add_lfacts(2 * col_ct, lfact_args)), ctxp->starting_lnprobv_ddr);
+  return ddr_sub(ddr_negate(CachedSortAndAddLfacts(ctxp->lfact_cachep, 2 * col_ct, lfact_args)), ctxp->starting_lnprobv_ddr);
 }
 
 // Exact comparison of the current table's likelihood with the observed
@@ -1886,7 +1946,7 @@ static void Fisher2xkClosedFormSum(Fisher2xkCtx* ctxp, uint32_t level, int32_t r
   lfact_args[lfact_arg_ct++] = inner_col_tot - inner_r1;
   const dd_real rank_lnlik_ddr =
     ddr_sub(ddr_sub(ctxp->inner_const_ddrs[level], ctxp->starting_lnprobv_ddr),
-            ddr_sort_and_add_lfacts(lfact_arg_ct, lfact_args));
+            CachedSortAndAddLfacts(ctxp->lfact_cachep, lfact_arg_ct, lfact_args));
   double rank_lik = exp(rank_lnlik_ddr.x[0]);
   double outer_sum = ctxp->outer_sum;
   while (1) {
@@ -2552,8 +2612,12 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
       lfact_sum_ddr = ddr_add(lfact_sum_ddr, ddr_lfact(col_tots[col_idx]));
     }
   }
+  LfactCache lfact_cache;
+  LfactCacheInit(tot, &lfact_cache);
+  ctx.lfact_cachep = &lfact_cache;
   Fisher2xkInitMode(col_tots, col_ct, tot, row1_tot, cur_r1);
   const uint32_t status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
+  LfactCacheCleanup(&lfact_cache);
   double result;
   if (status != kFisher2xkNonempty) {
     // Observed table is modal (kFisher2xkEmpty should be impossible), so the
@@ -2623,6 +2687,7 @@ typedef struct Fisher3xkCtxStruct {
   int32_t* saved_tables;
   unsigned char* flex_buf;
   double* lfact_args_buf;
+  LfactCache* lfact_cachep;
   dd_real starting_lnprobv_ddr;
   td_real starting_lnprobv_tdr;
   double outer_sum;
@@ -2997,8 +3062,8 @@ static void Fisher3xkClosedFormSum(Fisher3xkCtx* ctxp, int32_t lvl, int32_t dir)
     neg_args[neg_ct++] = r3 - col_tot + a + x;
   }
   const dd_real rank_lnlik_ddr =
-    ddr_sub(ddr_sub(ddr_sort_and_add_lfacts(pos_ct, pos_args),
-                    ddr_sort_and_add_lfacts(neg_ct, neg_args)),
+    ddr_sub(ddr_sub(CachedSortAndAddLfacts(ctxp->lfact_cachep, pos_ct, pos_args),
+                    CachedSortAndAddLfacts(ctxp->lfact_cachep, neg_ct, neg_args)),
             ctxp->starting_lnprobv_ddr);
   double rank_lik = exp(rank_lnlik_ddr.x[0]);
   double outer_sum = ctxp->outer_sum;
@@ -3067,7 +3132,8 @@ static uint32_t Fisher33Base(Fisher3xkCtx* ctxp) {
   }
   // Only the level-2 entries of cum_col_tots and inner_const_ddrs are used.
   view_cum_col_tots[2] = view_col_tots[0] + view_col_tots[1];
-  view_inner_const_ddrs[2] = ddr_sub(ddr_lfact(view_cum_col_tots[2]), ddr_add_lfacts(view_col_tots[0], view_col_tots[1]));
+  LfactCache* lfact_cachep = ctxp->lfact_cachep;
+  view_inner_const_ddrs[2] = ddr_sub(CachedLfact(lfact_cachep, view_cum_col_tots[2]), ddr_add(CachedLfact(lfact_cachep, view_col_tots[0]), CachedLfact(lfact_cachep, view_col_tots[1])));
   uint32_t fixed_ct = 0;
   for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
     for (uint32_t col_idx = 2; col_idx != col_ct; ++col_idx) {
@@ -3089,7 +3155,8 @@ static uint32_t Fisher33Base(Fisher3xkCtx* ctxp) {
   view.sym_ns = view_sym_ns;
   view.fac_args_buf = fac_args_buf;
   view.lfact_args_buf = lfact_args_buf;
-  view.starting_lnprobv_ddr = ddr_add(ctxp->starting_lnprobv_ddr, ddr_sort_and_add_lfacts(fixed_ct, lfact_args_buf));
+  view.lfact_cachep = lfact_cachep;
+  view.starting_lnprobv_ddr = ddr_add(ctxp->starting_lnprobv_ddr, CachedSortAndAddLfacts(lfact_cachep, fixed_ct, lfact_args_buf));
   view.starting_lnprobv_tdr = ctxp->starting_lnprobv_tdr;
   view.full_obs = ctxp->obs;
   view.fixed_cells = fixed_cells;
@@ -3308,7 +3375,11 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
   }
   while (Fisher3xkScanCycles(&ctx, INT32_MAX, 1)) {
   }
+  LfactCache lfact_cache;
+  LfactCacheInit(tot, &lfact_cache);
+  ctx.lfact_cachep = &lfact_cache;
   const uint32_t status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
+  LfactCacheCleanup(&lfact_cache);
   double result;
   if (status != kFisher2xkNonempty) {
     // Observed table is modal, so the non-mid p-value is 1.

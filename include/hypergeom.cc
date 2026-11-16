@@ -24,6 +24,107 @@
 namespace plink2 {
 #endif
 
+// Cheap approximation of the hypergeometric distribution's variance.  (Uses
+// mxx instead of mxx - 1 in the denominator since we don't need precision
+// here, and this avoids a division by zero.)
+static inline double hypergeom_variance_approx(double m11, double m12, double m21, double m22) {
+  const double mxx = m11 + m12 + m21 + m22;
+  return ((m11 + m12) * (m21 + m22) / mxx) * ((m11 + m21) * (m12 + m22) / mxx) / mxx;
+}
+
+// When the observed table is >= kPhyperApproxRtailOnlyMinZ standard
+// deviations to the right of the mean, PhyperApprox() may sum only the right
+// tail (after an lfact-based starting log-likelihood evaluation), instead of
+// also summing the entire left side for normalization.
+//
+// Near the mode, the right-tail-only computation is less accurate than the
+// original left_sum / (left_sum + right_sum) computation (2-6x higher RMS
+// relative error for n ~2^20..2^32), presumably because the latter cancels out
+// most of the error shared by the two likelihood chains, while the speed
+// benefit is only ~2x.  Hence the z threshold.
+#ifndef PHYPER_APPROX_RTAIL_ONLY_MIN_Z
+#  define PHYPER_APPROX_RTAIL_ONLY_MIN_Z 2.0
+#endif
+static const double kPhyperApproxRtailOnlyMinZ = PHYPER_APPROX_RTAIL_ONLY_MIN_Z;
+
+// The starting log-likelihood is evaluated with the ~40x faster
+// hypergeom_ln_prob_dbl() instead of hypergeom_ln_prob_d() when the former's
+// absolute error, ~2^{-53} * z^2, doesn't significantly increase the return
+// value's relative error.  That's the case when:
+// - We're returning 1 - q (logp=false): q's relative error is irrelevant.
+// - We're returning log(1 - q) (logp=true), and z^2 is less than this value.
+//   (With z ~8-12, hypergeom_ln_prob_dbl() increases RMS relative error by up
+//   to 2-5x for n ~2^20; with z ~20-37, 10-100x.)
+#ifndef PHYPER_APPROX_DBL_LNPROB_MAX_Z2
+#  define PHYPER_APPROX_DBL_LNPROB_MAX_Z2 50.0
+#endif
+static const double kPhyperApproxDblLnprobMaxZ2 = PHYPER_APPROX_DBL_LNPROB_MAX_Z2;
+
+// Minimum variances for the right-tail-only path to be faster, when using
+// hypergeom_ln_prob_dbl() (~0.04us) and hypergeom_ln_prob_d() (~1.6us),
+// respectively.  (Measured on Apple M-series.)
+#ifndef PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DBL
+#  define PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DBL 48.0
+#endif
+static const double kPhyperApproxRtailOnlyMinVarianceDbl = PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DBL;
+#ifndef PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DDR
+#  define PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DDR 8192.0
+#endif
+static const double kPhyperApproxRtailOnlyMinVarianceDdr = PHYPER_APPROX_RTAIL_ONLY_MIN_VARIANCE_DDR;
+
+// When logp is false and the observed table is >~9 standard deviations right
+// of the mean, PhyperApprox()'s left-sum overflow-based early exit only needs
+// ~sigma/z steps, so we additionally require sigma >= this times z before
+// using the right-tail-only path.
+#ifndef PHYPER_APPROX_RTAIL_ONLY_MIN_SIGMA_PER_Z
+#  define PHYPER_APPROX_RTAIL_ONLY_MIN_SIGMA_PER_Z 3.5
+#endif
+static const double kPhyperApproxRtailOnlyMinSigmaPerZ = PHYPER_APPROX_RTAIL_ONLY_MIN_SIGMA_PER_Z;
+
+ENUM_U31_DEF_START()
+  kPhyperApproxRtailNone,
+  kPhyperApproxRtailDbl,
+  kPhyperApproxRtailDdr
+ENUM_U31_DEF_END(PhyperApproxRtailMode);
+
+// Assumes we're at or to the right of the mode.
+static inline PhyperApproxRtailMode PhyperApproxGetRtailMode(double m11, double m12, double m21, double m22, uint32_t logp) {
+  const double variance = hypergeom_variance_approx(m11, m12, m21, m22);
+  if (variance < kPhyperApproxRtailOnlyMinVarianceDbl) {
+    return kPhyperApproxRtailNone;
+  }
+  const double mxx = m11 + m12 + m21 + m22;
+  const double dist_from_mean = m11 - (m11 + m12) * (m11 + m21) / mxx;
+  const double dist2 = dist_from_mean * dist_from_mean;
+  if ((dist_from_mean < 0) || (dist2 < kPhyperApproxRtailOnlyMinZ * kPhyperApproxRtailOnlyMinZ * variance)) {
+    return kPhyperApproxRtailNone;
+  }
+  if (logp) {
+    if (dist2 < kPhyperApproxDblLnprobMaxZ2 * variance) {
+      return kPhyperApproxRtailDbl;
+    }
+    return (variance >= kPhyperApproxRtailOnlyMinVarianceDdr)? kPhyperApproxRtailDdr : kPhyperApproxRtailNone;
+  }
+  // z^2 > 2 * 54 * ln(2) roughly corresponds to p-value rounding to 1.
+  // In that case, require sigma >= k*z  <=>  sigma^2 >= k * dist_from_mean.
+  if ((dist2 > 75.0 * variance) && (variance < kPhyperApproxRtailOnlyMinSigmaPerZ * dist_from_mean)) {
+    return kPhyperApproxRtailNone;
+  }
+  return kPhyperApproxRtailDbl;
+}
+
+// Double-precision analogue of join_log_and_nonlog().
+static inline double join_log_and_nonlog_dbl(double lnprob, double mult, uint32_t logp) {
+  if (logp) {
+    return lnprob + log(mult);
+  }
+  if (lnprob > -704.0) {
+    return exp(lnprob) * mult;
+  }
+  // Avoid a denormal intermediate result.
+  return exp(lnprob + 64 * kLn2) * mult * k2m64;
+}
+
 // obs_m11 + obs_m12 + obs_m21 + obs_m22 assumed to be <2^52.  (I'll keep the
 // old Fisher's 2x2 exact test variable names since they're relatively
 // self-explanatory, and scipy and R don't agree on hypergeometric-distribution
@@ -69,6 +170,40 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     if (right_upper_bound == 0.0) {
       // p-value is exactly 1 when m12*m21==0 and midp is false
       return logp? 0 : 1;
+    }
+    const PhyperApproxRtailMode rtail_mode = PhyperApproxGetRtailMode(m11, m12, m21, m22, logp);
+    if (rtail_mode != kPhyperApproxRtailNone) {
+      // Evaluate Q := (right-tail mass) + 0.5 * midp * pmf(obs) directly,
+      // starting from an lfact-based log-likelihood for the observed table,
+      // and return 1 - Q.  See the analogous Phyper() code path.
+      const uint32_t use_dbl_lnprob = (rtail_mode == kPhyperApproxRtailDbl);
+      dd_real ln_obs_ddr;
+      if (use_dbl_lnprob) {
+        ln_obs_ddr = ddr_maked(hypergeom_ln_prob_dbl(m11, m12, m21, m22));
+      } else {
+        ln_obs_ddr = hypergeom_ln_prob_d(m11, m12, m21, m22);
+      }
+      const double ln_obs = ln_obs_ddr.x[0];
+      // Slack accounts for log() and ln_obs rounding error.
+      if (ln_obs + log(right_upper_bound) < (logp? (-1022.0625 * kLn2) : (-54.0625 * kLn2))) {
+        return logp? 0 : 1;
+      }
+      double lik = 1;
+      double right_sum = 0;
+      while (1) {
+        m11 += 1;
+        m22 += 1;
+        lik *= m12 * m21 / (m11 * m22);
+        m12 -= 1;
+        m21 -= 1;
+        const double preadd = right_sum;
+        right_sum += lik;
+        if (right_sum == preadd) {
+          break;
+        }
+      }
+      const double q = use_dbl_lnprob? join_log_and_nonlog_dbl(ln_obs, right_sum + 0.5 * midp, 0) : join_log_and_nonlog(ln_obs_ddr, right_sum + 0.5 * midp, 0);
+      return logp? log1p(-q) : (1 - q);
     }
 
     // Scale our starting likelihood so that we overflow to INFINITY when we'd
@@ -173,7 +308,10 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
     const double pval = (left_sum - 0.5 * midp) / (left_sum + right_sum);
     return logp? log(pval) : pval;
   }
-  const dd_real starting_lnprob_ddr = hypergeom_ln_prob_d(m11, m12, m21, m22);
+  // hypergeom_ln_prob_dbl()'s ~2^{-53} * z^2 absolute error is fine when
+  // we're returning a log-p-value, but not otherwise.
+  const dd_real starting_lnprob_ddr = logp? ddr_maked(hypergeom_ln_prob_dbl(m11, m12, m21, m22)) : hypergeom_ln_prob_d(m11, m12, m21, m22);
+  const double starting_lnprob = starting_lnprob_ddr.x[0];
   // left_sum is the sum of < 2^52 terms, each of which is <= 1, so if
   // starting_lnprob < DBL_MIN / 2^52, final return value should always be 0
   // when logp=false and we're flushing denormals to zero.  DBL_MIN is
@@ -184,7 +322,7 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
   // replaced with -1127 if we want this function to return denormals.
   //
   // (Yes, a tighter bound could be established for left_sum if it matters.)
-  if ((!logp) && (starting_lnprob_ddr.x[0] < -1074 * kLn2)) {
+  if ((!logp) && (starting_lnprob < -1074 * kLn2)) {
     return 0;
   }
   double lik = 1;
@@ -201,8 +339,20 @@ double PhyperApprox(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t o
       break;
     }
   }
-  return join_log_and_nonlog(starting_lnprob_ddr, left_sum, logp);
+  return logp? (starting_lnprob + log(left_sum)) : join_log_and_nonlog(starting_lnprob_ddr, left_sum, 0);
 }
+
+// When the observed table is at or to the right of the mode, and the
+// distribution's variance is at least this large, Phyper() sums only the right
+// tail (after an lfact-based starting log-likelihood evaluation), instead of
+// also summing the entire left side for normalization.  The left-side sum's
+// length scales with the standard deviation, while the lfact-based evaluation
+// has a fixed cost of a few microseconds; empirically, the crossover is around
+// variance ~2^8 (z-score in [0.5, 10], Apple M-series).
+#ifndef PHYPER_RTAIL_ONLY_MIN_VARIANCE
+#  define PHYPER_RTAIL_ONLY_MIN_VARIANCE 384.0
+#endif
+static const double kPhyperRtailOnlyMinVariance = PHYPER_RTAIL_ONLY_MIN_VARIANCE;
 
 // Assumes parameters are nonnegative, and add up to less than 2^52.  Aims for
 // <1 ULP relative error.
@@ -229,7 +379,66 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
     if (ddr_is_zero(first_right_mult_ddr)) {
       return logp? 0.0 : 1.0;
     }
-    const double right_upper_bound = first_right_mult_ddr.x[0] / ddr_negate(ddr_subd(first_right_mult_ddr, 1.0)).x[0];
+    const double one_minus_first_right_mult = ddr_negate(ddr_subd(first_right_mult_ddr, 1.0)).x[0];
+    if (hypergeom_variance_approx(m11, m12, m21, m22) >= kPhyperRtailOnlyMinVariance) {
+      // Evaluate the right-tail mass R directly, starting from an
+      // lfact-based log-likelihood for the first right-tail table, and
+      // return 1 - R.  This avoids summing over the entire left side (~(z+c)
+      // standard deviations of terms) just to normalize; we only sum the
+      // right tail, whose length is ~sigma^2/distance-from-mode.
+      // Since we're at or to the right of the mode, R can't be much larger
+      // than 1/2, so 1 - R doesn't suffer from much cancellation, and dd_real
+      // R precision is plenty.
+      m11 += 1;
+      m12 -= 1;
+      m21 -= 1;
+      m22 += 1;
+      const dd_real ln_first_ddr = hypergeom_ln_prob_d(m11, m12, m21, m22);
+      // Adjacent-term ratios decrease as we move rightward, so
+      //   R <= pmf(first) / (1 - first_right_mult).
+      const double ln_r_upper_bound = ln_first_ddr.x[0] - log(one_minus_first_right_mult);
+      // Add a bit of slack to the thresholds, to account for ln_first_ddr
+      // error.
+      if (ln_r_upper_bound < (logp? (-1022.0625 * kLn2) : (-54.0625 * kLn2))) {
+        return logp? 0.0 : 1.0;
+      }
+      dd_real lik_ddr = ddr_maked(1.0);
+      dd_real right_sum_ddr = lik_ddr;
+      if (m21 > 0) {
+        const double min_incr_right = (1.0 / (1 << 15)) / (m21 * m21);
+        do {
+          m11 += 1;
+          m22 += 1;
+          lik_ddr = ddr_mul(lik_ddr, ddr_accurate_div(ddr_mul2d(m12, m21), ddr_mul2d(m11, m22)));
+          m12 -= 1;
+          m21 -= 1;
+          right_sum_ddr = ddr_add(right_sum_ddr, lik_ddr);
+        } while (lik_ddr.x[0] > right_sum_ddr.x[0] * min_incr_right);
+        if (m21 > 0) {
+          double lik = lik_ddr.x[0];
+          double right_tail_sum = 0.0;
+          while (1) {
+            m11 += 1;
+            m22 += 1;
+            lik *= m12 * m21 / (m11 * m22);
+            m12 -= 1;
+            m21 -= 1;
+            const double preadd = right_tail_sum;
+            right_tail_sum += lik;
+            if (right_tail_sum == preadd) {
+              break;
+            }
+          }
+          right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
+        }
+      }
+      const dd_real r_ddr = ddr_exp(ddr_add(ln_first_ddr, ddr_log(right_sum_ddr)));
+      if (!logp) {
+        return -ddr_subd(r_ddr, 1.0).x[0];
+      }
+      return ddr_log1p(ddr_negate(r_ddr)).x[0];
+    }
+    const double right_upper_bound = first_right_mult_ddr.x[0] / one_minus_first_right_mult;
 
     const double start_lik = (DBL_MAX * (logp? DBL_MIN : k2m54)) / right_upper_bound;
     // We want to compute left_sum_ddr to at most 2^{-67} relative error.  See

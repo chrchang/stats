@@ -69,6 +69,17 @@ def test_dhyper():
         lnp_got = exact_tests.hypergeom.logpmf(test_case[0], test_case[1], test_case[2], test_case[3])
         assert p_got == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
         assert math.exp(lnp_got) == pytest.approx(test_case[4], rel=test_case[5], abs=DBL_MIN)
+    # Nov 2026 bugfix (post-0.10.0): hypergeom_ln_prob_loader()'s near-zero-log-probability
+    # series (one cell 0, m12*m21/(m11+1) < 2^{-13}) used wrong terms after the
+    # first.  (Pre-fix log-pmf relative errors were 4.8e-7, 1.9e-6, and
+    # 5.6e-9.)  Expected values from 512-bit MPFR; the first also equals
+    # log1p(-1/(2^20+2)).
+    for (x, m, n, k, lnp_want, p_want) in [
+            (0, 1, 2**20 + 1, 1, -9.536729521662212e-07, 0.9999990463275026),
+            (0, 3, 2**20 + 2, 2, -5.72202952758491e-06, 0.9999942779868431),
+            (0, 5, 10**9 + 7, 7, -3.49999997725e-08, 0.9999999650000009)]:
+        assert exact_tests.dhyper(x, m, n, k, logp=True) == pytest.approx(lnp_want, rel=1e-15, abs=0)
+        assert exact_tests.dhyper(x, m, n, k) == pytest.approx(p_want, rel=1e-15, abs=0)
     assert exact_tests.dhyper(1e9, 4e9, 7.999e9, 3e9) == pytest.approx(1.7179298149436094e-08, rel=1e-15, abs=0)
     assert exact_tests.dhyper(0, 0, 0, 0) == 1.0
     assert exact_tests.dhyper(2, 2, 2, 4) == 1.0

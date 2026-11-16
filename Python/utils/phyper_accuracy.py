@@ -89,14 +89,8 @@ def phyper_accuracy_test(ab: float, ac: float, z: float, pow2s: list[int], num_t
                 relerr_noapprox_ssq += relerr * relerr
             relerr = compute_relerr(got_approx, want)
             relerr_approx_ssq += relerr * relerr
-            relerr = compute_relerr(got_scipy, want)
-            relerr_scipy_ssq += relerr * relerr
             if not omit_scipy:
-                if logp:
-                    got = scipy.stats.hypergeom.logcdf(a, n, cur_ab, cur_ac)
-                else:
-                    got = scipy.stats.hypergeom.cdf(a, n, cur_ab, cur_ac)
-                relerr = compute_relerr(got, want)
+                relerr = compute_relerr(got_scipy, want)
                 relerr_scipy_ssq += relerr * relerr
         num_trials = len(ns)
         print_str = f"n in [2^{pow2}, 2^{pow2+1}): "

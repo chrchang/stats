@@ -40,6 +40,11 @@ HEADER_INLINE uint32_t use_tdr_for_hypergeom_lnprob(double obs_tot) {
 //     m11! m12! m21! m22! (m11+m12+m21+m22)!
 dd_real hypergeom_ln_prob_loader(dd_real m11_ddr, dd_real m12_ddr, dd_real m21_ddr, dd_real m22_ddr);
 
+// Double-precision variant of hypergeom_ln_prob_loader().  Absolute error is
+// a small multiple of 2^{-53} * (1 + z^2/2), where z is the table's distance
+// from the mean in standard deviations.
+double hypergeom_ln_prob_dbl(double m11, double m12, double m21, double m22);
+
 HEADER_INLINE dd_real hypergeom_ln_prob_d(double m11, double m12, double m21, double m22) {
   return hypergeom_ln_prob_loader(ddr_maked(m11), ddr_maked(m12), ddr_maked(m21), ddr_maked(m22));
 }

@@ -5,7 +5,7 @@ import math
 import scipy
 import timeit
 """
-This collects benchmark results for exact_tests.pbinom().
+This collects benchmark results for exact_tests.phyper().
 """
 
 def parse_range_string(input_str: str):

@@ -5,7 +5,7 @@ import math
 import scipy
 import timeit
 """
-This collects benchmark results for exact_tests.fisher_exact().
+This collects benchmark results for exact_tests.cond_odds_ratio{,_ci}().
 """
 
 def parse_range_string(input_str: str):
