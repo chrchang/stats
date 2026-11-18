@@ -51,6 +51,30 @@ binom_2sided_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom
     .Call(`_exactr_binom_2sided_pval`, x_round, size_round, prob, midp, log_p, prob_denom)
 }
 
+#' @title Poisson distribution cdf
+#' @description Backend for ppois(), separated since dots aren't permitted in
+#'   C++ parameter names.
+#' @noRd
+ppois_cpp <- function(q, lambda, lower_tail, log_p, midp) {
+    .Call(`_exactr_ppois_cpp`, q, lambda, lower_tail, log_p, midp)
+}
+
+#' @title Exact Poisson one-sided test p-value
+#' @description Implements main p-value calculation for one-sided,
+#'   one-sample poisson.test().
+#' @noRd
+poisson_1sided_pval <- function(x_round, tt, rr, greater, midp, log_p) {
+    .Call(`_exactr_poisson_1sided_pval`, x_round, tt, rr, greater, midp, log_p)
+}
+
+#' @title Exact Poisson two-sided test p-value
+#' @description Implements main p-value calculation for two-sided,
+#'   one-sample poisson.test().
+#' @noRd
+poisson_2sided_pval <- function(x_round, tt, rr, midp, log_p) {
+    .Call(`_exactr_poisson_2sided_pval`, x_round, tt, rr, midp, log_p)
+}
+
 #' Hypergeometric distribution pmf
 #'
 #' Mass function for hypergeometric distribution with parameters `m`, `n`, and

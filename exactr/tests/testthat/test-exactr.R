@@ -136,6 +136,9 @@ test_that("pbinom works", {
 
   x <- c(-1,0,1,2)
   expect_identical(pbinom(x, size=0, p=0.5), c(0,1,1,1))
+  expect_identical(pbinom(x, size=0, p=0.5, lower.tail=FALSE), c(1,0,0,0))
+  expect_identical(pbinom(c(-1, 20, 25), 20, 0.3, lower.tail=FALSE), c(1, 0, 0))
+  expect_identical(pbinom(c(-1, 20, 25), 20, 0.3, lower.tail=FALSE, log.p=TRUE), c(0, -Inf, -Inf))
 
   expect_false(is.nan(pbinom(10, 1e6, 0.01, log.p=TRUE)))
 })
@@ -206,6 +209,118 @@ test_that("binom.test works", {
   expect_snapshot({
     binom.test(c(800,10))
   })
+
+  ## One-sided p-values, including midp, and the x=0 and x=n boundaries.
+  ## (alternative="greater", midp=TRUE previously returned
+  ## P[X >= x-1] - 0.5 * P[X = x-1] instead of P[X > x] + 0.5 * P[X = x].)
+  n <- 20
+  p <- 0.3
+  d <- stats::dbinom(0:n, n, p)
+  for (x in 0:n) {
+    less_want <- sum(d[1:(x+1)])
+    greater_want <- sum(d[(x+1):(n+1)])
+    half_px <- 0.5 * d[x+1]
+    expect_equal(binom.test(x, n, p, alternative="less")$p.value, less_want)
+    expect_equal(binom.test(x, n, p, alternative="greater")$p.value, greater_want)
+    expect_equal(binom.test(x, n, p, alternative="less", midp=TRUE)$p.value,
+                 less_want - half_px)
+    expect_equal(binom.test(x, n, p, alternative="greater", midp=TRUE)$p.value,
+                 greater_want - half_px)
+    expect_equal(binom.test(x, n, p, alternative="greater", midp=TRUE, log.p=TRUE)$log.p.value,
+                 log(greater_want - half_px))
+  }
+  expect_identical(binom.test(0, n, p, alternative="greater")$p.value, 1)
+  expect_identical(binom.test(n, n, p, alternative="less")$p.value, 1)
+  expect_equal(binom.test(7, 20, 0.3, alternative="greater", midp=TRUE)$p.value,
+               stats::pbinom(7, 20, 0.3, lower.tail=FALSE) + 0.5 * stats::dbinom(7, 20, 0.3))
+
+  ## method label
+  expect_identical(binom.test(7, 20, 0.3)$method, "Exact binomial test")
+  expect_identical(binom.test(7, 20, 0.3, log.p=TRUE)$method, "Exact binomial test")
+  expect_identical(binom.test(7, 20, 0.3, midp=TRUE)$method, "Exact binomial test (midp)")
+  expect_identical(binom.test(7, 20, 0.3, midp=TRUE, log.p=TRUE)$method, "Exact binomial test (midp)")
+})
+
+test_that("ppois works", {
+  q <- c(-1, 0, 1, 3, 10, 50, Inf)
+  for (lambda in c(0, 1e-5, 0.5, 4, 30, 1234.5)) {
+    expect_equal(ppois(q, lambda), stats::ppois(q, lambda), tolerance=1e-13)
+    expect_equal(ppois(q, lambda, lower.tail=FALSE),
+                 stats::ppois(q, lambda, lower.tail=FALSE), tolerance=1e-13)
+    expect_equal(ppois(q, lambda, log.p=TRUE),
+                 stats::ppois(q, lambda, log.p=TRUE), tolerance=1e-13)
+  }
+  expect_equal(cumsum(stats::dpois(0:100, 37.5)), ppois(0:100, 37.5))
+  expect_true(is.nan(suppressWarnings(ppois(1, -1))))
+  ## Deep tail where non-log result underflows.
+  expect_equal(ppois(10, 2000, log.p=TRUE),
+               stats::ppois(10, 2000, log.p=TRUE), tolerance=1e-13)
+})
+
+test_that("poisson.test works", {
+  ## From R 4.6.1 poisson.test() examples.
+  expect_snapshot({
+    poisson.test(137, 24.19893)
+    poisson.test(c(11, 6+8+7), c(800, 1083+1050+878))
+  })
+
+  ## Agreement with stats::poisson.test() on ordinary cases, excluding the
+  ## integer-(r * T) tie cases where rounding error matters.
+  set.seed(1)
+  for (i in 1:200) {
+    m <- 10^runif(1, -1, 3.5)
+    x <- max(0, round(m + rnorm(1) * 3 * sqrt(m)))
+    T <- 10^runif(1, -1, 1)
+    for (alt in c("two.sided", "less", "greater")) {
+      expect_equal(poisson.test(x, T, m/T, alternative=alt)[c("statistic", "parameter", "p.value", "conf.int", "estimate", "null.value", "alternative", "method")],
+                   stats::poisson.test(x, T, m/T, alternative=alt)[c("statistic", "parameter", "p.value", "conf.int", "estimate", "null.value", "alternative", "method")],
+                   tolerance=1e-12)
+    }
+  }
+  x <- c(7, 13)
+  T <- c(1.5, 2.25)
+  for (alt in c("two.sided", "less", "greater")) {
+    expect_equal(poisson.test(x, T, 0.75, alternative=alt)[c("statistic", "parameter", "p.value", "conf.int", "estimate", "null.value", "alternative", "method")],
+                 stats::poisson.test(x, T, 0.75, alternative=alt)[c("statistic", "parameter", "p.value", "conf.int", "estimate", "null.value", "alternative", "method")],
+                 tolerance=1e-12)
+  }
+
+  ## Ties are exact when (r * T) is an exact integer.
+  expect_identical(poisson.test(4, r=5)$p.value, 1)
+  expect_identical(poisson.test(5, r=5)$p.value, 1)
+  d <- stats::dpois(0:200, 6)
+  expect_equal(poisson.test(9, r=6)$p.value, sum(d[d <= stats::dpois(9, 6) * (1 + 1e-12)]))
+
+  ## midp
+  m <- 3.3
+  d <- stats::dpois(0:200, m)
+  expect_equal(poisson.test(7, r=m, midp=TRUE)$p.value,
+               sum(d[d < stats::dpois(7, m)]) + 0.5 * stats::dpois(7, m))
+  expect_equal(poisson.test(7, r=m, alternative="less", midp=TRUE)$p.value,
+               stats::ppois(6, m) + 0.5 * stats::dpois(7, m))
+  expect_equal(poisson.test(7, r=m, alternative="greater", midp=TRUE)$p.value,
+               stats::ppois(7, m, lower.tail=FALSE) + 0.5 * stats::dpois(7, m))
+  ## lambda=2: pmf(1) = pmf(2) is an exact tie between the two modes, and no
+  ## other pmf value ties pmf(0).
+  d <- stats::dpois(0:100, 2)
+  expect_equal(poisson.test(1, r=2, midp=TRUE)$p.value, 1 - stats::dpois(1, 2))
+  expect_equal(poisson.test(0, r=2, midp=TRUE)$p.value,
+               sum(d[d < 0.999 * stats::dpois(0, 2)]) + 0.5 * stats::dpois(0, 2))
+  expect_identical(poisson.test(0, T=0, midp=TRUE)$p.value, 0.5)
+
+  ## log.p
+  res <- poisson.test(10, r=2000, log.p=TRUE)
+  ## Checked against a 320-bit MPFR implementation.
+  expect_equal(res$log.p.value, -1938.6127473836495, tolerance=1e-14)
+
+  ## Large cases, checked against a 320-bit MPFR implementation.
+  expect_equal(poisson.test(1000123456, r=1e9)$p.value, 9.4638293091475092e-05, tolerance=1e-14)
+  expect_equal(poisson.test(999876544, r=1e9)$p.value, 9.4582633468018055e-05, tolerance=1e-14)
+  expect_equal(poisson.test(1000123456, r=1e9, log.p=TRUE)$log.p.value, -9.2654483742611529, tolerance=1e-14)
+
+  expect_error(poisson.test(1, r=2^51))
+  expect_error(poisson.test(c(1, 2, 3)))
+  expect_error(poisson.test(-1))
 })
 
 test_that("dhyper works", {

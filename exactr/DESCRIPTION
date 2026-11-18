@@ -1,8 +1,8 @@
 Package: exactr
 Type: Package
 Title: Accurate and Efficient Exact Tests
-Version: 0.1.1
-Date: 2026-11-13
+Version: 0.1.2
+Date: 2026-11-18
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),
@@ -24,8 +24,8 @@ Authors@R: c(person(given="Christopher",
              person("The Regents of the University of California, through Lawrence Berkeley National Laboratory",
                     role = c("cph"),
                     comment = "QD library"))
-Description: Implements binomial and Fisher's (2x2..2x6 and 3x3 so far) exact
-    tests.  This is based on high-accuracy log-likelihood arithmetic from Hida
+Description: Implements binomial, Poisson, and Fisher's (2x2..2x6 and 3x3 so
+    far) exact tests.  This is based on high-accuracy log-likelihood arithmetic from Hida
     Y, Li XS, Bailey DH (2001) <doi:10.1109/ARITH.2001.930115> and the Fisher's
     exact test algorithm in Chang et al. (2015) <doi:10.1186/s13742-015-0047-8>.
     Accuracy and speed of these functions compare favorably to their

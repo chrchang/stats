@@ -1,5 +1,5 @@
 #' @import Rcpp
 #' @importFrom Rcpp evalCpp
-#' @importFrom stats complete.cases qbeta
+#' @importFrom stats complete.cases qbeta qgamma
 #' @useDynLib exactr, .registration=TRUE
 NULL

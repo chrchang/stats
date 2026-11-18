@@ -351,7 +351,7 @@ cdef pbinom_vv_internal(object k_obj, object n_obj, object p_obj, bint complemen
 # If approx=True, this is essentially equivalent to a binom() call with
 # alternative="less", which uses a faster algorithm that doesn't try to get the
 # last few mantissa bits right.
-# Otherwise, relative error should be <0.6 ULP unless n is huge.
+# Otherwise, relative error should be <1 ULP, and <0.6 ULP unless n is huge.
 def pbinom(object k, double n, double p=0.5, bint complement=0, bint logp=0, bint approx=0):
     return pbinom_v_internal(k, n, p, complement, logp, approx)
 
@@ -850,8 +850,10 @@ cdef hypergeom_ppf_vv_internal(object p_obj, object M_obj, object n_obj, object 
 # guarantees qhyper(phyper(x, m, n, k), m, n, k) == x or
 # qhyper(phyper(x, m, n, k) * (1 + 0.5**52), m, n, k) > a in non-degenerate
 # cases.  However, it is designed to make these outcomes very likely:
-# - Phyper() is designed for <0.6 ULP relative error (except when n is huge),
-#   and achieves <0.5 ULP the vast majority of the time.
+# - Phyper() is designed for <1 ULP relative error everywhere, and <0.6 ULP
+#   except when n is huge; it achieves <0.5 ULP the vast majority of the
+#   time.  (Before a Nov 2026 fix, logp results near -2^{-1021} could have
+#   up to 0.75 ULP error.)
 # - The internal Qhyper() call is made with 0.5 ULP subtracted off of q.
 def qhyper(object p, int64_t m, int64_t n, int64_t k, bint logp=0):
     return hypergeom_ppf_v_internal(p, m+n, k, m, False, logp)

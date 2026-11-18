@@ -405,7 +405,7 @@ double Pbinom(double obs_k, double n, td_real p_tdr, int32_t complement, uint32_
     if (!logp) {
       return -ddr_subd(one_minus_prob_ddr, 1.0).x[0];
     }
-    return ddr_log1p(ddr_negate(one_minus_prob_ddr)).x[0];
+    return ddr_log1p_neg_quotient(one_minus_prob_ddr, right_sum_ddr, denom_ddr);
   }
   // We're at or to the left of the mode, and are responsible for tiny cmf
   // values.

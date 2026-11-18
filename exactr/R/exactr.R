@@ -211,7 +211,9 @@ binom.test <- function(x, n, p=0.5,
 
   P_OR_LNPVAL <- switch(alternative,
                         less = pbinom_cpp(x, n, p, TRUE, log.p, midp, TRUE, p.denom),
-                        greater = pbinom_cpp(x - 1, n, p, FALSE, log.p, midp, TRUE, p.denom),
+                        ## P[X >= x] = P[X > x-1], but with midp we want
+                        ## P[X > x] + 0.5 * P[X = x].
+                        greater = pbinom_cpp(if (midp) x else x - 1, n, p, FALSE, log.p, midp, TRUE, p.denom),
                         two.sided = binom_2sided_pval(x, n, p, midp, log.p, p.denom))
 
   p.L <- function(x, alpha) {
@@ -259,7 +261,7 @@ binom.test <- function(x, n, p=0.5,
                    estimate = ESTIMATE,
                    null.value = p,
                    alternative = alternative,
-                   method = "Exact binomial test",
+                   method = METHOD,
                    data.name = DNAME),
               class = "htest")
   } else {
@@ -270,10 +272,234 @@ binom.test <- function(x, n, p=0.5,
                    estimate = ESTIMATE,
                    null.value = p,
                    alternative = alternative,
-                   method = "Exact binomial test",
+                   method = METHOD,
                    data.name = DNAME),
               class = "htest")
   }
+}
+
+#' Poisson distribution cdf
+#'
+#' Cumulative distribution function for Poisson distribution with parameter
+#' `lambda`.
+#'
+#' @param q vector of event counts.
+#' @param lambda vector of (non-negative) means.
+#' @param lower.tail logical; if TRUE, probabilities are P\[X <= x\],
+#'   otherwise, P\[X > x\].
+#' @param log.p logical; if TRUE, probabilities p are given as log(p).
+#'
+#' @details Probabilities are computed as (Loader's-algorithm log-pmf) times
+#'   (relative-likelihood tail sum), where the tail sum is evaluated by direct
+#'   summation, a continued fraction, or Temme's uniform asymptotic expansion,
+#'   depending on the region.  Relative error is usually within a few ULPs.
+#'
+#' @return cdf(q).
+#'
+#' @keywords internal
+ppois <- function(q, lambda, lower.tail=TRUE, log.p=FALSE) {
+  if (!is.numeric(q)) {
+    stop("'q' must be a numeric vector")
+  }
+  if (!is.numeric(lambda)) {
+    stop("'lambda' must be a numeric vector")
+  }
+  if (!is.boolean(lower.tail)) {
+    stop("'lower.tail' must be a single boolean value")
+  }
+  if (!is.boolean(log.p)) {
+    stop("'log.p' must be a single boolean value")
+  }
+  result <- ppois_cpp(q, lambda, lower.tail, log.p, FALSE)
+  return(result)
+}
+
+#' Exact Poisson tests
+#'
+#' Performs an exact test of a simple null hypothesis about the rate parameter
+#' in Poisson distribution, or for the ratio between two rate parameters.
+#'
+#' @param x number of events.  A vector of length one or two.
+#' @param T time base for event count.  A vector of length one or two.
+#' @param r hypothesized rate or rate ratio.
+#' @param alternative indicates the alternative hypothesis and must be one of
+#'   "`two.sided`", "`greater`", or "`less`".  You can specify just the initial
+#'   letter.
+#' @param conf.level confidence level for the returned confidence interval.
+#' @param midp logical; if TRUE, midp-value is returned in place of p-value.
+#' @param log.p logical; if TRUE, log.p.value is calculated and returned.
+#'   (p.value is still returned.)  log.p.value remains accurate when p.value
+#'   underflows to zero.
+#'
+#' @details Confidence intervals are computed similarly to those of
+#'   [binom.test()] in the one-sample case, and using [binom.test()] in the
+#'   two-sample case.
+#'
+#'   In the one-sample case, the expected count is `(r * T)`; this product is
+#'   evaluated exactly (rather than rounded to a double-precision number)
+#'   before computing the p-value.  The two-sided p-value is the sum of
+#'   probabilities of all counts no more likely than `x`; like [binom.test()],
+#'   it is computed in time independent of `(r * T)` (instead of time
+#'   proportional to it), and probabilities are only considered to be tied if
+#'   they agree to ~40 significant digits (rather than within a relative
+#'   tolerance of 1e-7).  `(r * T)` must be less than 2^50 in the two-sided
+#'   case.
+#'
+#'   As with `p` in [binom.test()], this means that ties are not recognized
+#'   when `(r * T)` is intended to be an integer but is subject to rounding
+#'   error; e.g. `T = 3, r = 1/3` yields an expected count slightly less than
+#'   1, so `x = 0` is treated as the unique mode.  For reliable tie recognition
+#'   in that scenario, specify `T` and `r` such that their product is exact
+#'   (e.g. `T = 1, r = 1`).
+#'
+#'   In the two-sample case, the test is reduced to a binomial test via
+#'   conditioning on the total count; this calls [binom.test()] with
+#'   `p = r * T[1]` and `p.denom = r * T[1] + T[2]`.
+#'
+#' @return A list with class "`htest`" containing the following components:
+#'   \item{statistic}{the number of events (in the first sample if there are two.)}
+#'   \item{parameter}{the corresponding expected count.}
+#'   \item{p.value}{the p- or midp-value of the test.}
+#'   \item{log.p.value}{the log-p- or log-midp-value of the test.  Only present if argument `log.p = TRUE`.}
+#'   \item{conf.int}{a confidence interval for the rate or rate ratio.}
+#'   \item{estimate}{the estimated rate or rate ratio.}
+#'   \item{null.value}{the rate or rate ratio under the null, `r`.}
+#'   \item{alternative}{a character string describing the alternative hypothesis.}
+#'   \item{method}{the character string "`Exact Poisson test`" or "`Comparison of Poisson rates`" as appropriate, with " (midp)" appended when `midp = TRUE`.}
+#'   \item{data.name}{a character string giving the names of the data.}
+#'
+#' @examples
+#' ### These are paraphrased from data sets in the ISwR package
+#'
+#' ## SMR, Welsh Nickel workers
+#' poisson.test(137, 24.19893)
+#'
+#' ## eba1977, compare Fredericia to other three cities for ages 55-59
+#' poisson.test(c(11, 6 + 8 + 7), c(800, 1083 + 1050 + 878))
+#'
+#' ## Large case where R 4.6 poisson.test is very slow
+#' poisson.test(1000123456, r = 1e9)
+#'
+#' @export
+poisson.test <- function(x, T=1, r=1,
+                         alternative=c("two.sided", "less", "greater"),
+                         conf.level=0.95, midp=FALSE, log.p=FALSE) {
+  ## This closely follows the GPL-2.0-or-later poisson.test.R from R 4.6.0,
+  ## since it is designed to be a drop-in replacement.
+  DNAME <- deparse1(substitute(x))
+  DNAME <- paste(DNAME, "time base:", deparse1(substitute(T)))
+  if ((l <- length(x)) != length(T)) {
+    if (length(T) == 1L) {
+      T <- rep(T, l)
+    } else {
+      stop("'x' and 'T' have incompatible length")
+    }
+  }
+  xr <- round(x)
+
+  if (any(!is.finite(x) | (x < 0)) || max(abs(x-xr)) > 1e-7) {
+    stop("'x' must be finite, nonnegative, and integer")
+  }
+  x <- xr
+
+  if (any(is.na(T) | (T < 0))) {
+    stop("'T' must be nonnegative")
+  }
+
+  if ((k <- length(x)) < 1L) {
+    stop("not enough data")
+  }
+  if (k > 2L) {
+    stop("the case k > 2 is unimplemented")
+  }
+  if (!missing(r) && (length(r) > 1 || is.na(r) || r < 0)) {
+    stop("'r' must be a single positive number")
+  }
+  alternative <- match.arg(alternative)
+
+  if (!((length(conf.level) == 1L) && is.finite(conf.level) &&
+        (conf.level > 0) && (conf.level < 1))) {
+    stop("'conf.level' must be a single number between 0 and 1")
+  }
+
+  if (!is.boolean(midp)) {
+    stop("'midp' must be a single boolean value")
+  }
+  if (!is.boolean(log.p)) {
+    stop("'log.p' must be a single boolean value")
+  }
+
+  if (k == 2) {
+    RVAL <- binom.test(x, sum(x), r * T[1L],
+                       alternative=alternative, conf.level=conf.level,
+                       midp=midp, log.p=log.p, p.denom=r * T[1L] + T[2L])
+
+    RVAL$data.name <- DNAME
+    RVAL$statistic <- c(count1 = x[1L])
+    RVAL$parameter <- c("expected count1" = sum(x) * r * T[1L]/sum(T * c(1, r)))
+    RVAL$estimate <- c("rate ratio" = (x[1L]/T[1L])/(x[2L]/T[2L]))
+    pp <- RVAL$conf.int
+    RVAL$conf.int <- pp/(1 - pp)*T[2L]/T[1L]
+    names(r) <- "rate ratio"
+    RVAL$null.value <- r
+
+    RVAL$method <- "Comparison of Poisson rates"
+    if (midp) {
+      RVAL$method <- paste(RVAL$method, "(midp)")
+    }
+    return(RVAL)
+  }
+
+  P_OR_LNPVAL <- switch(alternative,
+                        less = poisson_1sided_pval(x, T, r, FALSE, midp, log.p),
+                        greater = poisson_1sided_pval(x, T, r, TRUE, midp, log.p),
+                        two.sided = poisson_2sided_pval(x, T, r, midp, log.p))
+
+  p.L <- function(x, alpha) {
+    if (x == 0) {  # No solution
+      0
+    } else {
+      qgamma(alpha, x)
+    }
+  }
+  p.U <- function(x, alpha) {
+    qgamma(1 - alpha, x + 1)
+  }
+  CINT <- switch(alternative,
+                 less = c(0, p.U(x, 1 - conf.level)),
+                 greater = c(p.L(x, 1 - conf.level), Inf),
+                 two.sided = {
+                   alpha <- (1 - conf.level) / 2
+                   c(p.L(x, alpha), p.U(x, alpha))
+                 }) / T
+  attr(CINT, "conf.level") <- conf.level
+
+  ESTIMATE <- x / T
+
+  names(T) <- "time base"
+  names(x) <- "number of events"
+  names(ESTIMATE) <-
+  names(r) <- "event rate"
+
+  METHOD <- "Exact Poisson test"
+  if (midp) {
+    METHOD <- paste(METHOD, "(midp)")
+  }
+
+  RVAL <- list(statistic = x,
+               parameter = T,
+               p.value = if (log.p) exp(P_OR_LNPVAL) else P_OR_LNPVAL)
+  if (log.p) {
+    RVAL$log.p.value <- P_OR_LNPVAL
+  }
+  structure(c(RVAL,
+              list(conf.int = CINT,
+                   estimate = ESTIMATE,
+                   null.value = r,
+                   alternative = alternative,
+                   method = METHOD,
+                   data.name = DNAME)),
+            class = "htest")
 }
 
 #' Hypergeometric distribution cdf

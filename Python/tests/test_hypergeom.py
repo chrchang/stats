@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 import exact_tests
+from fractions import Fraction
 import math
 import numpy as np
 import pytest
 import sys
 
 DBL_MIN = sys.float_info.min
+
+
+def assert_within_ulps(got, want_str, max_ulps):
+    # want_str is the exact value to >= 25 significant digits, not just the
+    # correctly rounded double: a tolerance below 1 ULP is only meaningful
+    # relative to the exact value.
+    want = Fraction(want_str)
+    ulp = Fraction(math.ulp(float(want)))
+    assert abs(Fraction(got) - want) <= Fraction(max_ulps) * ulp, (got, want_str)
 
 # These test cases were scraped from
 #   scipy/stats/tests/test_distributions.py
@@ -118,6 +128,17 @@ def test_phyper():
         assert exact_tests.hypergeom.cdf([0, 1, 2], [[4], [5]], 2, 2) == pytest.approx(np.array([[0.16666666666666666, 0.8333333333333334, 1], [0.3, 0.9, 1]]), rel=tol, abs=0)
         assert exact_tests.hypergeom.cdf([0, 1, 2], [4, 5, 6], 2, 2) == pytest.approx(np.array([0.16666666666666666, 0.9, 1]), rel=tol, abs=0)
         # todo: test exception-throwing cases
+    # Results ~2^{-1021}, where dd_real low words are subnormal.  Before a Nov
+    # 2026 fix (post-0.10.0), these cases had 0.72-0.75 ULP error; they are
+    # now correctly rounded.  We only check the 1 ULP guarantee here.  Exact
+    # values from 512-bit MPFR.  The first two cases exercise the
+    # right-tail-only code path, the last two the left/right-sum ratio path.
+    for (x, m, n, k, lnp_exact) in [
+            (11683, 20132, 18274, 18800, "-4.723676168759400169061696e-308"),
+            (11781, 34140, 11329, 13662, "-5.253471652039194065566436e-308"),
+            (1839, 4324, 2959, 2003, "-8.735114072024056183728513e-308"),
+            (924, 6187, 10551, 1013, "-8.258777581729273585388531e-308")]:
+        assert_within_ulps(exact_tests.phyper(x, m, n, k, logp=True), lnp_exact, 1)
 
 
 def test_qhyper():

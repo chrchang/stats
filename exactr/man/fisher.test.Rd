@@ -175,7 +175,8 @@ fisher.test(Convictions, conf.int = FALSE)
 (fisher.test(Convictions, conf.level = 0.95) -> ft)$conf.int
  fisher.test(Convictions, conf.level = 0.99)$conf.int
 
-## Some r x c tables which were out of reach for R 4.6's algorithm.
+## Some r x c tables which were out of reach for R 4.6's algorithm, but
+## complete within ~a second with the new algorithm.
 result <- fisher.test(matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow=2))
 result$p.value
 fisher.test(matrix(c(3000, 2000, 1000, 2000, 1300, 600, 1000, 700, 400), nrow=3))

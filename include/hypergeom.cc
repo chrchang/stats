@@ -432,11 +432,11 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
           right_sum_ddr = ddr_addd(right_sum_ddr, right_tail_sum);
         }
       }
-      const dd_real r_ddr = ddr_exp(ddr_add(ln_first_ddr, ddr_log(right_sum_ddr)));
+      const dd_real ln_r_ddr = ddr_add(ln_first_ddr, ddr_log(right_sum_ddr));
       if (!logp) {
-        return -ddr_subd(r_ddr, 1.0).x[0];
+        return -ddr_subd(ddr_exp(ln_r_ddr), 1.0).x[0];
       }
-      return ddr_log1p(ddr_negate(r_ddr)).x[0];
+      return ddr_log1p_negexp(ln_r_ddr);
     }
     const double right_upper_bound = first_right_mult_ddr.x[0] / one_minus_first_right_mult;
 
@@ -523,7 +523,7 @@ double Phyper(int64_t obs_m11, int64_t obs_m12, int64_t obs_m21, int64_t obs_m22
     if (!logp) {
       return -ddr_subd(one_minus_prob_ddr, 1.0).x[0];
     }
-    return ddr_log1p(ddr_negate(one_minus_prob_ddr)).x[0];
+    return ddr_log1p_neg_quotient(one_minus_prob_ddr, right_sum_ddr, denom_ddr);
   }
   // We're at or to the left of the mode, and are responsible for tiny cmf
   // values.

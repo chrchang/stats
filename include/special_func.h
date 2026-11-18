@@ -34,6 +34,16 @@ dd_real binom_ln_prob_loader_part2(dd_real k_ddr, dd_real nmk_ddr, dd_real n_ddr
 
 dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_real q_ddr);
 
+// Returns x log(x/np) + np - x, evaluated without cancellation.
+dd_real loader_bd0(dd_real x_ddr, dd_real np_ddr);
+
+// Poisson log-pmf via Loader's algorithm.  Assumes k is a nonnegative integer
+// < 2^53, and 0 < lambda < 2^960.
+dd_real pois_ln_prob_loader(double k, dd_real lambda_ddr);
+
+// log(1+x) - x.
+dd_real ddr_log1pmx(dd_real x_ddr);
+
 // The following functions are specialized to the range min(a,b)>=40,
 // min(p,q)>2^{-960}.  (The Boost source code is a good starting point for
 // handling other ranges; R is also good when GPL-2 is not a problem.)
@@ -53,6 +63,14 @@ dd_real erfcx_ddr(dd_real x_ddr);
 double log1pmx(double x);
 
 dd_real basym(dd_real a_ddr, dd_real b_ddr, dd_real lambda_ddr);
+
+// Poisson (b -> infinity) limit of basym_approx(), i.e. Temme's uniform
+// asymptotic expansion of the incomplete gamma function ratio, evaluated to
+// ordinary (a few ULPs) accuracy.  Assumes aa >= 100 is an integer and
+// |aa - lambda| is not much larger than ~0.03 * aa.
+// Returns log(P[X >= aa]) if aa >= lambda, and log(P[X <= aa - 1]) otherwise,
+// where X ~ Poisson(lambda).
+dd_real gasym_approx(double aa, dd_real lambda_ddr);
 
 // Evaluates regularized incomplete beta function with ordinary (usually off by
 // several ULPs) accuracy.

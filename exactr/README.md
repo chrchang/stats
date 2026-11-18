@@ -1,12 +1,12 @@
 exactr
 ======
 
-This package contains accurate and efficient implementations of the binomial
-and Fisher's (2x2..2x6 and 3x3 so far) exact tests.
+This package contains accurate and efficient implementations of the binomial,
+Poisson, and Fisher's (2x2..2x6 and 3x3 so far) exact tests.
 
 It also has unexported implementations of the related discrete distribution
-functions (dbinom, dhyper, pbinom, qbinom, phyper, qhyper), which are slower
-but more accurate than their R standard library counterparts.
+functions (dbinom, dhyper, pbinom, ppois, qbinom, phyper, qhyper), which are
+slower but more accurate than their R standard library counterparts.
 
 ### Comparison with R 4.6.1 stats
 
@@ -28,6 +28,20 @@ and memory; it is skipped for n >= 2^27:
     n=(2^5)-1: base=2.92e-05  stats=2.7e-05 sec/iter
     n=(2^20)-1: base=2.86e-05  stats=0.0189 sec/iter
     n=(2^35)-1: base=3.36e-05 sec/iter
+
+stats::poisson.test()'s one-sample two-sided p-value is accurate, but it takes
+O(r*T) time and memory; it is skipped for r*T >= 2^25.  (The two-sample test
+reduces to binom.test().)
+
+    $ utils/poissontest_accuracy.R --z-score 1 -e 5,20,25,30
+    r*T in [2^5, 2^6): errRMS=2.88e-16  statsErrRMS=2.54e-16
+    r*T in [2^20, 2^21): errRMS=5.54e-17  statsErrRMS=1.75e-16
+    r*T in [2^25, 2^26): errRMS=0
+    r*T in [2^30, 2^31): errRMS=9.58e-17
+    $ utils/poissontest_benchmark.R --z-score 1  # ~1300x speedup at r*T~=1m
+    r*T=(2^5)-0.5: base=5.39e-05  stats=3.16e-05 sec/iter
+    r*T=(2^20)-0.5: base=5.64e-05  stats=0.0743 sec/iter
+    r*T=(2^35)-0.5: base=5.92e-05 sec/iter
 
 For 2x2 tables, stats::fisher.test()'s p-value is accurate, but it takes O(n)
 time and memory (and requires entries < 2^31); it is skipped for n >= 2^27.

@@ -2,10 +2,12 @@
 
 export(binom.test)
 export(fisher.test)
+export(poisson.test)
 import(Rcpp)
 importFrom(Rcpp,evalCpp)
 importFrom(stats,
   complete.cases,
-  qbeta
+  qbeta,
+  qgamma
 )
 useDynLib(exactr, .registration=TRUE)

@@ -114,6 +114,20 @@ dd_real binom_ln_prob_loader(dd_real k_ddr, dd_real n_ddr, dd_real p_ddr, dd_rea
   return binom_ln_prob_loader_part2(k_ddr, nmk_ddr, n_ddr, p_ddr, q_ddr, stirlerr_ddr, half_lf_ddr);
 }
 
+// Poisson analogue of binom_ln_prob_loader():
+//   log(e^{-lambda} lambda^k / k!)
+//     = -stirlerr(k) - bd0(k, lambda) - 0.5 log(2 pi k)
+// for k > 0.
+dd_real pois_ln_prob_loader(double k, dd_real lambda_ddr) {
+  if (k == 0) {
+    return ddr_negate(lambda_ddr);
+  }
+  const dd_real k_ddr = ddr_maked(k);
+  const dd_real half_lf_ddr = ddr_add(_ddr_half_log_2pi, ddr_mul_pwr2(ddr_log(k_ddr), 0.5));
+  const dd_real neg_lc_ddr = ddr_add(ddr_stirlerr(k_ddr), loader_bd0(k_ddr, lambda_ddr));
+  return ddr_negate(ddr_add(neg_lc_ddr, half_lf_ddr));
+}
+
 // ibeta_...() and dependencies below are adapted from Boost 1.91.0.
 // This derived code is subject to the following license:
 //
@@ -730,6 +744,87 @@ dd_real basym_approx(double a, double b, dd_real lambda_ddr) {
   }
 
   return ddr_add(ddr_sub(ddr_addd(t_ddr, ln_e0), bcorr_ddr(ddr_maked(abmin), ddr_maked(abmax))), ddr_log(sum_ddr));
+}
+
+// Poisson limit of basym_approx().  The binomial upper tail P[X >= a] (for
+// a >= np) is the incomplete beta function ratio I_p(a, b) with b = n - a + 1;
+// as n -> infinity with np fixed at lambda, we have
+//   h = a/b -> 0, r1 -> 1, a*q - b*p -> a - lambda,
+//   b * log1pmx(lambda'/b) -> 0, bcorr(a, b) -> stirlerr(a).
+// The binomial lower tail P[X <= a-1] (for a < np) is the same with the roles
+// of a and b swapped, in which case r1 -> -1 instead.  The remaining
+// recurrences then only depend on the sign of r1.
+dd_real gasym_approx(double a, dd_real lambda_ddr) {
+  const double e1 = 0.3535533905932738;  // 2^{-3/2}
+  const double ln_e0 = 0.12078223763524522;
+
+  double a0[kBasymApproxIter + 1];
+  double b0[kBasymApproxIter + 1];
+  double c[kBasymApproxIter + 1];
+  double d[kBasymApproxIter + 1];
+
+  const dd_real lambda_minus_a_ddr = ddr_subd(lambda_ddr, a);
+  // t = a log(lambda/a) + a - lambda <= 0.
+  dd_real t_ddr = ddr_muld(ddr_log1pmx(ddr_divd(lambda_minus_a_ddr, a)), a);
+  if (t_ddr.x[0] > 0.0) {
+    t_ddr = ddr_maked(0.0);
+  }
+  const double r1 = (lambda_minus_a_ddr.x[0] > 0.0)? -1.0 : 1.0;
+  const dd_real f_ddr = ddr_negate(t_ddr);
+  const dd_real z0_ddr = ddr_sqrt(f_ddr);
+  const double w0sqr = 1.0 / a;
+  const double zw0sqr = w0sqr * 2 * f_ddr.x[0];
+  const double w0 = sqrt(w0sqr);
+
+  a0[0] = r1 * (2.0 / 3);
+  d[0] = a0[0] * 0.5;
+  c[0] = -d[0];
+  const dd_real initial_j0_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+  double j1w = e1 * w0;
+  dd_real sum_ddr = ddr_addd(initial_j0_ddr, d[0] * j1w);
+
+  double j0w = initial_j0_ddr.x[0];
+  double e1_znm1_w0n = e1 * z0_ddr.x[0] * w0sqr * kSqrt2;
+  double e1_zn_w0np1 = j1w * zw0sqr;
+  for (int32_t n = 2; n <= kBasymApproxIter; n += 2) {
+    a0[n - 1] = 2.0 / (n + 2);
+    const int32_t np1 = n + 1;
+    a0[n] = r1 * 2.0 / (n + 3);
+
+    for (int32_t i = n; i <= np1; ++i) {
+      const double r = (-i - 1) * 0.5;
+      b0[0] = r * a0[0];
+      for (int32_t m = 2; m <= i; ++m) {
+        double bsum = 0;
+        for (int32_t j = 1; j < m; ++j) {
+          const int32_t mmj = m - j;
+          bsum = prefer_fma(prefer_fma(j, r, -mmj) * a0[j - 1], b0[mmj - 1], bsum);
+        }
+        b0[m - 1] = prefer_fma(r, a0[m - 1], bsum / m);
+      }
+      c[i - 1] = b0[i - 1] / (i + 1);
+
+      double dsum = 0;
+      for (int32_t j = 1; j < i; ++j) {
+        dsum = prefer_fma(d[i - j - 1], c[j - 1], dsum);
+      }
+      d[i - 1] = -(dsum + c[i - 1]);
+    }
+
+    j0w = prefer_fma(j0w, (n - 1) * w0sqr, e1_znm1_w0n);
+    j1w = prefer_fma(j1w, n * w0sqr, e1_zn_w0np1);
+    e1_znm1_w0n = zw0sqr * e1_znm1_w0n;
+    e1_zn_w0np1 = zw0sqr * e1_zn_w0np1;
+    const double t0 = d[n - 1] * j0w;
+    const double t1 = d[n] * j1w;
+    sum_ddr = ddr_add(sum_ddr, ddr_add2d(t0, t1));
+    const double eps = 100 * k2m53;
+    if (fabs(t0) + fabs(t1) <= eps * sum_ddr.x[0]) {
+      break;
+    }
+  }
+
+  return ddr_add(ddr_sub(ddr_addd(t_ddr, ln_e0), ddr_stirlerr(ddr_maked(a))), ddr_log(sum_ddr));
 }
 
 CONSTI32(kBasymIter, 26);

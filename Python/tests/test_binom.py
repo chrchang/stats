@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 import exact_tests
+from fractions import Fraction
 import math
 import numpy as np
 import pytest
 import sys
 
 DBL_MIN = sys.float_info.min
+
+
+def assert_within_ulps(got, want_str, max_ulps):
+    # want_str is the exact value to >= 25 significant digits, not just the
+    # correctly rounded double: a tolerance below 1 ULP is only meaningful
+    # relative to the exact value.
+    want = Fraction(want_str)
+    ulp = Fraction(math.ulp(float(want)))
+    assert abs(Fraction(got) - want) <= Fraction(max_ulps) * ulp, (got, want_str)
 
 # See also ../utils/pbinom_accuracy.py and ../utils/pbinom_benchmark.py .
 
@@ -133,6 +143,12 @@ def test_pbinom():
     assert exact_tests.pbinom(5548, 9999, 0.37, logp=True) == pytest.approx(-8.201532972018594e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5549, 9999, 0.37, logp=True) == pytest.approx(-3.8607083741381037e-308, rel=1e-15, abs=0)
     assert exact_tests.pbinom(5550, 9999, 0.37, logp=True) == pytest.approx(0.0, abs=DBL_MIN)
+    # Results ~2^{-1021}, where dd_real low words are subnormal.  Before a Nov
+    # 2026 fix (post-0.10.0), these cases had 0.5-0.75 ULP error; they are now
+    # correctly rounded.  We only check the 1 ULP guarantee here.  Exact
+    # values from 512-bit MPFR.
+    assert_within_ulps(exact_tests.pbinom(3417, 6537, 0.3, logp=True), "-5.413528794249551082311449e-308", 1)
+    assert_within_ulps(exact_tests.pbinom(1104, 28039, 0.01, logp=True), "-6.661689950021950626708729e-308", 1)
     assert exact_tests.pbinom(2**50 - 555, 2**51, 0.499999) == pytest.approx(1, rel=1e-15, abs=0)
     # Regression test for 0.9.1 bugfix.  pbinom() (and phyper()) under the
     # default approx=False setting is *never* supposed to be off by more than 1

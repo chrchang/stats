@@ -251,6 +251,89 @@ hypergeom_lnpmf_internal <- function(a, b, c, d, bits) {
 }
 
 
+
+pois_lnpmf_internal <- function(k, lambda, bits) {
+  # lambda must already be an mpfr.
+  log(lambda) * k - lambda - lgamma(mpfr(k + 1, bits))
+}
+
+# Natural log of P[X <= k] (lower=TRUE; assumes k < lambda) or P[X >= k]
+# (lower=FALSE; assumes k > lambda), as an mpfr.  Like binom_cdf_parts(), this
+# just sums relative likelihoods, to independently validate the continued
+# fractions and asymptotic expansion used by the code under test.
+pois_ln_tail <- function(k, lambda, lower, bits) {
+  lnpmf <- pois_lnpmf_internal(k, lambda, bits)
+  if (lower) {
+    # lik(k-j) / lik(k-j+1) = (k-j+1) / lambda
+    tail <- series_sums(function(j) mpfr_vec(k - j + 1, bits) / lambda, k, bits)
+  } else {
+    # lik(k+j) / lik(k+j-1) = lambda / (k+j)
+    tail <- series_sums(function(j) lambda / mpfr_vec(k + j, bits), Inf, bits)
+  }
+  lnpmf + log(1 + tail$sums[[1]])
+}
+
+poissontest <- function(obs_k, tt, r, bits, return_log) {
+  # Assumes r * tt > 0, and alternative="two-sided" (the one-sided cases
+  # reduce to single tail-sums).  The expected count r * tt is evaluated
+  # exactly, as in exactr::poisson.test().
+  #
+  # With high precision:
+  # 1. If we're at a mode, return 1 or log(1).
+  # 2. Calculate the observed-side tail probability.
+  # 3. Perform exponential + binary search for the furthest-inward k on the
+  #    other side of the mode for which pmf(k) <= pmf(obs_k).
+  # 4. Calculate that tail probability, return sum of tails.
+  eps_bits <- (bits * 3) %/% 4
+  eps <- 2^mpfr(-eps_bits, bits)
+  lambda <- mpfr(r, bits) * mpfr(tt, bits)
+  if ((obs_k <= lambda) && (obs_k + 1 >= lambda)) {
+    return(float_from_ln(mpfr(0, bits), bits, return_log))
+  }
+  # _adj to indicate we've premultiplied by (1 - eps).
+  ln_starting_pmf_adj <- pois_lnpmf_internal(obs_k, lambda, bits) * (1 - eps)
+  lambda_floor <- asNumeric(floor(lambda))
+  if (obs_k < lambda) {
+    ln_obs_tail <- pois_ln_tail(obs_k, lambda, TRUE, bits)
+    # Invariant: pmf(min_k-1) > pmf(obs_k) >= pmf(max_k).
+    min_k <- lambda_floor + 1
+    max_k <- min_k
+    while (pois_lnpmf_internal(max_k, lambda, bits) > ln_starting_pmf_adj) {
+      min_k <- max_k + 1
+      max_k <- lambda_floor + 2 * (max_k - lambda_floor)
+    }
+    while (min_k < max_k) {
+      k <- (min_k + max_k) %/% 2
+      if (pois_lnpmf_internal(k, lambda, bits) > ln_starting_pmf_adj) {
+        min_k <- k + 1
+      } else {
+        max_k <- k
+      }
+    }
+    ln_other_tail <- pois_ln_tail(min_k, lambda, FALSE, bits)
+  } else {
+    ln_obs_tail <- pois_ln_tail(obs_k, lambda, FALSE, bits)
+    if (pois_lnpmf_internal(0, lambda, bits) > ln_starting_pmf_adj) {
+      # All outcomes to left of mode have higher probability than our
+      # starting outcome.
+      return(float_from_ln(ln_obs_tail, bits, return_log))
+    }
+    # Invariant: pmf(min_k) <= pmf(obs_k) < pmf(max_k+1).
+    min_k <- 0
+    max_k <- asNumeric(ceiling(lambda)) - 1
+    while (min_k < max_k) {
+      k <- (min_k + max_k + 1) %/% 2
+      if (pois_lnpmf_internal(k, lambda, bits) > ln_starting_pmf_adj) {
+        max_k <- k - 1
+      } else {
+        min_k <- k
+      }
+    }
+    ln_other_tail <- pois_ln_tail(min_k, lambda, TRUE, bits)
+  }
+  float_from_ln(logspace_add(ln_obs_tail, ln_other_tail), bits, return_log)
+}
+
 # scipy-style parameterization: M = total, n = first-row total, N = first-col
 # total.
 hypergeom_pmf <- function(k, M, n, N, bits, return_log) {

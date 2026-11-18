@@ -73,6 +73,52 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// ppois_cpp
+NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp);
+RcppExport SEXP _exactr_ppois_cpp(SEXP qSEXP, SEXP lambdaSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type q(qSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lambda(lambdaSEXP);
+    Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    rcpp_result_gen = Rcpp::wrap(ppois_cpp(q, lambda, lower_tail, log_p, midp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// poisson_1sided_pval
+double poisson_1sided_pval(double x_round, double tt, double rr, bool greater, bool midp, bool log_p);
+RcppExport SEXP _exactr_poisson_1sided_pval(SEXP x_roundSEXP, SEXP ttSEXP, SEXP rrSEXP, SEXP greaterSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_round(x_roundSEXP);
+    Rcpp::traits::input_parameter< double >::type tt(ttSEXP);
+    Rcpp::traits::input_parameter< double >::type rr(rrSEXP);
+    Rcpp::traits::input_parameter< bool >::type greater(greaterSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(poisson_1sided_pval(x_round, tt, rr, greater, midp, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
+// poisson_2sided_pval
+double poisson_2sided_pval(double x_round, double tt, double rr, bool midp, bool log_p);
+RcppExport SEXP _exactr_poisson_2sided_pval(SEXP x_roundSEXP, SEXP ttSEXP, SEXP rrSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type x_round(x_roundSEXP);
+    Rcpp::traits::input_parameter< double >::type tt(ttSEXP);
+    Rcpp::traits::input_parameter< double >::type rr(rrSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    rcpp_result_gen = Rcpp::wrap(poisson_2sided_pval(x_round, tt, rr, midp, log_p));
+    return rcpp_result_gen;
+END_RCPP
+}
 // dhyper
 NumericVector dhyper(NumericVector x, NumericVector m, NumericVector n, NumericVector k, bool log);
 RcppExport SEXP _exactr_dhyper(SEXP xSEXP, SEXP mSEXP, SEXP nSEXP, SEXP kSEXP, SEXP logSEXP) {
@@ -249,6 +295,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 8},
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
     {"_exactr_binom_2sided_pval", (DL_FUNC) &_exactr_binom_2sided_pval, 6},
+    {"_exactr_ppois_cpp", (DL_FUNC) &_exactr_ppois_cpp, 5},
+    {"_exactr_poisson_1sided_pval", (DL_FUNC) &_exactr_poisson_1sided_pval, 6},
+    {"_exactr_poisson_2sided_pval", (DL_FUNC) &_exactr_poisson_2sided_pval, 5},
     {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
     {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 8},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},

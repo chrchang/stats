@@ -6,6 +6,7 @@
 #include "include/hypergeom.h"
 #include "include/hypergeom_detail.h"
 #include "include/nchypergeom_fisher.h"
+#include "include/pois.h"
 #include "include/plink2_base.h"
 #include "include/plink2_float.h"
 #include "include/plink2_highprec.h"
@@ -202,13 +203,18 @@ NumericVector pbinom_cpp(NumericVector q, NumericVector size, NumericVector prob
       nans_produced = 1;
       continue;
     }
+    // R_DT_0 and R_DT_1.
+    const double dt_0 = lower_tail? (log_p? R_NegInf : 0.0) : (log_p? 0.0 : 1.0);
+    const double dt_1 = lower_tail? (log_p? 0.0 : 1.0) : (log_p? R_NegInf : 0.0);
     if (k_float < 0) {
-      results[ridx] = log_p? R_NegInf : 0.0;
+      results[ridx] = dt_0;
       continue;
     }
     const double k_floor = floor(k_float + 1e-7);
-    if (n_round <= k_floor) {
-      results[ridx] = log_p? 0.0 : 1.0;
+    // When midp is true and k == n, the result is 1 - 0.5 * pmf(n) (or its
+    // complement), so we must fall through.
+    if ((n_round < k_floor) || ((n_round == k_floor) && (!(midp && approx)))) {
+      results[ridx] = dt_1;
       continue;
     }
 
@@ -370,6 +376,122 @@ double binom_2sided_pval(double x_round, double size_round, double prob, bool mi
   const int64_t x = static_cast<int64_t>(x_round);
   const int64_t n = static_cast<int64_t>(size_round);
   return BinomTwoSidedP(x, n, prob_tdr, midp, log_p);
+}
+
+// R poisson.test() computes the Poisson mean as r * T.  We compute this
+// product exactly as a dd_real.
+static plink2::dd_real make_pois_lambda(double tt, double rr) {
+  const plink2::dd_real lambda_ddr = plink2::ddr_mul2d(rr, tt);
+  if (!((lambda_ddr.x[0] >= 0.0) && (lambda_ddr.x[0] < plink2::k2p900 * plink2::k2p50))) {
+    stop("(r * T) is not in [0, 2^950)");
+  }
+  return lambda_ddr;
+}
+
+//' @title Poisson distribution cdf
+//' @description Backend for ppois(), separated since dots aren't permitted in
+//'   C++ parameter names.
+//' @noRd
+// [[Rcpp::export]]
+NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp) {
+  // Imitate SETUP_Math2 macro in R src/library/stats/src/distn.c .
+  const uint32_t q_len = q.size();
+  const uint32_t lambda_len = lambda.size();
+  if ((q_len == 0) || (lambda_len == 0)) {
+    NumericVector results = NumericVector(0);
+    if (q_len == 0) {
+      results.attr("dim") = q.attr("dim");
+    }
+    return results;
+  }
+  const uint32_t results_len = std::max(q_len, lambda_len);
+  NumericVector results = NumericVector(results_len);
+  uint32_t nans_produced = 0;
+
+  uint32_t q_idx = 0;
+  uint32_t lambda_idx = 0;
+  for (uint32_t ridx = 0; ridx < results_len; ++ridx) {
+    const double k_float = q[q_idx++];
+    const double lam = lambda[lambda_idx++];
+    q_idx = (q_idx == q_len)? 0 : q_idx;
+    lambda_idx = (lambda_idx == lambda_len)? 0 : lambda_idx;
+    if (traits::is_nan<REALSXP>(k_float) || traits::is_nan<REALSXP>(lam)) {
+      if (NumericVector::is_na(k_float) || NumericVector::is_na(lam)) {
+        results[ridx] = NA_REAL;
+      } else {
+        results[ridx] = R_NaN;
+      }
+      continue;
+    }
+    // src/nmath/ppois.c
+    if (lam < 0.0) {
+      results[ridx] = R_NaN;
+      nans_produced = 1;
+      continue;
+    }
+    const double dt_0 = lower_tail? (log_p? R_NegInf : 0.0) : (log_p? 0.0 : 1.0);
+    const double dt_1 = lower_tail? (log_p? 0.0 : 1.0) : (log_p? R_NegInf : 0.0);
+    if (k_float < 0) {
+      results[ridx] = dt_0;
+      continue;
+    }
+    if (lam == R_PosInf) {
+      results[ridx] = dt_0;
+      continue;
+    }
+    if ((lam == 0.0) || (k_float == R_PosInf)) {
+      results[ridx] = dt_1;
+      continue;
+    }
+    const double k_floor = floor(k_float + 1e-7);
+    if (!(lam < plink2::k2p900 * plink2::k2p50)) {
+      stop("lambda values in [2^950, Inf) not currently supported");
+    }
+    if ((k_floor >= static_cast<double>(1LL << 53)) && (lam >= static_cast<double>(1LL << 51))) {
+      stop("q values in [2^53, Inf) not currently supported when lambda >= 2^51");
+    }
+    results[ridx] = plink2::PpoisApprox(k_floor, plink2::ddr_maked(lam), !lower_tail, midp, log_p);
+  }
+  if (nans_produced) {
+    warning("NaNs produced");
+  }
+  if (results_len == q_len) {
+    results.attr("dim") = q.attr("dim");
+  } else {
+    results.attr("dim") = lambda.attr("dim");
+  }
+  return results;
+}
+
+//' @title Exact Poisson one-sided test p-value
+//' @description Implements main p-value calculation for one-sided,
+//'   one-sample poisson.test().
+//' @noRd
+// [[Rcpp::export]]
+double poisson_1sided_pval(double x_round, double tt, double rr, bool greater, bool midp, bool log_p) {
+  const plink2::dd_real lambda_ddr = make_pois_lambda(tt, rr);
+  if (!(x_round < static_cast<double>(1LL << 53))) {
+    if (lambda_ddr.x[0] >= static_cast<double>(1LL << 51)) {
+      stop("x values in [2^53, Inf) not currently supported when r * T >= 2^51");
+    }
+  }
+  return plink2::PoisOneSidedP(x_round, lambda_ddr, greater, midp, log_p);
+}
+
+//' @title Exact Poisson two-sided test p-value
+//' @description Implements main p-value calculation for two-sided,
+//'   one-sample poisson.test().
+//' @noRd
+// [[Rcpp::export]]
+double poisson_2sided_pval(double x_round, double tt, double rr, bool midp, bool log_p) {
+  const plink2::dd_real lambda_ddr = make_pois_lambda(tt, rr);
+  if (!(x_round < static_cast<double>(1LL << 52))) {
+    stop("x is not in [0, 2^52 - 1]");
+  }
+  if (!(lambda_ddr.x[0] < static_cast<double>(1LL << 50))) {
+    stop("r * T is not in [0, 2^50)");
+  }
+  return plink2::PoisTwoSidedP(static_cast<int64_t>(x_round), lambda_ddr, midp, log_p);
 }
 
 //' Hypergeometric distribution pmf

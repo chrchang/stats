@@ -7,6 +7,7 @@ ISRC = include/binom.cc \
        include/hypergeom.cc \
        include/hypergeom_detail.cc \
        include/nchypergeom_fisher.cc \
+       include/pois.cc \
        include/plink2_base.cc \
        include/plink2_float.cc \
        include/plink2_highprec.cc \
