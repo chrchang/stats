@@ -798,16 +798,17 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'  fisher.test(Convictions, conf.level = 0.99)$conf.int
 #'
 #' ## Some r x c tables with many small expected counts, so the chi-squared
-#' ## approximation is inadvisable, which were out of reach for R 4.6's
-#' ## algorithm with its default workspace, but complete within a fraction of a
-#' ## second with the new algorithm.
-#' result <- fisher.test(matrix(c(13, 22, 22, 15, 39, 17, 5, 5, 8, 1,
-#'                                6, 9, 4, 0, 18, 9, 7, 1, 24, 25), nrow=2))
+#' ## approximation is inadvisable.  R 4.6's algorithm can't handle these within
+#' ## a minute, even with workspace = 64000000 (it runs for about two minutes on
+#' ## the first two, and fails with a hash key overflow on the third), but they
+#' ## complete within a fraction of a second with the new algorithm.
+#' result <- fisher.test(matrix(c(297, 209, 322, 218, 145, 226, 7, 4, 3,
+#'                                394, 260, 406, 2, 4, 3), nrow=3))
 #' result$p.value
-#' fisher.test(matrix(c(0, 3, 2, 6, 10, 4, 57, 27, 13,
-#'                      2, 5, 3, 3, 5, 0, 8, 1, 1), nrow=3))
-#' fisher.test(matrix(c(2, 0, 0, 4, 4, 3, 4, 3, 4, 1, 2,
-#'                      4, 6, 3, 10, 11, 11, 13, 3, 21, 11), nrow=3))
+#' fisher.test(matrix(c(166, 141, 110, 2, 0, 0, 4, 6, 3,
+#'                      160, 138, 108, 173, 163, 118, 82, 73, 53), nrow=3))
+#' fisher.test(matrix(c(212, 992, 1099, 53, 339, 373, 84, 374, 469,
+#'                      0, 2, 3), nrow=3))
 #'
 #' @export
 fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
