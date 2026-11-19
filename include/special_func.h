@@ -72,6 +72,10 @@ dd_real basym(dd_real a_ddr, dd_real b_ddr, dd_real lambda_ddr);
 // where X ~ Poisson(lambda).
 dd_real gasym_approx(double aa, dd_real lambda_ddr);
 
+// High-accuracy (~2^{-60} relative error) variant of gasym_approx(), the
+// Poisson limit of basym().  Assumes a >= 2048 and |a - lambda| <= ~0.03 * a.
+dd_real gasym(dd_real a_ddr, dd_real lambda_ddr);
+
 // Evaluates regularized incomplete beta function with ordinary (usually off by
 // several ULPs) accuracy.
 double ibeta_largeab_approx(double aa, double bb, dd_real p_ddr, dd_real q_ddr, dd_real aq_minus_bp_ddr, uint32_t inv, uint32_t midp_complement, uint32_t return_log);

@@ -111,6 +111,52 @@ def binom_cdf(k: int, n: int, p: float, bits: int, return_log: bool):
     return join_log_and_nonlog(lnpmf, lik_sum, return_log, invert)
 
 
+def pois_pmf(k: int, mu: float, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
+    mu = gmpy2.mpfr(mu)
+    lnpmf = gmpy2.log(mu) * k - mu - gmpy2.lngamma(k + 1)
+    return float_from_ln(lnpmf, return_log)
+
+
+def pois_cdf(k: int, mu: float, bits: int, return_log: bool):
+    gmpy2.get_context().precision = bits
+    # Assumes mu > 0.
+    # Like binom_cdf(), this doesn't take advantage of any continued fraction
+    # or asymptotic expansion, since much of the point of this function is to
+    # validate them.
+    #
+    # 1. If k >= mu, invert: compute P[X >= k+1] by summing upward.
+    #    Otherwise, compute P[X <= k] by summing downward.
+    # 2. Compute logpmf of the starting term with high precision, and sum
+    #    relative likelihoods until configured precision limit.
+    # 3. Combine as in binom_cdf().
+    mu = gmpy2.mpfr(mu)
+    lnmu = gmpy2.log(mu)
+    invert = (k >= mu)
+    if invert:
+        k += 1
+    lnpmf = lnmu * k - mu - gmpy2.lngamma(k + 1)
+    lik = gmpy2.mpfr(1.0)
+    lik_sum = lik
+    if not invert:
+        while k > 0:
+            lik *= k / mu
+            k -= 1
+            preadd = lik_sum
+            lik_sum += lik
+            if preadd == lik_sum:
+                break
+    else:
+        while True:
+            k += 1
+            lik *= mu / k
+            preadd = lik_sum
+            lik_sum += lik
+            if preadd == lik_sum:
+                break
+    return join_log_and_nonlog(lnpmf, lik_sum, return_log, invert)
+
+
 def binomtest(obs_k: int, n: int, p: float, bits: int, return_log: bool):
     gmpy2.get_context().precision = bits
     # Assumes 0 < p < 1.

@@ -20,14 +20,15 @@ Authors@R: c(person(given="Christopher",
                     comment = "Boost C++ Libraries"),
              person("The R Core Team",
                     role = c("cph"),
-                    comment = "R src/nmath/qnorm.c"),
+                    comment = "R src/nmath/ dbinom.c, dhyper.c, pgamma.c, qnorm.c"),
              person("The Regents of the University of California, through Lawrence Berkeley National Laboratory",
                     role = c("cph"),
                     comment = "QD library"))
-Description: Implements binomial, Poisson, and Fisher's (2x2..2x6 and 3x3 so
-    far) exact tests.  This is based on high-accuracy log-likelihood arithmetic from Hida
-    Y, Li XS, Bailey DH (2001) <doi:10.1109/ARITH.2001.930115> and the Fisher's
-    exact test algorithm in Chang et al. (2015) <doi:10.1186/s13742-015-0047-8>.
+Description: Implements binomial, Poisson, and Fisher's (2xk and 3xk so far)
+    exact tests.  This extends R's existing algorithms with high-accuracy
+    log-likelihood arithmetic from Hida Y, Li XS, Bailey DH (2001)
+    <doi:10.1109/ARITH.2001.930115> and the Fisher's exact test algorithm in
+    Chang et al. (2015) <doi:10.1186/s13742-015-0047-8>.
     Accuracy and speed of these functions compare favorably to their
     counterparts in the R 4.6 standard library.
 Encoding: UTF-8

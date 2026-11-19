@@ -393,7 +393,7 @@ static plink2::dd_real make_pois_lambda(double tt, double rr) {
 //'   C++ parameter names.
 //' @noRd
 // [[Rcpp::export]]
-NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp) {
+NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp, bool approx) {
   // Imitate SETUP_Math2 macro in R src/library/stats/src/distn.c .
   const uint32_t q_len = q.size();
   const uint32_t lambda_len = lambda.size();
@@ -450,7 +450,12 @@ NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, 
     if ((k_floor >= static_cast<double>(1LL << 53)) && (lam >= static_cast<double>(1LL << 51))) {
       stop("q values in [2^53, Inf) not currently supported when lambda >= 2^51");
     }
-    results[ridx] = plink2::PpoisApprox(k_floor, plink2::ddr_maked(lam), !lower_tail, midp, log_p);
+    // Ppois() doesn't support midp.
+    if (approx || midp) {
+      results[ridx] = plink2::PpoisApprox(k_floor, plink2::ddr_maked(lam), !lower_tail, midp, log_p);
+    } else {
+      results[ridx] = plink2::Ppois(k_floor, plink2::ddr_maked(lam), !lower_tail, log_p);
+    }
   }
   if (nans_produced) {
     warning("NaNs produced");
@@ -865,7 +870,7 @@ double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p) {
 
 // When the caller wants a p-value rather than a log-p-value, we return
 // exp(ln_pval), which is zero whenever ln_pval < ln(2^{-1075}).  So we can let
-// the 2xk/3x3 functions return early (with an upper bound on ln_pval) when they
+// the 2xk/3xk functions return early (with an upper bound on ln_pval) when they
 // can cheaply determine that the log-p-value is below a cutoff slightly
 // smaller than that; the result is unchanged.
 static const double kLnPCutoffNonlog = -1075 * plink2::kLn2 - 1e-9;
@@ -899,24 +904,26 @@ double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
   return exp(ln_pval);
 }
 
-//' @title Fisher 3x3 test log-p-value
-//' @description Implements main p-value calculation for 3x3 tables.
+//' @title Fisher 3xk test log-p-value
+//' @description Implements main p-value calculation for 3xk and kx3 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher33_test_pval(IntegerMatrix x, bool midp, bool log_p) {
-  int32_t obs[9];
+double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
+  const bool three_rows = (x.nrow() == 3);
+  const uint32_t k = three_rows? x.ncol() : x.nrow();
+  std::vector<int32_t> obs(3 * k);
   int64_t tot = 0;
-  for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
-    for (uint32_t col_idx = 0; col_idx != 3; ++col_idx) {
-      const int32_t val = x(row_idx, col_idx);
-      obs[row_idx * 3 + col_idx] = val;
+  for (uint32_t idx = 0; idx != k; ++idx) {
+    for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+      const int32_t val = three_rows? x(row_idx, idx) : x(idx, row_idx);
+      obs[row_idx * k + idx] = val;
       tot += val;
     }
   }
   if (tot >= (1LL << 31)) {
-    stop("problem instance too large (3x3 table entries must sum to less than 2^31)");
+    stop("problem instance too large (3xk table entries must sum to less than 2^31)");
   }
-  const double ln_pval = plink2::Fisher33LnP(obs, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
+  const double ln_pval = plink2::Fisher3xkLnP(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
   if (ln_pval != ln_pval) {
     stop("out of memory");
   }

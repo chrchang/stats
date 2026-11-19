@@ -55,8 +55,8 @@ binom_2sided_pval <- function(x_round, size_round, prob, midp, log_p, prob_denom
 #' @description Backend for ppois(), separated since dots aren't permitted in
 #'   C++ parameter names.
 #' @noRd
-ppois_cpp <- function(q, lambda, lower_tail, log_p, midp) {
-    .Call(`_exactr_ppois_cpp`, q, lambda, lower_tail, log_p, midp)
+ppois_cpp <- function(q, lambda, lower_tail, log_p, midp, approx) {
+    .Call(`_exactr_ppois_cpp`, q, lambda, lower_tail, log_p, midp, approx)
 }
 
 #' @title Exact Poisson one-sided test p-value
@@ -128,11 +128,11 @@ fisher2xk_test_pval <- function(x, midp, log_p) {
     .Call(`_exactr_fisher2xk_test_pval`, x, midp, log_p)
 }
 
-#' @title Fisher 3x3 test log-p-value
-#' @description Implements main p-value calculation for 3x3 tables.
+#' @title Fisher 3xk test log-p-value
+#' @description Implements main p-value calculation for 3xk and kx3 tables.
 #' @noRd
-fisher33_test_pval <- function(x, midp, log_p) {
-    .Call(`_exactr_fisher33_test_pval`, x, midp, log_p)
+fisher3xk_test_pval <- function(x, midp, log_p) {
+    .Call(`_exactr_fisher3xk_test_pval`, x, midp, log_p)
 }
 
 #' @title Fisher 2x2 two-sided test p-value

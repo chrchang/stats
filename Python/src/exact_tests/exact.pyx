@@ -7,7 +7,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -32,6 +32,8 @@ cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     int32_t ddr_gtd(const dd_real_struct a, double b) nogil
 
     dd_real_struct ddr_maked(const double a) nogil
+
+    dd_real_struct ddr_mul2d(double a, double b) nogil
 
     dd_real_struct ddr_exp(const dd_real_struct a) nogil
 
@@ -62,6 +64,18 @@ cdef extern from "../include/binom.h" namespace "plink2":
     double BinomTwoSidedP(int32_t obs_succ, int32_t obs_tot, td_real_struct p_tdr, int32_t midp, uint32_t logp) nogil
 
 
+cdef extern from "../include/pois.h" namespace "plink2":
+    double PoisMass(double k, dd_real_struct lambda_ddr, uint32_t logp) nogil
+
+    double PpoisApprox(double obs_k, dd_real_struct lambda_ddr, int32_t complement, int32_t midp, uint32_t logp) nogil
+
+    double Ppois(double obs_k, dd_real_struct lambda_ddr, int32_t complement, uint32_t logp) nogil
+
+    double PoisOneSidedP(double obs_k, dd_real_struct lambda_ddr, uint32_t greater_alt, int32_t midp, uint32_t logp) nogil
+
+    double PoisTwoSidedP(int64_t obs_k, dd_real_struct lambda_ddr, int32_t midp, uint32_t logp) nogil
+
+
 cdef extern from "../include/hypergeom.h" namespace "plink2":
     double HypergeomMassDdr(dd_real_struct m11_ddr, dd_real_struct m12_ddr, dd_real_struct m21_ddr, dd_real_struct m22_ddr, uint32_t logp)
 
@@ -83,7 +97,7 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) nogil
 
-    double Fisher33LnP(const int32_t* obs, uint32_t midp, double ln_p_cutoff) nogil
+    double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) nogil
 
 
 cdef extern from "../include/plink2_float.h" namespace "plink2":
@@ -618,6 +632,259 @@ cpdef binomtest(object k, object n, object p=0.5, str alternative="two-sided", b
     return binomtest_internal(ki, ni, p_tdr, twosided, complement, midp, logp)
 
 
+
+# Poisson distribution.  See ../include/pois.h .
+cdef double kPoisMuMax = 2.0 ** 950
+cdef double kPois2p50 = 2.0 ** 50
+cdef double kPois2p51 = 2.0 ** 51
+cdef double kPois2p52 = 2.0 ** 52
+cdef double kPois2p53 = 2.0 ** 53
+
+cdef int check_pois_mu(double mu) except -1:
+    if not (mu >= 0.0 and mu < kPoisMuMax):
+        raise RuntimeError("mu must be in [0, 2^950).")
+    return 0
+
+cdef double dpois_internal(double k, double mu, bint logp) except? 2.0:
+    check_pois_mu(mu)
+    if k < 0 or k != rint(k) or k == INFINITY:
+        return zeroval(logp)
+    if mu == 0.0:
+        if k == 0:
+            return oneval(logp)
+        return zeroval(logp)
+    if k >= kPois2p53:
+        raise RuntimeError("k must be less than 2^53.")
+    return flush_if_denormal(PoisMass(k, ddr_maked(mu), logp))
+
+cdef double ppois_internal(double k, double mu, bint complement, bint logp, bint approx) except? 2.0:
+    check_pois_mu(mu)
+    if k != k:
+        return k
+    if k == INFINITY:
+        if complement:
+            return zeroval(logp)
+        return oneval(logp)
+    if k >= kPois2p53 and mu >= kPois2p51:
+        raise RuntimeError("k values >= 2^53 are not supported when mu >= 2^51.")
+    if approx:
+        return flush_if_denormal(PpoisApprox(k, ddr_maked(mu), complement, 0, logp))
+    return flush_if_denormal(Ppois(k, ddr_maked(mu), complement, logp))
+
+# mode: 0 = pmf, 1 = cdf/sf
+cdef pois_vectorize_all(object k_obj, object mu_obj, int mode, bint complement, bint logp, bint approx):
+    ka = np.asarray(k_obj, dtype=np.float64)
+    mua = np.asarray(mu_obj, dtype=np.float64)
+    it = np.nditer([ka, mua], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef double kd
+    cdef double mud
+    for kd, mud in it:
+        if mode == 0:
+            results[it.index] = dpois_internal(kd, mud, logp)
+        else:
+            results[it.index] = ppois_internal(kd, mud, complement, logp, approx)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, mua.shape))
+
+cdef pois_vv_internal(object k_obj, object mu_obj, int mode, bint complement, bint logp, bint approx=False):
+    cdef double kd
+    cdef double mud
+    try:
+        kd = k_obj
+        mud = mu_obj
+    except TypeError:
+        return pois_vectorize_all(k_obj, mu_obj, mode, complement, logp, approx)
+    if mode == 0:
+        return dpois_internal(kd, mud, logp)
+    return ppois_internal(kd, mud, complement, logp, approx)
+
+# Returns likelihood of exactly k events.  To avoid confusion with R's
+# 'recycling' behavior, this R-style entry point can only broadcast k, not mu.
+def dpois(object k, double mu, bint logp=0):
+    return pois_vv_internal(k, mu, 0, 0, logp)
+
+# Returns cumulative mass function P[X <= k] (or P[X > k] if complement=True).
+# Non-integer k is rounded down.  Only k can be broadcast.
+#
+# If approx=True, this uses the faster algorithm behind poissontest()'s
+# one-sided p-values, which doesn't try to get the last few mantissa bits
+# right.  Otherwise, relative error should be <1 ULP (and is usually <0.5
+# ULP).
+def ppois(object k, double mu, bint complement=0, bint logp=0, bint approx=0):
+    return pois_vv_internal(k, mu, 1, complement, logp, approx)
+
+# scipy-style interfaces.
+class _PoissonDist:
+    @staticmethod
+    def cdf(object k, object mu, bint approx=False):
+        return pois_vv_internal(k, mu, 1, False, False, approx)
+
+    @staticmethod
+    def logcdf(object k, object mu, bint approx=False):
+        return pois_vv_internal(k, mu, 1, False, True, approx)
+
+    @staticmethod
+    def logpmf(object k, object mu):
+        return pois_vv_internal(k, mu, 0, False, True)
+
+    @staticmethod
+    def logsf(object k, object mu, bint approx=False):
+        return pois_vv_internal(k, mu, 1, True, True, approx)
+
+    @staticmethod
+    def pmf(object k, object mu):
+        return pois_vv_internal(k, mu, 0, False, False)
+
+    @staticmethod
+    def sf(object k, object mu, bint approx=False):
+        return pois_vv_internal(k, mu, 1, True, False, approx)
+
+poisson = _PoissonDist()
+
+cdef class Poisson:
+    cdef object mu
+    cdef bint _approx
+
+    def __cinit__(self, mu, **kwargs):
+        if 'tol' in kwargs:
+            # see Binomial
+            self._approx = (kwargs['tol'] >= (0.5 ** 32))
+        else:
+            self._approx = False
+        self.mu = np.asarray(mu, dtype=np.float64)
+
+    def ccdf(self, k):
+        return pois_vv_internal(k, self.mu, 1, True, False, self._approx)
+
+    def cdf(self, k):
+        return pois_vv_internal(k, self.mu, 1, False, False, self._approx)
+
+    def logccdf(self, k):
+        return pois_vv_internal(k, self.mu, 1, True, True, self._approx)
+
+    def logcdf(self, k):
+        return pois_vv_internal(k, self.mu, 1, False, True, self._approx)
+
+    def logpmf(self, k):
+        return pois_vv_internal(k, self.mu, 0, False, True)
+
+    def pmf(self, k):
+        return pois_vv_internal(k, self.mu, 0, False, False)
+
+
+# Returns the expected count t * r as a dd_real.  If t and r are both floats,
+# the product is computed exactly.  Otherwise they're converted to
+# fractions.Fraction, and the product is rounded to ~106-bit precision.
+cdef dd_real_struct pois_mu_ddr(object t, object r) except *:
+    cdef dd_real_struct mu_ddr
+    if isinstance(t, (float, np.floating)) and isinstance(r, (float, np.floating)):
+        if t < 0 or r < 0:
+            raise RuntimeError("t and r must be nonnegative.")
+        mu_ddr = ddr_mul2d(r, t)
+    else:
+        prod = fractions.Fraction(t) * fractions.Fraction(r)
+        if fractions.Fraction(t) < 0 or fractions.Fraction(r) < 0:
+            raise RuntimeError("t and r must be nonnegative.")
+        mu_ddr.x[0] = float(prod)
+        mu_ddr.x[1] = float(prod - fractions.Fraction(mu_ddr.x[0]))
+    if not (mu_ddr.x[0] >= 0.0 and mu_ddr.x[0] < kPoisMuMax):
+        raise RuntimeError("t * r must be in [0, 2^950).")
+    return mu_ddr
+
+cdef double poissontest_internal(int64_t k, dd_real_struct mu_ddr, bint twosided, bint greater, bint midp, bint logp) except? 2.0:
+    if k < 0:
+        raise RuntimeError("k must be nonnegative.")
+    cdef double result
+    if twosided:
+        if k >= kPois2p52:
+            raise RuntimeError("k must be less than 2^52.")
+        if not (mu_ddr.x[0] < kPois2p50):
+            raise RuntimeError("t * r must be less than 2^50 for the two-sided test.")
+        result = PoisTwoSidedP(k, mu_ddr, midp, logp)
+    else:
+        if k >= kPois2p53 and mu_ddr.x[0] >= kPois2p51:
+            raise RuntimeError("k values >= 2^53 are not supported when t * r >= 2^51.")
+        result = PoisOneSidedP(k, mu_ddr, greater, midp, logp)
+    return flush_if_denormal(result)
+
+cdef poissontest_vectorize_k(object k_obj, dd_real_struct mu_ddr, bint twosided, bint greater, bint midp, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    it = np.nditer([ka], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    for ki in it:
+        results[it.index] = poissontest_internal(ki, mu_ddr, twosided, greater, midp, logp)
+    return np.reshape(results, ka.shape)
+
+cdef poissontest_vectorize_all(object k_obj, object t_obj, object r_obj, bint twosided, bint greater, bint midp, bint logp):
+    ka = np.asarray(k_obj, dtype=np.int64)
+    ta = np.asarray(t_obj, dtype=np.float64)
+    ra = np.asarray(r_obj, dtype=np.float64)
+    it = np.nditer([ka, ta, ra], flags=['c_index'])
+    cdef cnp.ndarray[double,mode="c",ndim=1] results = np.empty(it.itersize, dtype=np.float64)
+    cdef int64_t ki
+    cdef double td
+    cdef double rd
+    for ki, td, rd in it:
+        results[it.index] = poissontest_internal(ki, pois_mu_ddr(td, rd), twosided, greater, midp, logp)
+    return np.reshape(results, np.broadcast_shapes(ka.shape, ta.shape, ra.shape))
+
+def _parse_alternative(str alternative):
+    if alternative not in ("two-sided", "less", "greater"):
+        raise RuntimeError("alternative is not in {'two-sided', 'less', 'greater'}.")
+    return (alternative == "two-sided", alternative == "greater")
+
+# One-sample exact Poisson test (R poisson.test() with a length-1 x), with
+# expected count t * r.  Returns the p-value.
+#
+# The two-sided p-value is the sum of probabilities of all counts no more
+# likely than k ("minlike").  As with binomtest(), ties are only recognized
+# when probabilities agree to ~40 significant digits, rather than within R's
+# 1 + 1e-7 relative tolerance; and t * r is evaluated exactly when t and r are
+# floats.  So, when t * r is intended to be an integer but t or r is subject
+# to rounding error (e.g. t=3, r=1/3), ties won't be recognized; pass r as
+# fractions.Fraction(1, 3) in that case.
+#
+# k must be in [0, 2^52) and t * r must be in [0, 2^50) for the two-sided
+# test.  k, t, and r can be broadcast (but t and r must be floats when they
+# are arrays).
+cpdef poissontest(object k, object t=1.0, object r=1.0, str alternative="two-sided", bint midp=0, bint logp=0):
+    twosided, greater = _parse_alternative(alternative)
+    if np.ndim(t) != 0 or np.ndim(r) != 0:
+        return poissontest_vectorize_all(k, t, r, twosided, greater, midp, logp)
+    if isinstance(t, np.ndarray):
+        t = t.item()
+    if isinstance(r, np.ndarray):
+        r = r.item()
+    cdef dd_real_struct mu_ddr = pois_mu_ddr(t, r)
+    cdef int64_t ki
+    try:
+        ki = k
+    except TypeError:
+        return poissontest_vectorize_k(k, mu_ddr, twosided, greater, midp, logp)
+    return poissontest_internal(ki, mu_ddr, twosided, greater, midp, logp)
+
+# Two-sample comparison of Poisson rates (R poisson.test() with length-2 x and
+# T): tests whether the rate ratio (k1/t1) / (k2/t2) equals r.  As in R, this
+# conditions on the total count, reducing to
+#   binomtest(k1, k1 + k2, r*t1 / (r*t1 + t2))
+# with the success probability computed exactly as a fractions.Fraction.
+# k1 and k2 can be broadcast; t1, t2, and r must be scalars.
+def poissontest2(object k1, object k2, object t1=1.0, object t2=1.0, object r=1.0, str alternative="two-sided", bint midp=0, bint logp=0):
+    _parse_alternative(alternative)
+    rt1 = fractions.Fraction(r) * fractions.Fraction(t1)
+    t2f = fractions.Fraction(t2)
+    if fractions.Fraction(r) < 0 or fractions.Fraction(t1) < 0 or t2f < 0:
+        raise RuntimeError("t1, t2, and r must be nonnegative.")
+    denom = rt1 + t2f
+    if denom == 0:
+        raise RuntimeError("r * t1 + t2 must be positive.")
+    if np.ndim(k1) == 0 and np.ndim(k2) == 0:
+        n = k1 + k2
+    else:
+        n = np.add(np.asarray(k1, dtype=np.int64), np.asarray(k2, dtype=np.int64))
+    return binomtest(k1, n, rt1 / denom, alternative, midp, logp)
+
 # scipy and R don't use the same parameters for the hypergeometric
 # distribution:
 #   R (m, n, k) = (a+c, b+d, a+b)
@@ -904,8 +1171,13 @@ hypergeom = _HypergeomDist()
 # table must be a 2x2 or larger matrix, represented as a list of equal-length
 # lists.  For 2x2 tests, values must be nonnegative integers which add up
 # to <2^52.  For tests on larger tables, they must add up to <2^31.
-# Currently supported table shapes are 2xk, kx2, and 3x3.  (Runtime of the
-# 2xk test grows quickly with k, so it's mainly useful for small k.)
+# Currently supported table shapes are 2xk, kx2, 3xk, and kx3.  (Runtime
+# grows quickly with k and the table total, especially when the p-value is
+# extremely small; in the latter case, note that p-values which underflow to
+# zero are detected much more quickly when logp isn't requested.  Memory use
+# also grows with the difficulty of the problem: it's usually well under
+# 50 MB, with internal caps bounding it to roughly 250 MB for tables with up
+# to ~20 columns.)
 #
 # alternative must be one of the following:
 #   "two-sided": default, must be this if table is larger than 2x2.
@@ -954,10 +1226,9 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
     cdef int64_t a
     cdef int64_t b
     cdef int32_t* obs_buf
-    cdef int32_t obs33[9]
     # When logp isn't requested, the return value is exp_flush(ln_result),
     # which is zero whenever exp(ln_result) < DBL_MIN.  So we can let the
-    # 2xk/3x3 functions return early (with an upper bound on ln_result) when
+    # 2xk/3xk functions return early (with an upper bound on ln_result) when
     # they can cheaply determine that the log-p-value is below a cutoff
     # slightly smaller than ln(DBL_MIN); the result is unchanged.
     cdef double ln_p_cutoff = -DBL_MAX if logp else (log(DBL_MIN) - 1e-9)
@@ -1001,22 +1272,30 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
             free(obs_buf)
         if ln_result != ln_result:
             raise MemoryError()
-    elif nrow == 3 and ncol == 3:
-        total = 0
-        for idx in range(9):
-            a = table[idx // 3][idx % 3]
-            if a < 0 or a > 0x7fffffff:
-                raise RuntimeError("3x3 table entries must be nonnegative and sum to <2^31")
-            total += a
-            obs33[idx] = <int32_t>a
-        if total > 0x7fffffff:
-            raise RuntimeError("3x3 table entries must be nonnegative and sum to <2^31")
-        with nogil:
-            ln_result = Fisher33LnP(obs33, midp, ln_p_cutoff)
+    elif nrow == 3 or ncol == 3:
+        k = ncol if nrow == 3 else nrow
+        obs_buf = <int32_t*>malloc(3 * k * sizeof(int32_t))
+        if not obs_buf:
+            raise MemoryError()
+        try:
+            total = 0
+            for idx in range(k):
+                for row_idx in range(3):
+                    a = table[row_idx][idx] if nrow == 3 else table[idx][row_idx]
+                    if a < 0 or a > 0x7fffffff:
+                        raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+                    total += a
+                    obs_buf[row_idx * k + idx] = <int32_t>a
+            if total > 0x7fffffff:
+                raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+            with nogil:
+                ln_result = Fisher3xkLnP(obs_buf, k, midp, ln_p_cutoff)
+        finally:
+            free(obs_buf)
         if ln_result != ln_result:
             raise MemoryError()
     else:
-         raise RuntimeError("only 2xk, kx2, and 3x3 tables are currently supported")
+         raise RuntimeError("only 2xk, kx2, 3xk, and kx3 tables are currently supported")
     if logp:
         return ln_result
     return exp_flush(ln_result)

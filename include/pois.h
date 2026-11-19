@@ -54,6 +54,11 @@ double PoisMass(double k, dd_real lambda_ddr, uint32_t logp);
 // obs_k >= 2^53 is only supported when lambda < 2^51.
 double PpoisApprox(double obs_k, dd_real lambda_ddr, int32_t complement, int32_t midp, uint32_t logp);
 
+// High-accuracy variant of PpoisApprox() (without midp support).  Should
+// consistently achieve <1 ULP relative error, like Pbinom().  Same domain as
+// PpoisApprox().
+double Ppois(double obs_k, dd_real lambda_ddr, int32_t complement, uint32_t logp);
+
 // One-sided exact test p-value; greater_alt indicates alternative="greater".
 HEADER_INLINE double PoisOneSidedP(double obs_k, dd_real lambda_ddr, uint32_t greater_alt, int32_t midp, uint32_t logp) {
   const int32_t k_decr = greater_alt && (!midp);

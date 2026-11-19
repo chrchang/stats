@@ -20,6 +20,7 @@ ext_modules = [
                          "src/include/hypergeom.cc",
                          "src/include/hypergeom_detail.cc",
                          "src/include/nchypergeom_fisher.cc",
+                         "src/include/pois.cc",
                          "src/include/plink2_base.cc",
                          "src/include/plink2_float.cc",
                          "src/include/plink2_hwe.cc",
@@ -37,10 +38,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="exact_tests",
-    version="0.10.1",
+    version="0.11.0",
     author="Christopher Chang",
     author_email="chrchang@alumni.caltech.edu",
-    description="Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",
+    description="Accurate and efficient binomial, Poisson, Hardy-Weinberg equilibrium, and Fisher's exact tests, along with associated distributions.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/chrchang/stats",

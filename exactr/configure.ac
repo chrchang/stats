@@ -1,4 +1,4 @@
-AC_INIT([exactr],[0.1.1],[chrchang@alumni.caltech.edu])
+AC_INIT([exactr],[0.1.2],[chrchang@alumni.caltech.edu])
 
 : ${R_HOME=`R RHOME`}
 if test -z "${R_HOME}"; then

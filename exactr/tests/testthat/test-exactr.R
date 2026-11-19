@@ -255,6 +255,67 @@ test_that("ppois works", {
   ## Deep tail where non-log result underflows.
   expect_equal(ppois(10, 2000, log.p=TRUE),
                stats::ppois(10, 2000, log.p=TRUE), tolerance=1e-13)
+
+  ## approx=FALSE (the default) promises <1 ULP error relative to the exact
+  ## (infinite-precision) value, so usually only the two doubles bracketing it
+  ## are acceptable.  (As of this writing, all of these cases are correctly
+  ## rounded, but we don't want to fail if a future speed optimization gives up
+  ## unpromised accuracy.)  Several of these cases are within 0.001 ULP of a
+  ## rounding boundary.
+  ##
+  ## Each exact value is represented as hi + lo, where hi is the 320-bit MPFR
+  ## result correctly rounded to double, and lo is the remainder rounded to
+  ## double.  (In the subnormal case, lo is only accurate to 2^{-1074}, which
+  ## is still enough to identify the two acceptable results.)  Inputs and
+  ## reference values are written in hex since R's decimal parser isn't always
+  ## correctly rounded (e.g. it reads 244837.89991574993 as
+  ## 0x1.de32f33070758p+17 instead of 0x1.de32f33070759p+17); and it parses
+  ## subnormal hex literals like 0x1p-1074 as 0, so that lo is written as
+  ## 2^-1074.  The cases
+  ## exercise direct summation, Temme's expansion, both continued fractions,
+  ## and a subnormal result.
+  ##
+  ## Spacing between consecutive doubles in the binade containing the exact
+  ## value hi + lo.
+  ulp_of_exact <- function(hi, lo) {
+    x <- abs(hi)
+    if (x < .Machine$double.xmin) {
+      return(2^-1074)
+    }
+    e <- floor(log2(x))
+    if (2^e > x) {
+      e <- e - 1
+    } else if (2^(e + 1) <= x) {
+      e <- e + 1
+    }
+    if ((x == 2^e) && (sign(lo) == -sign(hi)) && (e > -1022)) {
+      ## hi is a power of 2 and the exact value is just below it in magnitude.
+      e <- e - 1
+    }
+    2^(e - 52)
+  }
+  ## Entries are (q, lambda, lower.tail, log.p, hi, lo).
+  ulp_cases <- list(
+    list(141, 0x1.26674275d3e35p+7, TRUE, FALSE, 0x1.4acd640bbc5dbp-2, 0x1.ff0dd00803c4fp-56),
+    list(12663, 0x1.8c776f1914c96p+13, FALSE, FALSE, 0x1.29e65f0a030f1p-1, -0x1.fcf6333abbe22p-55),
+    list(1076091, 0x1.0816fd59c0965p+20, TRUE, FALSE, 0x1.1117594e845e3p-25, -0x1.fcd7607725959p-79),
+    list(1846969520, 1846972037, FALSE, FALSE, 0x1.0bf3eb68c07ccp-1, 0x1.f5cd59ee281fcp-55),
+    list(67534192, 0x1.01a0a7ec0556bp+26, TRUE, FALSE, 0x1.be51b0cf35846p-2, 0x1.ebbcdbe5e4246p-56),
+    list(168122, 0x1.3f44f4c5caecbp+17, FALSE, FALSE, 0x1.4582b85633a33p-100, -0x1.ecaeefc0b9f13p-154),
+    list(236634, 0x1.de32f33070759p+17, FALSE, TRUE, -0x1.11d642801bf89p-206, -0x1.ebeee96035b19p-260),
+    list(1197, 3000.75, TRUE, FALSE, 0x1.196432abd9e51p-1021, 2^-1074),
+    list(960000, 1000000.5, TRUE, TRUE, -0x1.97bf23c291c95p+9, -0x1.db65f41e8705p-45),
+    list(1040000, 1000000.5, FALSE, TRUE, -0x1.8d132acf660e3p+9, 0x1.30a5633a6172ap-45))
+  for (cc in ulp_cases) {
+    hi <- cc[[5]]
+    lo <- cc[[6]]
+    got <- ppois(cc[[1]], cc[[2]], lower.tail=cc[[3]], log.p=cc[[4]])
+    ## (got - hi) is computed exactly whenever got is within a few ULPs of hi.
+    expect_lt(abs((got - hi) - lo), ulp_of_exact(hi, lo),
+              label=paste0("ppois(", cc[[1]], ", ", sprintf("%a", cc[[2]]), ") error"))
+    got_approx <- ppois(cc[[1]], cc[[2]], lower.tail=cc[[3]], log.p=cc[[4]], approx=TRUE)
+    expect_equal(got_approx, hi, tolerance=2e-15)
+  }
 })
 
 test_that("poisson.test works", {
@@ -404,14 +465,13 @@ test_that("fisher.test works", {
 
   fisher.test(cbind(0, c(0,0,0,1)))
 
-  ## R PR#4688: once gave p.value=Inf, now gives FEXACT error 501
-  ## (After new algorithm is fully implemented, this case should no longer
-  ## yield an error at all.  But we'll probably want to skip it under some
-  ## circumstances, it looks like it'll be slow.)
+  ## R PR#4688: once gave p.value=Inf, then FEXACT error 501.  Now handled
+  ## by the 3xk code; the p-value underflows to zero, which is detected
+  ## quickly.  (log.p = TRUE would be very slow here.)
   reli <- cbind(Si = c(2121, 100, 27, 0),
                 av = c(4700, 216, 67, 0),
                 Nc = c(6234,2461,502,14))
-  expect_error(fisher.test(reli, workspace=2000000))
+  expect_identical(fisher.test(reli, workspace=2000000)$p.value, 0)
 
   a <- diag(1:3)
   p <- fisher.test(a, simulate.p.value=TRUE)$p.value
@@ -479,6 +539,52 @@ test_that("fisher.test works on 2xk and 3x3 tables", {
   }
 
   ## Still forwarded to stats::fisher.test().
-  expect_error(fisher.test(matrix(1, 3, 4), midp = TRUE))
+  expect_error(fisher.test(matrix(1, 4, 4), midp = TRUE))
   expect_error(fisher.test(matrix(1, 2, 9), midp = FALSE, simulate.p.value = TRUE, B = 10), NA)
+})
+
+test_that("fisher.test works on larger 2xk and 3xk tables", {
+  ## Reference values were computed by (pruned) exact enumeration with
+  ## 256-bit MPFR arithmetic.  Each case is (column-major entries, number of
+  ## rows, log-p-value, log-midp-value).
+  cases <- list(
+    list(c(59, 64, 79, 94, 38, 45, 90, 86, 82, 82, 60, 72, 70, 79), 2,
+         -0.071938761276373928, -0.071938815194004191),
+    list(c(69, 85, 66, 75, 90, 86, 28, 37, 68, 70, 90, 84, 77, 75), 2,
+         -0.25190433769013532, -0.25190440603994091),
+    list(c(1, 2, 1, 4, 3, 1, 2, 5, 0, 1, 0, 1, 0, 2, 3, 4, 3, 2), 2,
+         -0.35329748516790693, -0.41242615795654952),
+    list(c(1, 1, 3, 1, 1, 1, 1, 0, 0, 2, 3, 1, 3, 7, 5, 2, 3, 0), 2,
+         -1.4843038728469717, -1.4918907420522329),
+    list(c(1, 1, 0, 1, 1, 0, 3, 0, 1, 0, 1, 1, 2, 2, 2, 2, 3, 1), 3,
+         -0.11365018305619758, -0.17781090707359118),
+    list(c(4, 1, 1, 0, 0, 1, 0, 2, 1, 1, 0, 2, 1, 0, 3, 1, 3, 1), 3,
+         -1.4070116119685145, -1.5536083327901693),
+    list(c(0, 1, 0, 1, 2, 0, 4, 1, 2, 0, 6, 1, 7, 4, 1), 3,
+         -2.8640803039982159, -2.9425671320127691),
+    list(c(3, 0, 0, 2, 1, 2, 3, 0, 0, 1, 1, 1, 1, 1, 2), 3,
+         -0.54059281778090373, -0.64751570884718135),
+    list(c(1, 0, 2, 0, 0, 1, 1, 2, 2, 4, 1, 5), 3,
+         -0.18301893558768439, -0.21874741757827967))
+  for (cc in cases) {
+    m <- matrix(cc[[1]], nrow = cc[[2]])
+    for (mm in list(m, t(m))) {
+      expect_equal(fisher.test(mm)$p.value, exp(cc[[3]]), tolerance = 1e-13)
+      expect_equal(fisher.test(mm, log.p = TRUE)$log.p.value, cc[[3]], tolerance = 1e-13)
+      expect_equal(fisher.test(mm, midp = TRUE)$p.value, exp(cc[[4]]), tolerance = 1e-13)
+    }
+  }
+
+  ## Agreement with stats::fisher.test().
+  set.seed(13)
+  for (i in 1:3) {
+    m <- matrix(rpois(12, 8), nrow = 3)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+    m <- matrix(rpois(16, 6), nrow = 2)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+  }
+
+  ## Too large for stats::fisher.test() with its default workspace.
+  big <- matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow = 2)
+  expect_gt(fisher.test(big)$p.value, 0)
 })

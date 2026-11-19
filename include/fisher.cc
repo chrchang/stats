@@ -1712,6 +1712,223 @@ static dd_real CachedSortAndAddLfacts(LfactCache* cachep, uint32_t ct, double* a
   return sum_ddr;
 }
 
+// When FISHER_DEBUG_OVERRIDES is defined, the following environment
+// variables can be used to force particular code paths (for testing):
+//   FISHER2XK_MITM_H / FISHER3XK_MITM_H: number of meet-in-the-middle inner
+//     columns (0 = disable meet-in-the-middle); this also skips the
+//     memoized-recursion race.
+//   FISHER_NO_MEMO: disable memoization.
+#ifdef FISHER_DEBUG_OVERRIDES
+#  include <stdlib.h>
+static inline const char* FisherDebugEnv(const char* name) {
+  return getenv(name);
+}
+#else
+static inline const char* FisherDebugEnv(__maybe_unused const char* name) {
+  return nullptr;
+}
+#endif
+
+// --- Memoization of subproblem results.
+//
+// This is the other main idea behind the network algorithm: the result of a
+// subproblem (the contribution of all tables with a given set of fixed cells)
+// only depends on the subproblem's shape and margins, and on the product of
+// the fixed cells' factorials.  When different prefixes lead to the same
+// subproblem with the same fixed-cell factorial product, the result can be
+// reused.  With large cell counts, such collisions are infrequent, but with
+// small counts, factorial products coincide very often (permuted columns,
+// 0! = 1!, 3! * 5! = 6!, ...), and this collapses most of the search.
+//
+// FEXACT merges paths whose log-probabilities are within a tolerance, which
+// introduces error.  We instead identify factorial products by a hash of
+// their prime-exponent vectors: with a random 64-bit value H(p) assigned to
+// each prime p, the product prod_i (x_i)! is mapped to
+//   sum_p e_p * H(p)  (mod 2^64),
+// where e_p is the exponent of p in the product.  This is additive across
+// factors, so it can be maintained incrementally (with a table of
+// FactHash(x) := hash of x!), and exactly-equal products always have equal
+// hashes, regardless of which factorials they're composed of.  Distinct
+// products collide with probability ~2^{-64}; to be safe, we also require
+// the dd_real log-factorial sums to agree to within rounding error.
+
+typedef struct FisherMemoEntryStruct {
+  dd_real fixed_lfact_sum;
+  double sum_incr;
+  double tie_incr;
+  uint64_t prod_hash;
+  // Hash of (state, prod_hash); 0 = empty slot.
+  uint64_t hash;
+  int32_t state[4];
+  uint32_t status;
+} FisherMemoEntry;
+
+typedef struct FisherMemoStruct {
+  FisherMemoEntry* entries;
+  uint32_t capacity;
+  uint32_t ct;
+  uint32_t max_capacity;
+  // fact_hashes[x] = hash of x!, for x in [0, fact_hash_ct).
+  uint64_t* fact_hashes;
+  uint32_t fact_hash_ct;
+} FisherMemo;
+
+// Work budgets for the memoized recursion, as multiples of the predicted
+// meet-in-the-middle cost (see Fisher2xkLnP()).  These were calibrated so
+// that the budget corresponds to roughly the median meet-in-the-middle
+// runtime for that prediction.
+static const double kFisher2xkMemoBudgetMult = 1.2;
+static const double kFisher3xkMemoBudgetMult = 3.0;
+
+// Memoization is only used for at least this many nonempty columns.
+static const uint32_t kFisher2xkMemoMinCols = 5;
+static const uint32_t kFisher3xkMemoMinCols = 4;
+
+// Memoization is disabled for larger tables, since the fact_hashes table
+// would be too large, and exact collisions are rare with large counts
+// anyway.
+static const int64_t kFisherMemoMaxTot = 1LL << 22;
+static const uint32_t kFisherMemoInitLog2Capacity = 10;
+// 2^20 entries * 72 bytes = 72 MiB.  (Lower caps are a bad tradeoff: once the
+// table fills, new results aren't cached, and some sparse tables slow down by
+// orders of magnitude.)
+static const uint32_t kFisherMemoMaxLog2Capacity = 20;
+// Grow (or stop inserting, if at max capacity) once this fraction of the
+// table is used.
+static const double kFisherMemoMaxLoad = 0.7;
+
+static inline uint64_t SplitMix64(uint64_t xx) {
+  xx += 0x9e3779b97f4a7c15LLU;
+  xx = (xx ^ (xx >> 30)) * 0xbf58476d1ce4e5b9LLU;
+  xx = (xx ^ (xx >> 27)) * 0x94d049bb133111ebLLU;
+  return xx ^ (xx >> 31);
+}
+
+// tot must be <= kFisherMemoMaxTot.
+static BoolErr FisherMemoInit(int64_t tot, FisherMemo* memop) {
+  memset(memop, 0, sizeof(FisherMemo));
+  const uint32_t ct = tot + 1;
+  memop->capacity = 1U << kFisherMemoInitLog2Capacity;
+  memop->max_capacity = 1U << kFisherMemoMaxLog2Capacity;
+  memop->entries = S_CAST(FisherMemoEntry*, calloc(memop->capacity, sizeof(FisherMemoEntry)));
+  memop->fact_hashes = S_CAST(uint64_t*, malloc(ct * sizeof(int64_t)));
+  uint32_t* smallest_prime_factors = S_CAST(uint32_t*, malloc(ct * sizeof(int32_t)));
+  if ((!memop->entries) || (!memop->fact_hashes) || (!smallest_prime_factors)) {
+    free(smallest_prime_factors);
+    return 1;
+  }
+  memop->fact_hash_ct = ct;
+  // Sieve smallest prime factors, then compute g(x) = sum of H(p) over the
+  // prime factors of x (with multiplicity), and take prefix sums.
+  for (uint32_t uii = 0; uii != ct; ++uii) {
+    smallest_prime_factors[uii] = 0;
+  }
+  for (uint64_t ullii = 2; ullii < ct; ++ullii) {
+    if (!smallest_prime_factors[ullii]) {
+      for (uint64_t ulljj = ullii; ulljj < ct; ulljj += ullii) {
+        if (!smallest_prime_factors[ulljj]) {
+          smallest_prime_factors[ulljj] = ullii;
+        }
+      }
+    }
+  }
+  uint64_t* fact_hashes = memop->fact_hashes;
+  // Temporarily store g(x) in fact_hashes[x].
+  fact_hashes[0] = 0;
+  if (ct > 1) {
+    fact_hashes[1] = 0;
+  }
+  for (uint32_t uii = 2; uii < ct; ++uii) {
+    const uint32_t spf = smallest_prime_factors[uii];
+    fact_hashes[uii] = SplitMix64(spf) + fact_hashes[uii / spf];
+  }
+  for (uint32_t uii = 2; uii < ct; ++uii) {
+    fact_hashes[uii] += fact_hashes[uii - 1];
+  }
+  free(smallest_prime_factors);
+  return 0;
+}
+
+static void FisherMemoCleanup(FisherMemo* memop) {
+  free(memop->entries);
+  free(memop->fact_hashes);
+}
+
+static inline uint64_t FisherMemoFactHash(const FisherMemo* memop, int32_t xx) {
+  return memop->fact_hashes[xx];
+}
+
+static inline uint64_t FisherMemoHash(const int32_t* state, uint64_t prod_hash) {
+  uint64_t hash = prod_hash;
+  for (uint32_t uii = 0; uii != 4; ++uii) {
+    hash = SplitMix64(hash ^ S_CAST(uint32_t, state[uii]));
+  }
+  return hash | 1;
+}
+
+// Returns the matching entry, or nullptr.
+static FisherMemoEntry* FisherMemoLookup(FisherMemo* memop, const int32_t* state, uint64_t prod_hash, dd_real fixed_lfact_sum) {
+  const uint64_t hash = FisherMemoHash(state, prod_hash);
+  const uint32_t mask = memop->capacity - 1;
+  // Far above dd_real rounding error.
+  const double tol = 1e-28 * MAXV(1.0, fabs(fixed_lfact_sum.x[0]));
+  for (uint32_t slot = S_CAST(uint32_t, hash) & mask; ; slot = (slot + 1) & mask) {
+    FisherMemoEntry* entryp = &(memop->entries[slot]);
+    if (!entryp->hash) {
+      return nullptr;
+    }
+    if ((entryp->hash == hash) && (entryp->prod_hash == prod_hash) && (!memcmp(entryp->state, state, 4 * sizeof(int32_t))) && (fabs(ddr_sub(entryp->fixed_lfact_sum, fixed_lfact_sum).x[0]) <= tol)) {
+      return entryp;
+    }
+  }
+}
+
+static void FisherMemoInsert(FisherMemo* memop, const int32_t* state, uint64_t prod_hash, dd_real fixed_lfact_sum, uint32_t status, double sum_incr, double tie_incr) {
+  if (memop->ct >= kFisherMemoMaxLoad * memop->capacity) {
+    if (memop->capacity == memop->max_capacity) {
+      return;
+    }
+    // Double the table size.
+    const uint32_t new_capacity = 2 * memop->capacity;
+    FisherMemoEntry* new_entries = S_CAST(FisherMemoEntry*, calloc(new_capacity, sizeof(FisherMemoEntry)));
+    if (!new_entries) {
+      memop->max_capacity = memop->capacity;
+      return;
+    }
+    const uint32_t new_mask = new_capacity - 1;
+    for (uint32_t old_slot = 0; old_slot != memop->capacity; ++old_slot) {
+      const FisherMemoEntry* old_entryp = &(memop->entries[old_slot]);
+      if (old_entryp->hash) {
+        uint32_t slot = S_CAST(uint32_t, old_entryp->hash) & new_mask;
+        while (new_entries[slot].hash) {
+          slot = (slot + 1) & new_mask;
+        }
+        new_entries[slot] = *old_entryp;
+      }
+    }
+    free(memop->entries);
+    memop->entries = new_entries;
+    memop->capacity = new_capacity;
+  }
+  const uint64_t hash = FisherMemoHash(state, prod_hash);
+  const uint32_t mask = memop->capacity - 1;
+  uint32_t slot = S_CAST(uint32_t, hash) & mask;
+  while (memop->entries[slot].hash) {
+    slot = (slot + 1) & mask;
+  }
+  FisherMemoEntry* entryp = &(memop->entries[slot]);
+  entryp->fixed_lfact_sum = fixed_lfact_sum;
+  entryp->sum_incr = sum_incr;
+  entryp->tie_incr = tie_incr;
+  entryp->prod_hash = prod_hash;
+  entryp->hash = hash;
+  memcpy(entryp->state, state, 4 * sizeof(int32_t));
+  entryp->status = status;
+  memop->ct += 1;
+}
+
+struct Fisher2xkMitmStruct;
+
 typedef struct Fisher2xkCtxStruct {
   uint32_t col_ct;
   const int32_t* col_tots;
@@ -1750,6 +1967,28 @@ typedef struct Fisher2xkCtxStruct {
   // probability.
   double outer_sum;
   double tie_ct;
+  // Meet-in-the-middle state (see Fisher2xkMitmRecord()); nullptr when
+  // disabled.
+  struct Fisher2xkMitmStruct* mitm;
+  // Memoization state; nullptr when disabled.  Not used while mitm is
+  // non-null, since the outer recursion's results are deferred then.
+  FisherMemo* memo;
+  // When mitm or memo is enabled, fixed_lfact_sums[j] is the sum of the
+  // log-factorials of columns (j+1)..(col_ct-1) of the current table, when
+  // Fisher2xkLevel(j) is called.
+  dd_real* fixed_lfact_sums;
+  // When memo is enabled, fixed_prod_hashes[j] is the FisherMemo hash of the
+  // factorial product of columns (j+1)..(col_ct-1).
+  uint64_t* fixed_prod_hashes;
+  // When fixed_lfact_sums is non-null, col_lfact_prefix_sums[j] is
+  // lfact(col_tots[0]) + ... + lfact(col_tots[j]).
+  const dd_real* col_lfact_prefix_sums;
+  // Work counter for the memoized recursion, in units of roughly 20ns (4 per
+  // rank visited, 1 per closed-form-sum or tail-boundary step).  When it
+  // exceeds work_budget, aborted is set and the recursion unwinds.
+  uint64_t work;
+  uint64_t work_budget;
+  uint32_t aborted;
 } Fisher2xkCtx;
 
 // Returns index of the column whose row-1 entry should be incremented to
@@ -1869,10 +2108,21 @@ static double Fisher2xkModeCt(const int32_t* col_tots, uint32_t col_ct, const in
 }
 
 // Log-likelihood of the current table relative to the observed table.
-static dd_real Fisher2xkLnLik(Fisher2xkCtx* ctxp) {
+// When ctxp->fixed_lfact_sums is non-null, fixed_lfact_sums[level] must
+// account for columns (level+1)..(col_ct-1), and only the other columns are
+// summed here.
+static dd_real Fisher2xkLnLik(Fisher2xkCtx* ctxp, uint32_t level) {
   const uint32_t col_ct = ctxp->col_ct;
   const int32_t* col_tots = ctxp->col_tots;
   const int32_t* cur_r1 = ctxp->cur_r1;
+  if (ctxp->fixed_lfact_sums) {
+    LfactCache* lfact_cachep = ctxp->lfact_cachep;
+    dd_real sum_ddr = ctxp->fixed_lfact_sums[level];
+    for (uint32_t col_idx = 0; col_idx <= level; ++col_idx) {
+      sum_ddr = ddr_add(sum_ddr, ddr_add(CachedLfact(lfact_cachep, cur_r1[col_idx]), CachedLfact(lfact_cachep, col_tots[col_idx] - cur_r1[col_idx])));
+    }
+    return ddr_sub(ddr_negate(sum_ddr), ctxp->starting_lnprobv_ddr);
+  }
   double* lfact_args = ctxp->lfact_args_buf;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
     lfact_args[2 * col_idx] = cur_r1[col_idx];
@@ -1936,19 +2186,29 @@ static void Fisher2xkClosedFormSum(Fisher2xkCtx* ctxp, uint32_t level, int32_t r
   double x = start_x;
   double inner_r1 = row1_tot - start_x;
   uint32_t lfact_arg_ct = 0;
-  for (uint32_t col_idx = level + 1; col_idx != col_ct; ++col_idx) {
-    lfact_args[lfact_arg_ct++] = cur_r1[col_idx];
-    lfact_args[lfact_arg_ct++] = col_tots[col_idx] - cur_r1[col_idx];
+  if (!ctxp->fixed_lfact_sums) {
+    for (uint32_t col_idx = level + 1; col_idx != col_ct; ++col_idx) {
+      lfact_args[lfact_arg_ct++] = cur_r1[col_idx];
+      lfact_args[lfact_arg_ct++] = col_tots[col_idx] - cur_r1[col_idx];
+    }
   }
   lfact_args[lfact_arg_ct++] = x;
   lfact_args[lfact_arg_ct++] = col_tot - x;
   lfact_args[lfact_arg_ct++] = inner_r1;
   lfact_args[lfact_arg_ct++] = inner_col_tot - inner_r1;
+  dd_real lfact_sum_ddr = CachedSortAndAddLfacts(ctxp->lfact_cachep, lfact_arg_ct, lfact_args);
+  if (ctxp->fixed_lfact_sums) {
+    lfact_sum_ddr = ddr_add(lfact_sum_ddr, ctxp->fixed_lfact_sums[level]);
+  }
   const dd_real rank_lnlik_ddr =
     ddr_sub(ddr_sub(ctxp->inner_const_ddrs[level], ctxp->starting_lnprobv_ddr),
-            CachedSortAndAddLfacts(ctxp->lfact_cachep, lfact_arg_ct, lfact_args));
+            lfact_sum_ddr);
   double rank_lik = exp(rank_lnlik_ddr.x[0]);
-  double outer_sum = ctxp->outer_sum;
+  // The sum is accumulated locally, so that the stopping criterion is
+  // relative to this sum rather than to the (possibly much larger) running
+  // total; otherwise, the error from truncating many closed-form sums would
+  // add up.
+  double outer_sum = 0.0;
   while (1) {
     const double preadd = outer_sum;
     outer_sum += rank_lik;
@@ -1969,8 +2229,9 @@ static void Fisher2xkClosedFormSum(Fisher2xkCtx* ctxp, uint32_t level, int32_t r
       break;
     }
     rank_lik *= rank_lik_mult;
+    ctxp->work += 1;
   }
-  ctxp->outer_sum = outer_sum;
+  ctxp->outer_sum += outer_sum;
 }
 
 // Generalization of Fisher23LnPLeftTailsum().  Differences:
@@ -2015,7 +2276,7 @@ static void Fisher2xkBaseTailsum(Fisher2xkCtx* ctxp, uint32_t swap01, uint32_t e
       m22 -= 1;
     }
     Fisher2xkSetBase(ctxp, swap01, m11, m12);
-    lik = ddr_exp(Fisher2xkLnLik(ctxp)).x[0];
+    lik = ddr_exp(Fisher2xkLnLik(ctxp, 2)).x[0];
     cur_eps = 2 * k2m52;
   }
   uint32_t entry_tie = 0;
@@ -2036,6 +2297,7 @@ static void Fisher2xkBaseTailsum(Fisher2xkCtx* ctxp, uint32_t swap01, uint32_t e
   double m22_tail;
   if (entry_above) {
     while (1) {
+      ctxp->work += 1;
       const double prev_numer = m11 * m22;
       if (prev_numer == 0) {
         // lowest-likelihood table on this side is still too probable
@@ -2086,6 +2348,7 @@ static void Fisher2xkBaseTailsum(Fisher2xkCtx* ctxp, uint32_t swap01, uint32_t e
     const double tailenter_lik = lik;
     uint32_t tie_ct_incr = entry_tie;
     while (1) {
+      ctxp->work += 1;
       total += lik;
       m11 += 1;
       m22 += 1;
@@ -2171,8 +2434,9 @@ static const uint32_t kFisher2xkEmptyTie = 2;
 // Compares the mode of the current subproblem (whose row-1 entries must
 // already be in cur_r1[]) with the observed table, returning the status
 // Fisher2xkLevel() would return for that subproblem.
-static uint32_t Fisher2xkModeStatus(Fisher2xkCtx* ctxp) {
-  const double lnlik = Fisher2xkLnLik(ctxp).x[0];
+// level is as in Fisher2xkLnLik().
+static uint32_t Fisher2xkModeStatus(Fisher2xkCtx* ctxp, uint32_t level) {
+  const double lnlik = Fisher2xkLnLik(ctxp, level).x[0];
   if (lnlik < -kSmallEpsilon) {
     return kFisher2xkEmpty;
   }
@@ -2223,7 +2487,7 @@ static uint32_t Fisher2xkLevel2(Fisher2xkCtx* ctxp, int32_t row1_tot) {
   double orig_base_lnlik = 0.0;
   double orig_base_eps;
   {
-    const dd_real lnlik_ddr = Fisher2xkLnLik(ctxp);
+    const dd_real lnlik_ddr = Fisher2xkLnLik(ctxp, 2);
     const double lnlik = lnlik_ddr.x[0];
     if (lnlik < -kSmallEpsilon) {
       return kFisher2xkEmpty;
@@ -2389,10 +2653,764 @@ static uint32_t Fisher2xkLevel2(Fisher2xkCtx* ctxp, int32_t row1_tot) {
   return kFisher2xkNonempty;
 }
 
+// Meet-in-the-middle extension of Fisher2xkLevel().
+//
+// The recursion in Fisher2xkLevel() visits every nonempty rank at every
+// level, so its cost grows like (number of nonempty ranks at level 3) ~
+// w^{k-3}, where w is the typical width of a column's nonempty range.  The
+// network algorithm instead merges all partial tables that leave the same
+// subproblem behind; with two rows, the subproblem left after fixing
+// columns h..(k-1) is determined by the row-1 total s of columns 0..(h-1).
+// We exploit this with a single merge point:
+// - Columns are split into an "inner" group A = 0..(h-1) and an "outer"
+//   group B = h..(k-1).  The usual recursion runs over the B levels, with
+//   empty ranks still summed in closed form.  But when it reaches a nonempty
+//   2xh subproblem, instead of recursing, it records a query (s, lB, weight),
+//   where lB is the log-likelihood contribution of the B columns (relative to
+//   the observed table), and weight is the product of the symmetry factors.
+// - Afterward, queries are grouped by s and sorted by decreasing lB.  For the
+//   first query in a group, we run the usual recursion over the A levels; in
+//   the notation below, this computes V = sum_{a: e(a) <= 0} exp(e(a)), where
+//   e(a) := lA(a) + lB_1.  For query i, the relevant sum is then
+//     exp(lB_i - lB_1) * (V + sum_{a: 0 < e(a) <= lB_1 - lB_i} exp(e(a))).
+//   So we enumerate the A-tables with 0 < e(a) <= lB_1 - lB_m, and add each
+//   one's likelihood to the bucket of the first query it contributes to;
+//   prefix sums over the buckets then answer all the queries in the group.
+// - Exact comparisons are performed whenever e(a) is within epsilon of a
+//   query threshold, so the result is exactly what the plain recursion
+//   would compute (modulo floating-point summation order).
+// With h chosen to balance the two sides, the cost is roughly w^{k/2} (plus
+// a logarithmic factor), instead of w^{k-3}.
+//
+// Columns in an equal-total run are only treated as interchangeable within
+// each group.
+
+// --- Generic meet-in-the-middle machinery, shared by the 2xk and 3xk code.
+//
+// A query is recorded for each nonempty outer configuration b; key
+// identifies the inner subproblem (i.e. the inner row totals), lnlik_b is
+// the log-likelihood contribution of the outer cells (relative to the
+// observed table), and weight is a symmetry multiplier.  b_vals[] stores
+// enough of b to reconstruct the outer cells.
+//
+// The table-specific code supplies callbacks to process a query group
+// (computing the base sum V for the first query, and then enumerating the
+// inner tables a with 0 < e(a) <= threshold limit), to perform exact
+// comparisons against the observed table, and to save/restore its state
+// around query processing (which may happen in the middle of the outer
+// recursion, when the query buffer fills up).
+
+typedef struct FisherMitmQueryStruct {
+  dd_real lnlik_b;
+  double weight;
+  int64_t key;
+  uint32_t b_idx;
+#ifdef __cplusplus
+  bool operator<(const struct FisherMitmQueryStruct& rhs) const {
+    if (key != rhs.key) {
+      return key < rhs.key;
+    }
+    // Decreasing lnlik_b.
+    if (lnlik_b.x[0] != rhs.lnlik_b.x[0]) {
+      return lnlik_b.x[0] > rhs.lnlik_b.x[0];
+    }
+    return lnlik_b.x[1] > rhs.lnlik_b.x[1];
+  }
+#endif
+} FisherMitmQuery;
+
+#ifndef __cplusplus
+static int FisherMitmQueryCmp(const void* aa, const void* bb) {
+  const FisherMitmQuery* qa = S_CAST(const FisherMitmQuery*, aa);
+  const FisherMitmQuery* qb = S_CAST(const FisherMitmQuery*, bb);
+  if (qa->key != qb->key) {
+    return (qa->key < qb->key)? -1 : 1;
+  }
+  if (qa->lnlik_b.x[0] != qb->lnlik_b.x[0]) {
+    return (qa->lnlik_b.x[0] > qb->lnlik_b.x[0])? -1 : 1;
+  }
+  if (qa->lnlik_b.x[1] != qb->lnlik_b.x[1]) {
+    return (qa->lnlik_b.x[1] > qb->lnlik_b.x[1])? -1 : 1;
+  }
+  return 0;
+}
+#endif
+
+typedef struct FisherMitmStruct {
+  void* table_ctx;
+  // Handles queries[0..(query_ct-1)], which all have the same key and are
+  // sorted in decreasing-lnlik_b order.  Expected to call
+  // FisherMitmSweepBegin(), enumerate inner tables (passing them to
+  // FisherMitmAddEntry() or FisherMitmAddLik()), and then call
+  // FisherMitmSweepEnd().
+  void (*process_group)(void* table_ctx, const FisherMitmQuery* queries, uint32_t query_ct);
+  // Exact comparison of (current inner cells, outer cells described by
+  // b_vals) with the observed table; positive if more probable.  Must not
+  // change the current table.
+  intptr_t (*compare_outer)(void* table_ctx, const int32_t* b_vals);
+  // Writes the factorial arguments of the outer cells described by b_vals
+  // to fac_args[], returning the number of arguments.
+  uint32_t (*outer_fac_args)(void* table_ctx, const int32_t* b_vals, uint64_t* fac_args);
+  void (*save_state)(void* table_ctx);
+  void (*restore_state)(void* table_ctx);
+  uint32_t b_val_ct;
+  FisherMitmQuery* queries;
+  int32_t* b_vals;
+  uint32_t query_ct;
+  uint32_t query_capacity;
+  // Per-group sweep state, with room for query_capacity + 1 entries.
+  // thresholds[i] = lB_1 - lB_{i+1} (dd_real high part).
+  double* thresholds;
+  // exp(thresholds[i])
+  double* threshold_liks;
+  double* bucket_sums;
+  double* bucket_errs;
+  // For contributions resolved by exact comparisons, which only apply to a
+  // single query.
+  double* extra_sums;
+  double* extra_tie_cts;
+  const FisherMitmQuery* group_queries;
+  uint32_t group_query_ct;
+  // Counting-sort buffers.
+  uint32_t* sort_cts;
+  FisherMitmQuery* sort_buf;
+  uint64_t sort_cts_size;
+  uint32_t sort_buf_capacity;
+  // Room for 2 * max_outer_fac_args entries.
+  uint64_t* fac_args;
+  // Results are accumulated here instead of in the table code's
+  // outer_sum/tie_ct, since queries may be processed while the outer
+  // recursion is in the middle of a symmetry-weighted block.
+  double sum;
+  double sum_err;
+  double tie_ct;
+  uint32_t nomem;
+} FisherMitm;
+
+// Queries are processed in batches of at most this size, to bound memory
+// use (~128 bytes + 4 * b_val_ct per query).  Larger batches allow more
+// sharing, but 2^20 was only up to ~11% faster than 2^19 on the hardest
+// tables tested, while using ~50-100 MiB more.
+static const uint32_t kFisherMitmQueryCap = 1U << 19;
+// Maximum lB_1 - lB_m within a group, so that exp(e(a)) can't overflow.
+static const double kFisherMitmMaxSpan = 600.0;
+// Likelihood-space tolerance for FisherMitmAddLik(): 1 +/- 2^{-44}.
+static const double kFisherMitmLikTolHi = 1.0 + k2m44;
+static const double kFisherMitmLikTolLo = 1.0 - k2m44;
+
+static inline double DdrExpd(dd_real a) {
+  return exp(a.x[0]) * (1.0 + a.x[1]);
+}
+
+// Neumaier summation.
+static inline void SumAdd(double addend, double* sump, double* errp) {
+  const double sum = *sump;
+  const double new_sum = sum + addend;
+  if (fabs(sum) >= fabs(addend)) {
+    *errp += (sum - new_sum) + addend;
+  } else {
+    *errp += (addend - new_sum) + sum;
+  }
+  *sump = new_sum;
+}
+
+static BoolErr FisherMitmInit(void* table_ctx, uint32_t b_val_ct, uint32_t max_outer_fac_args, FisherMitm* mitmp) {
+  memset(mitmp, 0, sizeof(FisherMitm));
+  mitmp->table_ctx = table_ctx;
+  mitmp->b_val_ct = b_val_ct;
+  mitmp->fac_args = S_CAST(uint64_t*, malloc(2 * max_outer_fac_args * sizeof(int64_t)));
+  return (mitmp->fac_args == nullptr);
+}
+
+static void FisherMitmCleanup(FisherMitm* mitmp) {
+  free(mitmp->queries);
+  free(mitmp->b_vals);
+  free(mitmp->thresholds);
+  free(mitmp->sort_cts);
+  free(mitmp->sort_buf);
+  free(mitmp->fac_args);
+}
+
+static BoolErr FisherMitmGrow(FisherMitm* mitmp) {
+  const uint32_t old_capacity = mitmp->query_capacity;
+  if (old_capacity >= kFisherMitmQueryCap) {
+    return 1;
+  }
+  const uint32_t new_capacity = old_capacity? MINV(2 * old_capacity, kFisherMitmQueryCap) : 1024;
+  void* new_buf = realloc(mitmp->queries, new_capacity * sizeof(FisherMitmQuery));
+  if (!new_buf) {
+    return 1;
+  }
+  mitmp->queries = S_CAST(FisherMitmQuery*, new_buf);
+  new_buf = realloc(mitmp->b_vals, new_capacity * S_CAST(uintptr_t, mitmp->b_val_ct) * sizeof(int32_t));
+  if (!new_buf) {
+    return 1;
+  }
+  mitmp->b_vals = S_CAST(int32_t*, new_buf);
+  // thresholds, threshold_liks, bucket_sums, bucket_errs, extra_sums,
+  // extra_tie_cts
+  new_buf = realloc(mitmp->thresholds, 6 * (new_capacity + 1) * sizeof(double));
+  if (!new_buf) {
+    return 1;
+  }
+  mitmp->thresholds = S_CAST(double*, new_buf);
+  mitmp->threshold_liks = &(mitmp->thresholds[new_capacity + 1]);
+  mitmp->bucket_sums = &(mitmp->threshold_liks[new_capacity + 1]);
+  mitmp->bucket_errs = &(mitmp->bucket_sums[new_capacity + 1]);
+  mitmp->extra_sums = &(mitmp->bucket_errs[new_capacity + 1]);
+  mitmp->extra_tie_cts = &(mitmp->extra_sums[new_capacity + 1]);
+  mitmp->query_capacity = new_capacity;
+  return 0;
+}
+
+static inline const int32_t* FisherMitmBVals(const FisherMitm* mitmp, const FisherMitmQuery* queryp) {
+  return &(mitmp->b_vals[queryp->b_idx * S_CAST(uintptr_t, mitmp->b_val_ct)]);
+}
+
+static void FisherMitmProcess(FisherMitm* mitmp);
+
+static void FisherMitmAppend(FisherMitm* mitmp, int64_t key, dd_real lnlik_b, double weight, const int32_t* b_vals) {
+  if (mitmp->query_ct == mitmp->query_capacity) {
+    if (unlikely(FisherMitmGrow(mitmp))) {
+      mitmp->nomem = 1;
+      return;
+    }
+  }
+  const uint32_t query_idx = mitmp->query_ct;
+  FisherMitmQuery* queryp = &(mitmp->queries[query_idx]);
+  queryp->lnlik_b = lnlik_b;
+  queryp->weight = weight;
+  queryp->key = key;
+  queryp->b_idx = query_idx;
+  memcpy(&(mitmp->b_vals[query_idx * S_CAST(uintptr_t, mitmp->b_val_ct)]), b_vals, mitmp->b_val_ct * sizeof(int32_t));
+  mitmp->query_ct = query_idx + 1;
+  if (mitmp->query_ct == kFisherMitmQueryCap) {
+    FisherMitmProcess(mitmp);
+  }
+}
+
+// Adds the first query's contribution (base_sum = V and its tie count), and
+// initializes the sweep state for the remaining queries.  Returns 0 if
+// there's nothing left to do, and otherwise sets *excess_limit_ptr to the
+// largest relevant e(a) (plus epsilon).
+static uint32_t FisherMitmSweepBegin(FisherMitm* mitmp, const FisherMitmQuery* queries, uint32_t query_ct, double base_sum, double base_tie_ct, double* excess_limit_ptr) {
+  SumAdd(queries[0].weight * base_sum, &mitmp->sum, &mitmp->sum_err);
+  mitmp->tie_ct += queries[0].weight * base_tie_ct;
+  if (query_ct == 1) {
+    return 0;
+  }
+  const dd_real lnlik_b1_ddr = queries[0].lnlik_b;
+  // Query 0 is already fully accounted for, so it's excluded from the sweep.
+  const FisherMitmQuery* sweep_queries = &(queries[1]);
+  const uint32_t sweep_ct = query_ct - 1;
+  for (uint32_t query_idx = 0; query_idx != sweep_ct; ++query_idx) {
+    const dd_real threshold_ddr = ddr_sub(lnlik_b1_ddr, sweep_queries[query_idx].lnlik_b);
+    mitmp->thresholds[query_idx] = threshold_ddr.x[0];
+    mitmp->threshold_liks[query_idx] = DdrExpd(threshold_ddr);
+    mitmp->bucket_sums[query_idx] = 0.0;
+    mitmp->bucket_errs[query_idx] = 0.0;
+    mitmp->extra_sums[query_idx] = 0.0;
+    mitmp->extra_tie_cts[query_idx] = 0.0;
+  }
+  mitmp->group_queries = sweep_queries;
+  mitmp->group_query_ct = sweep_ct;
+  *excess_limit_ptr = mitmp->thresholds[sweep_ct - 1] + kSmallEpsilon;
+  return 1;
+}
+
+// Handles near-ties between an inner table with excess e(a) and the
+// thresholds starting at index lo: exact comparisons are performed for each
+// threshold within epsilon of e(a).
+static void FisherMitmAddNear(FisherMitm* mitmp, double excess, double lik, uint32_t lo) {
+  const double* thresholds = mitmp->thresholds;
+  const uint32_t query_ct = mitmp->group_query_ct;
+  const double excess_hi = excess + kSmallEpsilon;
+  uint32_t query_idx = lo;
+  for (; (query_idx != query_ct) && (thresholds[query_idx] <= excess_hi); ++query_idx) {
+    const intptr_t cmp_result = mitmp->compare_outer(mitmp->table_ctx, FisherMitmBVals(mitmp, &(mitmp->group_queries[query_idx])));
+    if (cmp_result <= 0) {
+      mitmp->extra_sums[query_idx] += lik;
+      if (cmp_result == 0) {
+        mitmp->extra_tie_cts[query_idx] += 1;
+      }
+    }
+  }
+  if (query_idx != query_ct) {
+    SumAdd(lik, &(mitmp->bucket_sums[query_idx]), &(mitmp->bucket_errs[query_idx]));
+  }
+}
+
+// Adds the current inner table, with dd_real-precision excess e(a) > 0, to
+// the sweep state.
+// Its likelihood contributes to query i iff e(a) <= thresholds[i]; since
+// thresholds[] is sorted, it's added to the bucket of the first query it
+// contributes to, unless it's within epsilon of some thresholds, in which
+// case exact comparisons are performed for those queries.
+static void FisherMitmAddEntry(FisherMitm* mitmp, dd_real excess_ddr) {
+  const double excess = excess_ddr.x[0];
+  const double* thresholds = mitmp->thresholds;
+  const uint32_t query_ct = mitmp->group_query_ct;
+  // Find the first threshold >= excess - kSmallEpsilon.
+  const double excess_lo = excess - kSmallEpsilon;
+  uint32_t lo = 0;
+  uint32_t hi = query_ct;
+  while (lo < hi) {
+    const uint32_t mid = (lo + hi) / 2;
+    if (thresholds[mid] < excess_lo) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  if (lo == query_ct) {
+    return;
+  }
+  const double lik = DdrExpd(excess_ddr);
+  if (thresholds[lo] > excess + kSmallEpsilon) {
+    SumAdd(lik, &(mitmp->bucket_sums[lo]), &(mitmp->bucket_errs[lo]));
+    return;
+  }
+  FisherMitmAddNear(mitmp, excess, lik, lo);
+}
+
+// Fast path for an inner table whose likelihood exp(e(a)) is only known to
+// relative accuracy ~2^{-47}, with e(a) known to be > 0.
+// *bucket_idx_ptr must be query_ct, or the bucket index returned by a
+// previous call with a larger likelihood.  Returns 0 on success, or 1 if the
+// table is within the tolerance of a threshold (in which case the caller
+// must compute e(a) exactly and call FisherMitmAddEntry()).
+static inline uint32_t FisherMitmAddLik(FisherMitm* mitmp, double lik, uint32_t* bucket_idx_ptr) {
+  const double* threshold_liks = mitmp->threshold_liks;
+  const uint32_t query_ct = mitmp->group_query_ct;
+  uint32_t bucket_idx = *bucket_idx_ptr;
+  const double lik_lo = lik * kFisherMitmLikTolLo;
+  if (bucket_idx && (threshold_liks[bucket_idx - 1] >= lik_lo)) {
+    // Binary search for the new first threshold >= lik_lo.
+    uint32_t lo = 0;
+    uint32_t hi = bucket_idx - 1;
+    while (lo < hi) {
+      const uint32_t mid = (lo + hi) / 2;
+      if (threshold_liks[mid] < lik_lo) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    bucket_idx = lo;
+    *bucket_idx_ptr = bucket_idx;
+  }
+  if (bucket_idx == query_ct) {
+    return 0;
+  }
+  if (threshold_liks[bucket_idx] > lik * kFisherMitmLikTolHi) {
+    SumAdd(lik, &(mitmp->bucket_sums[bucket_idx]), &(mitmp->bucket_errs[bucket_idx]));
+    return 0;
+  }
+  return 1;
+}
+
+// Returns 1 iff the outer-cell factorial products of the two queries are
+// exactly equal.
+static uint32_t FisherMitmOuterEqual(FisherMitm* mitmp, const int32_t* b1, const int32_t* b2) {
+  uint64_t* numer_factorial_args = mitmp->fac_args;
+  const uint32_t arg_ct = mitmp->outer_fac_args(mitmp->table_ctx, b1, numer_factorial_args);
+  uint64_t* denom_factorial_args = &(numer_factorial_args[arg_ct]);
+  mitmp->outer_fac_args(mitmp->table_ctx, b2, denom_factorial_args);
+  td_real starting_lnprobv_tdr;
+  starting_lnprobv_tdr.x[0] = DBL_MAX;
+  td_real ln_odds_ratio_tdr = tdr_make1(0.0);
+  double unused;
+  return (CompareFactorialProducts(arg_ct, tdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, &starting_lnprobv_tdr, &ln_odds_ratio_tdr, &unused) == 0);
+}
+
+// For query i >= 1, the relevant sum is
+//   exp(lB_i - lB_1) * (V + sum_{a: 0 < e(a) <= lB_1 - lB_i} exp(e(a))).
+static void FisherMitmSweepEnd(FisherMitm* mitmp, const FisherMitmQuery* queries, double base_sum, double base_tie_ct) {
+  const uint32_t sweep_ct = mitmp->group_query_ct;
+  const FisherMitmQuery* sweep_queries = mitmp->group_queries;
+  const dd_real lnlik_b1_ddr = queries[0].lnlik_b;
+  const int32_t* b_vals1 = FisherMitmBVals(mitmp, &(queries[0]));
+  double prefix_sum = base_sum;
+  double prefix_err = 0.0;
+  for (uint32_t query_idx = 0; query_idx != sweep_ct; ++query_idx) {
+    const FisherMitmQuery* queryp = &(sweep_queries[query_idx]);
+    SumAdd(mitmp->bucket_sums[query_idx], &prefix_sum, &prefix_err);
+    prefix_err += mitmp->bucket_errs[query_idx];
+    const double cur_sum = prefix_sum + prefix_err + mitmp->extra_sums[query_idx];
+    double cur_tie_ct = mitmp->extra_tie_cts[query_idx];
+    const dd_real threshold_ddr = ddr_sub(lnlik_b1_ddr, queryp->lnlik_b);
+    if ((base_tie_ct != 0.0) && (threshold_ddr.x[0] <= kSmallEpsilon) && FisherMitmOuterEqual(mitmp, b_vals1, FisherMitmBVals(mitmp, queryp))) {
+      // The base region's ties are also ties for this query.
+      cur_tie_ct += base_tie_ct;
+    }
+    const double scale = queryp->weight * DdrExpd(ddr_negate(threshold_ddr));
+    SumAdd(scale * cur_sum, &mitmp->sum, &mitmp->sum_err);
+    mitmp->tie_ct += queryp->weight * cur_tie_ct;
+  }
+}
+
+// Sorts queries by key, then decreasing lnlik_b.  A counting sort is used for
+// the first key when the range is small enough.
+static void FisherMitmSortQueries(FisherMitm* mitmp) {
+  const uint32_t query_ct = mitmp->query_ct;
+  FisherMitmQuery* queries = mitmp->queries;
+  int64_t min_key = queries[0].key;
+  int64_t max_key = min_key;
+  for (uint32_t query_idx = 1; query_idx != query_ct; ++query_idx) {
+    const int64_t cur_key = queries[query_idx].key;
+    min_key = MINV(min_key, cur_key);
+    max_key = MAXV(max_key, cur_key);
+  }
+  const uint64_t range = S_CAST(uint64_t, max_key - min_key) + 1;
+  if (range > query_ct) {
+    STD_SORT(query_ct, FisherMitmQueryCmp, queries);
+    return;
+  }
+  if (range > mitmp->sort_cts_size) {
+    free(mitmp->sort_cts);
+    mitmp->sort_cts = S_CAST(uint32_t*, malloc((range + 1) * sizeof(int32_t)));
+    if (!mitmp->sort_cts) {
+      mitmp->sort_cts_size = 0;
+      STD_SORT(query_ct, FisherMitmQueryCmp, queries);
+      return;
+    }
+    mitmp->sort_cts_size = range;
+  }
+  if (mitmp->sort_buf_capacity < query_ct) {
+    free(mitmp->sort_buf);
+    mitmp->sort_buf = S_CAST(FisherMitmQuery*, malloc(mitmp->query_capacity * sizeof(FisherMitmQuery)));
+    if (!mitmp->sort_buf) {
+      mitmp->sort_buf_capacity = 0;
+      STD_SORT(query_ct, FisherMitmQueryCmp, queries);
+      return;
+    }
+    mitmp->sort_buf_capacity = mitmp->query_capacity;
+  }
+  uint32_t* cts = mitmp->sort_cts;
+  memset(cts, 0, (range + 1) * sizeof(int32_t));
+  for (uint32_t query_idx = 0; query_idx != query_ct; ++query_idx) {
+    cts[queries[query_idx].key - min_key + 1] += 1;
+  }
+  for (uint64_t ullii = 1; ullii <= range; ++ullii) {
+    cts[ullii] += cts[ullii - 1];
+  }
+  FisherMitmQuery* sorted = mitmp->sort_buf;
+  for (uint32_t query_idx = 0; query_idx != query_ct; ++query_idx) {
+    sorted[cts[queries[query_idx].key - min_key]++] = queries[query_idx];
+  }
+  // cts[j] is now the end of group j.
+  uint32_t group_start = 0;
+  for (uint64_t ullii = 0; ullii != range; ++ullii) {
+    const uint32_t group_end = cts[ullii];
+    if (group_end - group_start > 1) {
+      STD_SORT(group_end - group_start, FisherMitmQueryCmp, &(sorted[group_start]));
+    }
+    group_start = group_end;
+  }
+  memcpy(queries, sorted, query_ct * sizeof(FisherMitmQuery));
+}
+
+static void FisherMitmProcess(FisherMitm* mitmp) {
+  const uint32_t query_ct = mitmp->query_ct;
+  if ((!query_ct) || mitmp->nomem) {
+    return;
+  }
+  void* table_ctx = mitmp->table_ctx;
+  mitmp->save_state(table_ctx);
+  FisherMitmSortQueries(mitmp);
+  FisherMitmQuery* queries = mitmp->queries;
+  for (uint32_t group_start = 0; group_start != query_ct; ) {
+    const int64_t key = queries[group_start].key;
+    const dd_real lnlik_b1_ddr = queries[group_start].lnlik_b;
+    uint32_t group_end = group_start + 1;
+    while ((group_end != query_ct) && (queries[group_end].key == key) && (ddr_sub(lnlik_b1_ddr, queries[group_end].lnlik_b).x[0] <= kFisherMitmMaxSpan)) {
+      ++group_end;
+    }
+    mitmp->process_group(table_ctx, &(queries[group_start]), group_end - group_start);
+    if (mitmp->nomem) {
+      break;
+    }
+    group_start = group_end;
+  }
+  mitmp->query_ct = 0;
+  mitmp->restore_state(table_ctx);
+}
+
+// --- 2xk meet-in-the-middle.
+
+typedef struct Fisher2xkMitmModeCacheEntryStruct {
+  dd_real neg_lnlik_a;
+  int32_t row1_tot;
+} Fisher2xkMitmModeCacheEntry;
+
+static const uint32_t kFisher2xkMitmModeCacheSize = 4096;
+
+typedef struct Fisher2xkMitmStruct {
+  FisherMitm core;
+  Fisher2xkCtx* ctxp;
+  // h: number of inner columns.  Must be in [3, col_ct - 2].
+  uint32_t a_col_ct;
+  // Product of the symmetry factors of the enclosing outer levels.
+  double cur_weight;
+  Fisher2xkMitmModeCacheEntry* mode_cache;
+  int32_t* saved_cur_r1;
+  int32_t* scratch_b;
+  double saved_outer_sum;
+  double saved_tie_ct;
+} Fisher2xkMitm;
+
+static inline dd_real Fisher2xkColLfacts(Fisher2xkCtx* ctxp, uint32_t col_idx, int32_t x) {
+  return ddr_add(CachedLfact(ctxp->lfact_cachep, x), CachedLfact(ctxp->lfact_cachep, ctxp->col_tots[col_idx] - x));
+}
+
+static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot);
+
+// Called in place of Fisher2xkLevel(ctxp, a_col_ct - 1, row1_tot).
+static uint32_t Fisher2xkMitmRecord(Fisher2xkCtx* ctxp, int32_t row1_tot) {
+  Fisher2xkMitm* mitmp = ctxp->mitm;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const dd_real lnlik_b_ddr = ddr_sub(ddr_negate(ctxp->fixed_lfact_sums[a_col_ct - 1]), ctxp->starting_lnprobv_ddr);
+  {
+    // Log-likelihood of the inner mode only depends on row1_tot.
+    Fisher2xkMitmModeCacheEntry* cache_entryp = &(mitmp->mode_cache[S_CAST(uint32_t, row1_tot) & (kFisher2xkMitmModeCacheSize - 1)]);
+    if (cache_entryp->row1_tot != row1_tot) {
+      dd_real lfact_sum_ddr = ddr_maked(0.0);
+      for (uint32_t col_idx = 0; col_idx != a_col_ct; ++col_idx) {
+        lfact_sum_ddr = ddr_add(lfact_sum_ddr, Fisher2xkColLfacts(ctxp, col_idx, ctxp->cur_r1[col_idx]));
+      }
+      cache_entryp->row1_tot = row1_tot;
+      cache_entryp->neg_lnlik_a = lfact_sum_ddr;
+    }
+    const double mode_lnlik = ddr_sub(lnlik_b_ddr, cache_entryp->neg_lnlik_a).x[0];
+    if (mode_lnlik < -kSmallEpsilon) {
+      return kFisher2xkEmpty;
+    }
+    if (mode_lnlik <= kSmallEpsilon) {
+      const uint32_t status = Fisher2xkModeStatus(ctxp, a_col_ct - 1);
+      if (status != kFisher2xkNonempty) {
+        return status;
+      }
+    }
+  }
+  FisherMitmAppend(&mitmp->core, row1_tot, lnlik_b_ddr, mitmp->cur_weight, &(ctxp->cur_r1[a_col_ct]));
+  return kFisher2xkNonempty;
+}
+
+// Returns 1 if the current table is more probable than the observed table,
+// given its (dd_real-precision) log-likelihood relative to the observed table.
+static inline uint32_t Fisher2xkMoreProbable(Fisher2xkCtx* ctxp, dd_real lnlik_ddr) {
+  if (lnlik_ddr.x[0] > kSmallEpsilon) {
+    return 1;
+  }
+  if (lnlik_ddr.x[0] < -kSmallEpsilon) {
+    return 0;
+  }
+  double unused;
+  return (Fisher2xkCompare(ctxp, &unused) > 0);
+}
+
+// In the innermost enumeration loop, likelihoods are updated with cheap
+// likelihood-ratio multiplications, and only recomputed from scratch (with
+// dd_real log-factorials) every this many steps, or when they're near 1 or
+// a query threshold.  Accumulated relative error between syncs is bounded by
+// ~4 ulps per step, which must stay well below the FisherMitmAddLik()
+// tolerance.
+static const uint32_t kFisherMitmSyncInterval = 8;
+
+// Enumerates inner tables a with e(a) > 0 (i.e. more probable than the
+// observed table when combined with the outer columns currently in
+// cur_r1[]), passing those with e(a) <= excess_limit to the sweep.
+// On entry, cur_r1[0..level] must be the mode of the 2x(level+1) subproblem
+// with row-1 total row1_tot, and partial_ddr must be lB_1 minus the
+// log-factorial terms of columns (level+1)..(a_col_ct-1).  cur_r1[] is
+// restored on exit.
+static void Fisher2xkMitmEnum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot, dd_real partial_ddr, double excess_limit) {
+  Fisher2xkMitm* mitmp = ctxp->mitm;
+  FisherMitm* corep = &mitmp->core;
+  int32_t* cur_r1 = ctxp->cur_r1;
+  const int32_t* col_tots = ctxp->col_tots;
+  if (level == 1) {
+    const int32_t mode1 = cur_r1[1];
+    const int32_t x_min = MAXV(0, row1_tot - col_tots[0]);
+    const int32_t x_max = MINV(col_tots[1], row1_tot);
+    // The likelihood and the bucket index are nonincreasing as we walk away
+    // from the mode.
+    const double lik_limit = exp(excess_limit) * kFisherMitmLikTolHi;
+    const double c0 = col_tots[0];
+    const double c1 = col_tots[1];
+    for (int32_t dir = 1; dir >= -1; dir -= 2) {
+      int32_t x = (dir == 1)? mode1 : (mode1 - 1);
+      uint32_t steps_since_sync = kFisherMitmSyncInterval;
+      double lik = 0.0;
+      uint32_t bucket_idx = corep->group_query_ct;
+      for (; (x >= x_min) && (x <= x_max); x += dir) {
+        if (steps_since_sync < kFisherMitmSyncInterval) {
+          // Update lik from (x - dir) to x.
+          const double prev_x1 = x - dir;
+          const double prev_x0 = row1_tot - prev_x1;
+          if (dir == 1) {
+            lik *= ((c1 - prev_x1) * prev_x0) / ((prev_x1 + 1) * (c0 - prev_x0 + 1));
+          } else {
+            lik *= (prev_x1 * (c0 - prev_x0)) / ((c1 - prev_x1 + 1) * (prev_x0 + 1));
+          }
+          ++steps_since_sync;
+          if (lik > kFisherMitmLikTolHi) {
+            if ((lik > lik_limit) || (!FisherMitmAddLik(corep, lik, &bucket_idx))) {
+              continue;
+            }
+          }
+          // Near 1 or a threshold; fall through to an exact evaluation.
+        }
+        cur_r1[0] = row1_tot - x;
+        cur_r1[1] = x;
+        const dd_real excess_ddr = ddr_sub(partial_ddr, ddr_add(Fisher2xkColLfacts(ctxp, 1, x), Fisher2xkColLfacts(ctxp, 0, row1_tot - x)));
+        if (!Fisher2xkMoreProbable(ctxp, excess_ddr)) {
+          break;
+        }
+        lik = DdrExpd(excess_ddr);
+        steps_since_sync = 0;
+        if (excess_ddr.x[0] <= excess_limit) {
+          FisherMitmAddEntry(corep, excess_ddr);
+        }
+      }
+    }
+    cur_r1[0] = row1_tot - mode1;
+    cur_r1[1] = mode1;
+    return;
+  }
+  int32_t* saved_mode = &(ctxp->saved_modes[level * ctxp->col_ct]);
+  const int32_t start_x = cur_r1[level];
+  const int32_t x_min = MAXV(0, row1_tot - ctxp->cum_col_tots[level]);
+  const int32_t x_max = MINV(col_tots[level], row1_tot);
+  memcpy(saved_mode, cur_r1, level * sizeof(int32_t));
+  for (uint32_t x_decreasing = 0; x_decreasing != 2; ++x_decreasing) {
+    int32_t x = start_x;
+    if (x_decreasing) {
+      if (x == x_min) {
+        break;
+      }
+      memcpy(cur_r1, saved_mode, level * sizeof(int32_t));
+      --x;
+      Fisher2xkModeIncr(col_tots, level, cur_r1);
+    }
+    while (1) {
+      cur_r1[level] = x;
+      const dd_real inner_partial_ddr = ddr_sub(partial_ddr, Fisher2xkColLfacts(ctxp, level, x));
+      dd_real mode_excess_ddr = inner_partial_ddr;
+      for (uint32_t col_idx = 0; col_idx != level; ++col_idx) {
+        mode_excess_ddr = ddr_sub(mode_excess_ddr, Fisher2xkColLfacts(ctxp, col_idx, cur_r1[col_idx]));
+      }
+      if (!Fisher2xkMoreProbable(ctxp, mode_excess_ddr)) {
+        // Maximum excess over a rank is log-concave in x, so we're done in
+        // this direction (and if this is the modal rank, we're done
+        // entirely).
+        if ((!x_decreasing) && (x == start_x)) {
+          x_decreasing = 1;
+        }
+        break;
+      }
+      Fisher2xkMitmEnum(ctxp, level - 1, row1_tot - x, inner_partial_ddr, excess_limit);
+      if (x_decreasing) {
+        if (x == x_min) {
+          break;
+        }
+        --x;
+        Fisher2xkModeIncr(col_tots, level, cur_r1);
+      } else {
+        if (x == x_max) {
+          break;
+        }
+        ++x;
+        Fisher2xkModeDecr(col_tots, level, cur_r1);
+      }
+    }
+  }
+  memcpy(cur_r1, saved_mode, level * sizeof(int32_t));
+  cur_r1[level] = start_x;
+}
+
+static void Fisher2xkMitmProcessGroup(void* table_ctx, const FisherMitmQuery* queries, uint32_t query_ct) {
+  Fisher2xkMitm* mitmp = S_CAST(Fisher2xkMitm*, table_ctx);
+  Fisher2xkCtx* ctxp = mitmp->ctxp;
+  int32_t* cur_r1 = ctxp->cur_r1;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const int32_t row1_tot = S_CAST(int32_t, queries[0].key);
+  memcpy(&(cur_r1[a_col_ct]), FisherMitmBVals(&mitmp->core, &(queries[0])), (ctxp->col_ct - a_col_ct) * sizeof(int32_t));
+  Fisher2xkInitMode(ctxp->col_tots, a_col_ct, ctxp->cum_col_tots[a_col_ct], row1_tot, cur_r1);
+  ctxp->outer_sum = 0.0;
+  ctxp->tie_ct = 0.0;
+  ctxp->fixed_lfact_sums[a_col_ct - 1] = ddr_negate(ddr_add(queries[0].lnlik_b, ctxp->starting_lnprobv_ddr));
+  if (ctxp->memo) {
+    uint64_t prod_hash = 0;
+    for (uint32_t col_idx = a_col_ct; col_idx != ctxp->col_ct; ++col_idx) {
+      prod_hash += FisherMemoFactHash(ctxp->memo, cur_r1[col_idx]) + FisherMemoFactHash(ctxp->memo, ctxp->col_tots[col_idx] - cur_r1[col_idx]);
+    }
+    ctxp->fixed_prod_hashes[a_col_ct - 1] = prod_hash;
+  }
+  // ctxp->mitm must be temporarily cleared, so this doesn't just record the
+  // query again.
+  ctxp->mitm = nullptr;
+  Fisher2xkLevel(ctxp, a_col_ct - 1, row1_tot);
+  ctxp->mitm = mitmp;
+  const double base_sum = ctxp->outer_sum;
+  const double base_tie_ct = ctxp->tie_ct;
+  double excess_limit;
+  if (!FisherMitmSweepBegin(&mitmp->core, queries, query_ct, base_sum, base_tie_ct, &excess_limit)) {
+    return;
+  }
+  Fisher2xkMitmEnum(ctxp, a_col_ct - 1, row1_tot, queries[0].lnlik_b, excess_limit);
+  FisherMitmSweepEnd(&mitmp->core, queries, base_sum, base_tie_ct);
+}
+
+static intptr_t Fisher2xkMitmCompareOuter(void* table_ctx, const int32_t* b_vals) {
+  Fisher2xkMitm* mitmp = S_CAST(Fisher2xkMitm*, table_ctx);
+  Fisher2xkCtx* ctxp = mitmp->ctxp;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const uint32_t b_col_ct = ctxp->col_ct - a_col_ct;
+  int32_t* outer_r1 = &(ctxp->cur_r1[a_col_ct]);
+  memcpy(mitmp->scratch_b, outer_r1, b_col_ct * sizeof(int32_t));
+  memcpy(outer_r1, b_vals, b_col_ct * sizeof(int32_t));
+  double unused;
+  const intptr_t result = Fisher2xkCompare(ctxp, &unused);
+  memcpy(outer_r1, mitmp->scratch_b, b_col_ct * sizeof(int32_t));
+  return result;
+}
+
+static uint32_t Fisher2xkMitmOuterFacArgs(void* table_ctx, const int32_t* b_vals, uint64_t* fac_args) {
+  Fisher2xkMitm* mitmp = S_CAST(Fisher2xkMitm*, table_ctx);
+  const Fisher2xkCtx* ctxp = mitmp->ctxp;
+  const uint32_t col_ct = ctxp->col_ct;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const int32_t* col_tots = ctxp->col_tots;
+  uint32_t arg_ct = 0;
+  for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+    const int32_t val = b_vals[col_idx - a_col_ct];
+    fac_args[arg_ct++] = val;
+    fac_args[arg_ct++] = col_tots[col_idx] - val;
+  }
+  return arg_ct;
+}
+
+static void Fisher2xkMitmSaveState(void* table_ctx) {
+  Fisher2xkMitm* mitmp = S_CAST(Fisher2xkMitm*, table_ctx);
+  Fisher2xkCtx* ctxp = mitmp->ctxp;
+  memcpy(mitmp->saved_cur_r1, ctxp->cur_r1, ctxp->col_ct * sizeof(int32_t));
+  mitmp->saved_outer_sum = ctxp->outer_sum;
+  mitmp->saved_tie_ct = ctxp->tie_ct;
+}
+
+static void Fisher2xkMitmRestoreState(void* table_ctx) {
+  Fisher2xkMitm* mitmp = S_CAST(Fisher2xkMitm*, table_ctx);
+  Fisher2xkCtx* ctxp = mitmp->ctxp;
+  memcpy(ctxp->cur_r1, mitmp->saved_cur_r1, ctxp->col_ct * sizeof(int32_t));
+  ctxp->outer_sum = mitmp->saved_outer_sum;
+  ctxp->tie_ct = mitmp->saved_tie_ct;
+}
+
 // On entry, cur_r1[0..level] must be the mode of the 2x(level+1) subproblem
 // with row-1 total row1_tot and the current cur_r1[(level+1)..] values.  It is
 // restored on exit.
-static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot) {
+static uint32_t Fisher2xkLevelInner(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot) {
   if (level == 2) {
     return Fisher2xkLevel2(ctxp, row1_tot);
   }
@@ -2415,6 +3433,14 @@ static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_
     }
     while (1) {
       cur_r1[level] = x;
+      ctxp->work += 4;
+      dd_real* fixed_lfact_sums = ctxp->fixed_lfact_sums;
+      if (fixed_lfact_sums) {
+        fixed_lfact_sums[level - 1] = ddr_add(fixed_lfact_sums[level], Fisher2xkColLfacts(ctxp, level, x));
+        if (ctxp->memo) {
+          ctxp->fixed_prod_hashes[level - 1] = ctxp->fixed_prod_hashes[level] + FisherMemoFactHash(ctxp->memo, x) + FisherMemoFactHash(ctxp->memo, col_tots[level] - x);
+        }
+      }
       uint32_t inner_status;
       const double weight = Fisher2xkSymFactor(ctxp, level);
       if (weight == 1) {
@@ -2423,16 +3449,28 @@ static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_
         if (weight == 0) {
           // If this rank is nonempty, its contribution is accounted for by
           // the permutation in nonincreasing order.
-          inner_status = Fisher2xkModeStatus(ctxp);
+          inner_status = Fisher2xkModeStatus(ctxp, level - 1);
         } else {
           const double saved_outer_sum = ctxp->outer_sum;
           const double saved_tie_ct = ctxp->tie_ct;
           ctxp->outer_sum = 0.0;
           ctxp->tie_ct = 0.0;
+          Fisher2xkMitm* mitmp = ctxp->mitm;
+          double saved_weight = 0.0;
+          if (mitmp) {
+            saved_weight = mitmp->cur_weight;
+            mitmp->cur_weight = saved_weight * weight;
+          }
           inner_status = Fisher2xkLevel(ctxp, level - 1, row1_tot - x);
+          if (mitmp) {
+            mitmp->cur_weight = saved_weight;
+          }
           ctxp->outer_sum = saved_outer_sum + weight * ctxp->outer_sum;
           ctxp->tie_ct = saved_tie_ct + weight * ctxp->tie_ct;
         }
+      }
+      if (ctxp->aborted) {
+        return kFisher2xkNonempty;
       }
       if (inner_status != kFisher2xkNonempty) {
         if ((!x_decreasing) && (x == start_x)) {
@@ -2463,6 +3501,147 @@ static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_
   memcpy(cur_r1, saved_mode, level * sizeof(int32_t));
   cur_r1[level] = start_x;
   return kFisher2xkNonempty;
+}
+
+// On entry, cur_r1[0..level] must be the mode of the 2x(level+1) subproblem
+// with row-1 total row1_tot and the current cur_r1[(level+1)..] values.  It is
+// restored on exit.
+static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot) {
+  if (ctxp->mitm) {
+    if (level + 1 == ctxp->mitm->a_col_ct) {
+      return Fisher2xkMitmRecord(ctxp, row1_tot);
+    }
+    return Fisher2xkLevelInner(ctxp, level, row1_tot);
+  }
+  FisherMemo* memop = ctxp->memo;
+  if (!memop) {
+    return Fisher2xkLevelInner(ctxp, level, row1_tot);
+  }
+  const dd_real fixed_lfact_sum_ddr = ctxp->fixed_lfact_sums[level];
+  {
+    // Since x! (c-x)! <= c!, every table in this subproblem is at least as
+    // probable as exp(-fixed_lfact_sum - sum_{j<=level} lfact(c_j)).  If
+    // that's more probable than the observed table, the subproblem
+    // contributes nothing.
+    const double min_lnlik = ddr_sub(ddr_negate(ddr_add(fixed_lfact_sum_ddr, ctxp->col_lfact_prefix_sums[level])), ctxp->starting_lnprobv_ddr).x[0];
+    if (min_lnlik > kSmallEpsilon) {
+      return kFisher2xkNonempty;
+    }
+  }
+  const int32_t* cur_r1 = ctxp->cur_r1;
+  int32_t state[4] = {S_CAST(int32_t, level), row1_tot, -1, 0};
+  const uint32_t sym_n = ctxp->sym_ns[level];
+  if (!sym_n) {
+    // Swapping the rows of the subproblem doesn't change its result.
+    const int32_t swapped_row1_tot = ctxp->cum_col_tots[level] + ctxp->col_tots[level] - row1_tot;
+    if (swapped_row1_tot < row1_tot) {
+      state[1] = swapped_row1_tot;
+    }
+  } else {
+    // The symmetry factors applied within this subproblem also depend on the
+    // next column's row-1 value, and on how many of the fixed columns in the
+    // same equal-total run share it (see Fisher2xkSymFactor()).
+    const int32_t next_val = cur_r1[level + 1];
+    int32_t eq_ct = 0;
+    for (uint32_t col_idx = level + 1; col_idx != level + sym_n; ++col_idx) {
+      eq_ct += (cur_r1[col_idx] == next_val);
+    }
+    state[2] = next_val;
+    state[3] = eq_ct;
+  }
+  const uint64_t prod_hash = ctxp->fixed_prod_hashes[level];
+  FisherMemoEntry* entryp = FisherMemoLookup(memop, state, prod_hash, fixed_lfact_sum_ddr);
+  if (entryp) {
+    ctxp->outer_sum += entryp->sum_incr;
+    ctxp->tie_ct += entryp->tie_incr;
+    return entryp->status;
+  }
+  if (ctxp->work > ctxp->work_budget) {
+    ctxp->aborted = 1;
+    return kFisher2xkNonempty;
+  }
+  const double saved_outer_sum = ctxp->outer_sum;
+  const double saved_tie_ct = ctxp->tie_ct;
+  ctxp->outer_sum = 0.0;
+  ctxp->tie_ct = 0.0;
+  const uint32_t status = Fisher2xkLevelInner(ctxp, level, row1_tot);
+  if (ctxp->aborted) {
+    return kFisher2xkNonempty;
+  }
+  FisherMemoInsert(memop, state, prod_hash, fixed_lfact_sum_ddr, status, ctxp->outer_sum, ctxp->tie_ct);
+  ctxp->outer_sum += saved_outer_sum;
+  ctxp->tie_ct += saved_tie_ct;
+  return status;
+}
+
+// Meet-in-the-middle is only used for at least this many nonempty columns.
+// (There must be at least two outer columns for it to help, since otherwise
+// each query group has a single query.)
+static const uint32_t kFisher2xkMitmMinCols = 5;
+// ...and at most this many (so saved_cur_r1 can live on the stack; runtime
+// would be astronomical for most larger tables anyway).
+static const uint32_t kFisher2xkMitmMaxCols = 256;
+
+// Approximate cost of a B-side query, relative to an A-side enumeration step.
+static const double kFisher2xkMitmQueryCost = 3.0;
+
+// Returns the number of inner columns to use for meet-in-the-middle, or 0 if
+// it shouldn't be used.  col_tots[] must be sorted in decreasing order, and
+// mode_lnlik is the log-likelihood of the mode relative to the observed
+// table.
+// Each side's work is roughly proportional to the number of tables more
+// probable than the observed table in a d-dimensional space (d = number of
+// free row-1 entries); this region is approximately an ellipsoid with
+// semi-axes sqrt(2 * mode_lnlik) * sd_j, where sd_j is the standard deviation
+// of column j's row-1 entry.  The B side has k-h dimensions.  The A side has
+// h-1 dimensions per query group, and there's one group per value of the
+// inner row-1 total, which adds another dimension.
+static uint32_t Fisher2xkMitmSplit(const int32_t* col_tots, uint32_t col_ct, int32_t row1_tot, int32_t tot, double mode_lnlik, double* ln_cost_ptr) {
+  // -DBL_MAX = don't try the memoized recursion first.
+  *ln_cost_ptr = -DBL_MAX;
+  if ((col_ct < kFisher2xkMitmMinCols) || (col_ct > kFisher2xkMitmMaxCols)) {
+    return 0;
+  }
+  const char* env_override = FisherDebugEnv("FISHER2XK_MITM_H");
+  if (env_override) {
+    const uint32_t hh = atoi(env_override);
+    if ((hh >= 3) && (hh + 1 < col_ct)) {
+      return hh;
+    }
+    return 0;
+  }
+  const double row1_frac = S_CAST(double, row1_tot) / tot;
+  const double var_mult = row1_frac * (1 - row1_frac) / MAXV(tot - 1, 1);
+  const double ln_radius = 0.5 * log(2 * MAXV(mode_lnlik, 0.5));
+  // ln_axes[j] = log(semi-axis length for column j), floored at log(0.5)
+  // since every nonempty dimension has at least one table.
+  double ln_axes[kFisher2xkMitmMaxCols];
+  for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+    const double col_tot = col_tots[col_idx];
+    ln_axes[col_idx] = MAXV(ln_radius + 0.5 * log(col_tot * (tot - col_tot) * var_mult), -kLn2);
+  }
+  // ln(volume of unit d-ball) = (d/2) * ln(pi) - lgamma(d/2 + 1)
+  uint32_t best_hh = 0;
+  double best_ln_cost = DBL_MAX;
+  for (uint32_t hh = 3; hh + 1 < col_ct; ++hh) {
+    double ln_a = 0.0;
+    for (uint32_t col_idx = 0; col_idx != hh; ++col_idx) {
+      ln_a += ln_axes[col_idx];
+    }
+    ln_a += 0.5 * (hh - 1) * log(kPi) - lgamma(0.5 * (hh - 1) + 1) + kLn2;
+    double ln_b = log(kFisher2xkMitmQueryCost);
+    for (uint32_t col_idx = hh; col_idx != col_ct; ++col_idx) {
+      ln_b += ln_axes[col_idx];
+    }
+    ln_b += 0.5 * (col_ct - hh) * log(kPi) - lgamma(0.5 * (col_ct - hh) + 1);
+    const double ln_cost = MAXV(ln_a, ln_b) + log1p(exp(-fabs(ln_a - ln_b)));
+    if (ln_cost < best_ln_cost) {
+      best_ln_cost = ln_cost;
+      best_hh = hh;
+    }
+  }
+  *ln_cost_ptr = best_ln_cost;
+  return best_hh;
 }
 
 double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
@@ -2528,18 +3707,6 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
       tot += cur_col_tot;
     }
   }
-  // Find runs of equal-total columns, ignoring columns 0 and 1.
-  for (uint32_t run_start = 0; run_start != col_ct; ) {
-    uint32_t run_end = run_start + 1;
-    while ((run_end != col_ct) && (col_tots[run_end] == col_tots[run_start])) {
-      ++run_end;
-    }
-    for (uint32_t col_idx = run_start; col_idx != run_end; ++col_idx) {
-      sym_ns[col_idx] = (col_idx >= 2)? (run_end - col_idx) : 0;
-    }
-    sym_ns[run_end - 1] = 0;
-    run_start = run_end;
-  }
   Fisher2xkCtx ctx;
   ctx.col_ct = col_ct;
   ctx.col_tots = col_tots;
@@ -2556,6 +3723,10 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   ctx.full_cell_ct = 0;
   ctx.outer_sum = 0.0;
   ctx.tie_ct = 0.0;
+  ctx.mitm = nullptr;
+  ctx.memo = nullptr;
+  ctx.fixed_lfact_sums = nullptr;
+  ctx.fixed_prod_hashes = nullptr;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
     lfact_args_buf[2 * col_idx] = obs_r1[col_idx];
     lfact_args_buf[2 * col_idx + 1] = col_tots[col_idx] - obs_r1[col_idx];
@@ -2616,7 +3787,136 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   LfactCacheInit(tot, &lfact_cache);
   ctx.lfact_cachep = &lfact_cache;
   Fisher2xkInitMode(col_tots, col_ct, tot, row1_tot, cur_r1);
-  const uint32_t status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
+  // Log-likelihood of the mode relative to the observed table.
+  const double mode_lnlik = Fisher2xkLnLik(&ctx, col_ct - 1).x[0];
+  double mitm_ln_cost;
+  const uint32_t mitm_a_col_ct = Fisher2xkMitmSplit(col_tots, col_ct, row1_tot, tot, mode_lnlik, &mitm_ln_cost);
+  // Find runs of equal-total columns, ignoring columns 0 and 1.  With
+  // meet-in-the-middle, runs are also split at the inner/outer boundary.
+  for (uint32_t run_start = 0; run_start != col_ct; ) {
+    uint32_t run_end = run_start + 1;
+    while ((run_end != col_ct) && (col_tots[run_end] == col_tots[run_start]) && (run_end != mitm_a_col_ct)) {
+      ++run_end;
+    }
+    for (uint32_t col_idx = run_start; col_idx != run_end; ++col_idx) {
+      sym_ns[col_idx] = (col_idx >= 2)? (run_end - col_idx) : 0;
+    }
+    sym_ns[run_end - 1] = 0;
+    run_start = run_end;
+  }
+  // fixed_lfact_sums, col_lfact_prefix_sums, and fixed_prod_hashes
+  unsigned char* memo_alloc = S_CAST(unsigned char*, malloc(col_ct * (2 * sizeof(dd_real) + sizeof(int64_t))));
+  if (unlikely(!memo_alloc)) {
+    LfactCacheCleanup(&lfact_cache);
+    free(alloc_base);
+    return S_CAST(double, NAN);
+  }
+  ctx.fixed_lfact_sums = R_CAST(dd_real*, memo_alloc);
+  {
+    dd_real* col_lfact_prefix_sums = &(ctx.fixed_lfact_sums[col_ct]);
+    dd_real sum_ddr = ddr_maked(0.0);
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      sum_ddr = ddr_add(sum_ddr, CachedLfact(&lfact_cache, col_tots[col_idx]));
+      col_lfact_prefix_sums[col_idx] = sum_ddr;
+    }
+    ctx.col_lfact_prefix_sums = col_lfact_prefix_sums;
+  }
+  ctx.fixed_prod_hashes = R_CAST(uint64_t*, &(ctx.fixed_lfact_sums[2 * col_ct]));
+  ctx.fixed_lfact_sums[col_ct - 1] = ddr_maked(0.0);
+  ctx.fixed_prod_hashes[col_ct - 1] = 0;
+  FisherMemo memo;
+  // With few columns, the recursion is too shallow for memoization to be
+  // worth its setup cost.
+  const uint32_t use_memo = (col_ct >= kFisher2xkMemoMinCols) && (tot <= kFisherMemoMaxTot) && (!FisherDebugEnv("FISHER_NO_MEMO"));
+  if (use_memo) {
+    if (unlikely(FisherMemoInit(tot, &memo))) {
+      FisherMemoCleanup(&memo);
+      free(memo_alloc);
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      return S_CAST(double, NAN);
+    }
+    ctx.memo = &memo;
+  }
+  ctx.work = 0;
+  ctx.work_budget = ~0LLU;
+  ctx.aborted = 0;
+  uint32_t run_mitm = (mitm_a_col_ct != 0);
+  uint32_t status = kFisher2xkNonempty;
+  if (run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX)) {
+    // With small counts, the memoized recursion is often much faster than
+    // meet-in-the-middle (which doesn't benefit much from memoization), but
+    // it's hard to predict in advance.  So we try it first, with a work
+    // budget proportional to the predicted meet-in-the-middle cost, and fall
+    // back if that's exceeded.  (Memo entries are kept.)
+    ctx.work_budget = S_CAST(uint64_t, kFisher2xkMemoBudgetMult * exp(MINV(mitm_ln_cost, 50.0)));
+    status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
+    if (!ctx.aborted) {
+      run_mitm = 0;
+    } else {
+      ctx.aborted = 0;
+      ctx.work_budget = ~0LLU;
+      ctx.outer_sum = 0.0;
+      ctx.tie_ct = 0.0;
+      Fisher2xkInitMode(col_tots, col_ct, tot, row1_tot, cur_r1);
+    }
+  } else if (!run_mitm) {
+    status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
+  }
+  Fisher2xkMitm mitm;
+  int32_t mitm_saved_cur_r1[kFisher2xkMitmMaxCols];
+  int32_t mitm_scratch_b[kFisher2xkMitmMaxCols];
+  Fisher2xkMitmModeCacheEntry* mitm_mode_cache = nullptr;
+  if (run_mitm) {
+    mitm_mode_cache = S_CAST(Fisher2xkMitmModeCacheEntry*, malloc(kFisher2xkMitmModeCacheSize * sizeof(Fisher2xkMitmModeCacheEntry)));
+    if (unlikely((!mitm_mode_cache) || FisherMitmInit(&mitm, col_ct - mitm_a_col_ct, 2 * (col_ct - mitm_a_col_ct), &mitm.core))) {
+      free(mitm_mode_cache);
+      if (use_memo) {
+        FisherMemoCleanup(&memo);
+      }
+      free(memo_alloc);
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      return S_CAST(double, NAN);
+    }
+    mitm.core.process_group = Fisher2xkMitmProcessGroup;
+    mitm.core.compare_outer = Fisher2xkMitmCompareOuter;
+    mitm.core.outer_fac_args = Fisher2xkMitmOuterFacArgs;
+    mitm.core.save_state = Fisher2xkMitmSaveState;
+    mitm.core.restore_state = Fisher2xkMitmRestoreState;
+    mitm.ctxp = &ctx;
+    mitm.a_col_ct = mitm_a_col_ct;
+    mitm.cur_weight = 1.0;
+    for (uint32_t uii = 0; uii != kFisher2xkMitmModeCacheSize; ++uii) {
+      mitm_mode_cache[uii].row1_tot = -1;
+    }
+    mitm.mode_cache = mitm_mode_cache;
+    mitm.saved_cur_r1 = mitm_saved_cur_r1;
+    mitm.scratch_b = mitm_scratch_b;
+    ctx.mitm = &mitm;
+    status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
+    FisherMitmProcess(&mitm.core);
+    ctx.mitm = nullptr;
+    const uint32_t nomem = mitm.core.nomem;
+    ctx.outer_sum += mitm.core.sum + mitm.core.sum_err;
+    ctx.tie_ct += mitm.core.tie_ct;
+    FisherMitmCleanup(&mitm.core);
+    free(mitm_mode_cache);
+    if (unlikely(nomem)) {
+      if (use_memo) {
+        FisherMemoCleanup(&memo);
+      }
+      free(memo_alloc);
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      return S_CAST(double, NAN);
+    }
+  }
+  if (use_memo) {
+    ctx.memo = nullptr;
+    FisherMemoCleanup(&memo);
+  }
+  free(memo_alloc);
   LfactCacheCleanup(&lfact_cache);
   double result;
   if (status != kFisher2xkNonempty) {
@@ -2667,9 +3967,8 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
 // The innermost two levels (columns 0 and 1, with everything else fixed) are
 // handled by Fisher2xkLevel2(), since the transpose of that subproblem is a
 // 2x3 table.
-// This code is written for general 3xk tables, but beyond 3x3 it's usually
-// slower than the network algorithm (which merges subproblems with the same
-// remaining row totals), so only the 3x3 entry point is exposed for now.
+// Beyond 3x3, this is combined with meet-in-the-middle and memoization (see
+// Fisher3xkMitmRecord() and FisherMemoLookup()).
 //
 // Cells are identified by "keys": (r, j) for j >= 1 has key 3j - r, and
 // column-0 cells have key -1.  The level variable with key L is (0, L/3) when
@@ -2690,8 +3989,31 @@ typedef struct Fisher3xkCtxStruct {
   LfactCache* lfact_cachep;
   dd_real starting_lnprobv_ddr;
   td_real starting_lnprobv_tdr;
+  // Scratch buffers for Fisher33Base()'s 2x3 view: view_fixed_cells has room
+  // for 3 * col_ct entries, view_fac_args for 6 * col_ct, and view_lfact_args
+  // for 3 * col_ct + 16.
+  int32_t* view_fixed_cells;
+  uint64_t* view_fac_args;
+  double* view_lfact_args;
   double outer_sum;
   double tie_ct;
+  // Meet-in-the-middle state; nullptr when disabled.
+  struct Fisher3xkMitmStruct* mitm;
+  // Memoization state; nullptr when disabled.  Not used while mitm is
+  // non-null, since the outer recursion's results are deferred then.
+  FisherMemo* memo;
+  // fixed_lfact_sums[lvl] is the sum of log-factorials of the fixed cells
+  // (key > lvl) of the current table, when Fisher3xkLevel(lvl) is called.
+  dd_real* fixed_lfact_sums;
+  // fixed_prod_hashes[lvl] is the corresponding FisherMemo hash.
+  uint64_t* fixed_prod_hashes;
+  // When memo is non-null, col_lfact_prefix_sums[j] is lfact(col_tots[0]) +
+  // ... + lfact(col_tots[j-1]).
+  const dd_real* col_lfact_prefix_sums;
+  // See Fisher2xkCtx.
+  uint64_t work;
+  uint64_t work_budget;
+  uint32_t aborted;
 } Fisher3xkCtx;
 
 static inline int32_t Fisher3xkCellKey(uint32_t row_idx, uint32_t col_idx) {
@@ -3019,9 +4341,11 @@ static void Fisher3xkClosedFormSum(Fisher3xkCtx* ctxp, int32_t lvl, int32_t dir)
     inner_col_tot += col_tots[col2_idx];
     neg_args[neg_ct++] = col_tots[col2_idx];
   }
-  for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
-    for (uint32_t col2_idx = col_idx + 1; col2_idx != col_ct; ++col2_idx) {
-      neg_args[neg_ct++] = cur[row_idx * col_ct + col2_idx];
+  if (!ctxp->memo) {
+    for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+      for (uint32_t col2_idx = col_idx + 1; col2_idx != col_ct; ++col2_idx) {
+        neg_args[neg_ct++] = cur[row_idx * col_ct + col2_idx];
+      }
     }
   }
   const double col_tot = col_tots[col_idx];
@@ -3061,12 +4385,21 @@ static void Fisher3xkClosedFormSum(Fisher3xkCtx* ctxp, int32_t lvl, int32_t dir)
     neg_args[neg_ct++] = r2 - x;
     neg_args[neg_ct++] = r3 - col_tot + a + x;
   }
+  dd_real neg_sum_ddr = CachedSortAndAddLfacts(ctxp->lfact_cachep, neg_ct, neg_args);
+  if (ctxp->memo) {
+    // fixed_lfact_sums[3 * col_idx] covers the columns after col_idx.
+    neg_sum_ddr = ddr_add(neg_sum_ddr, ctxp->fixed_lfact_sums[3 * col_idx]);
+  }
   const dd_real rank_lnlik_ddr =
     ddr_sub(ddr_sub(CachedSortAndAddLfacts(ctxp->lfact_cachep, pos_ct, pos_args),
-                    CachedSortAndAddLfacts(ctxp->lfact_cachep, neg_ct, neg_args)),
+                    neg_sum_ddr),
             ctxp->starting_lnprobv_ddr);
   double rank_lik = exp(rank_lnlik_ddr.x[0]);
-  double outer_sum = ctxp->outer_sum;
+  // The sum is accumulated locally, so that the stopping criterion is
+  // relative to this sum rather than to the (possibly much larger) running
+  // total; otherwise, the error from truncating many closed-form sums would
+  // add up.
+  double outer_sum = 0.0;
   while (1) {
     const double preadd = outer_sum;
     outer_sum += rank_lik;
@@ -3091,8 +4424,9 @@ static void Fisher3xkClosedFormSum(Fisher3xkCtx* ctxp, int32_t lvl, int32_t dir)
       break;
     }
     rank_lik *= rank_lik_mult;
+    ctxp->work += 1;
   }
-  ctxp->outer_sum = outer_sum;
+  ctxp->outer_sum += outer_sum;
 }
 
 // Innermost levels: columns 0 and 1 vary, and everything else is fixed.
@@ -3121,10 +4455,9 @@ static uint32_t Fisher33Base(Fisher3xkCtx* ctxp) {
   int32_t view_cum_col_tots[3];
   dd_real view_inner_const_ddrs[3];
   uint32_t view_sym_ns[3] = {0, 0, 0};
-  // Buffer sizes assume col_ct == 3.
-  int32_t fixed_cells[3];
-  uint64_t fac_args_buf[18];
-  double lfact_args_buf[16];
+  int32_t* fixed_cells = ctxp->view_fixed_cells;
+  uint64_t* fac_args_buf = ctxp->view_fac_args;
+  double* lfact_args_buf = ctxp->view_lfact_args;
   for (uint32_t view_col_idx = 0; view_col_idx != 3; ++view_col_idx) {
     const uint32_t row_idx = perm[view_col_idx];
     view_col_tots[view_col_idx] = row_rems[row_idx];
@@ -3156,22 +4489,459 @@ static uint32_t Fisher33Base(Fisher3xkCtx* ctxp) {
   view.fac_args_buf = fac_args_buf;
   view.lfact_args_buf = lfact_args_buf;
   view.lfact_cachep = lfact_cachep;
-  view.starting_lnprobv_ddr = ddr_add(ctxp->starting_lnprobv_ddr, CachedSortAndAddLfacts(lfact_cachep, fixed_ct, lfact_args_buf));
+  view.starting_lnprobv_ddr = ddr_add(ctxp->starting_lnprobv_ddr, ctxp->memo? ctxp->fixed_lfact_sums[3] : CachedSortAndAddLfacts(lfact_cachep, fixed_ct, lfact_args_buf));
   view.starting_lnprobv_tdr = ctxp->starting_lnprobv_tdr;
   view.full_obs = ctxp->obs;
   view.fixed_cells = fixed_cells;
   view.full_cell_ct = 3 * col_ct;
   view.outer_sum = ctxp->outer_sum;
   view.tie_ct = ctxp->tie_ct;
+  view.mitm = nullptr;
+  view.work = 0;
+  view.memo = nullptr;
+  view.fixed_lfact_sums = nullptr;
+  view.fixed_prod_hashes = nullptr;
   const uint32_t status = Fisher2xkLevel2(&view, ctxp->col_tots[0]);
   ctxp->outer_sum = view.outer_sum;
   ctxp->tie_ct = view.tie_ct;
+  ctxp->work += 4 + view.work;
   return status;
 }
+// --- 3xk meet-in-the-middle.
+//
+// Same idea as the 2xk version (see the comment above Fisher2xkMitmRecord()).
+// The inner group is columns 0..(h-1), and the subproblem left after fixing
+// the outer columns is determined by the inner row-0 and row-1 totals (s0,
+// s1), so queries are keyed by s0 * (row_tots[1] + 1) + s1.  There are no
+// symmetry weights.
+
+typedef struct Fisher3xkMitmModeCacheEntryStruct {
+  dd_real neg_lnlik_a;
+  int64_t key;
+} Fisher3xkMitmModeCacheEntry;
+
+static const uint32_t kFisher3xkMitmModeCacheSize = 4096;
+
+typedef struct Fisher3xkMitmStruct {
+  FisherMitm core;
+  Fisher3xkCtx* ctxp;
+  // h: number of inner columns.  Must be in [2, col_ct - 2].
+  uint32_t a_col_ct;
+  Fisher3xkMitmModeCacheEntry* mode_cache;
+  // These have room for 3 * col_ct entries.
+  int32_t* saved_cur;
+  int32_t* scratch_cur;
+  int32_t* b_buf;
+  double saved_outer_sum;
+  double saved_tie_ct;
+} Fisher3xkMitm;
+
+// Exact comparison of the current table's likelihood with the observed
+// table's; positive if the current table is more probable.
+static intptr_t Fisher3xkCompare(Fisher3xkCtx* ctxp) {
+  const uint32_t table_size = 3 * ctxp->col_ct;
+  uint64_t* numer_factorial_args = ctxp->view_fac_args;
+  uint64_t* denom_factorial_args = &(numer_factorial_args[table_size]);
+  for (uint32_t cell_idx = 0; cell_idx != table_size; ++cell_idx) {
+    numer_factorial_args[cell_idx] = ctxp->obs[cell_idx];
+    denom_factorial_args[cell_idx] = ctxp->cur[cell_idx];
+  }
+  td_real ln_odds_ratio_tdr = tdr_make1(0.0);
+  double unused;
+  return CompareFactorialProducts(table_size, tdr_make1(1.0), 0, 0, numer_factorial_args, denom_factorial_args, &ctxp->starting_lnprobv_tdr, &ln_odds_ratio_tdr, &unused);
+}
+
+static inline uint32_t Fisher3xkMoreProbable(Fisher3xkCtx* ctxp, dd_real lnlik_ddr) {
+  if (lnlik_ddr.x[0] > kSmallEpsilon) {
+    return 1;
+  }
+  if (lnlik_ddr.x[0] < -kSmallEpsilon) {
+    return 0;
+  }
+  return (Fisher3xkCompare(ctxp) > 0);
+}
+
+// Sum of log-factorials of cur[] cells in columns [col_start, col_end).
+static dd_real Fisher3xkLfactSum(Fisher3xkCtx* ctxp, uint32_t col_start, uint32_t col_end) {
+  const uint32_t col_ct = ctxp->col_ct;
+  const int32_t* cur = ctxp->cur;
+  LfactCache* lfact_cachep = ctxp->lfact_cachep;
+  dd_real sum_ddr = ddr_maked(0.0);
+  for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+    const int32_t* cur_row = &(cur[row_idx * col_ct]);
+    for (uint32_t col_idx = col_start; col_idx != col_end; ++col_idx) {
+      sum_ddr = ddr_add(sum_ddr, CachedLfact(lfact_cachep, cur_row[col_idx]));
+    }
+  }
+  return sum_ddr;
+}
+
+static void Fisher3xkMitmLoadOuter(Fisher3xkCtx* ctxp, uint32_t a_col_ct, const int32_t* b_vals) {
+  const uint32_t col_ct = ctxp->col_ct;
+  int32_t* cur = ctxp->cur;
+  for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+    const int32_t v0 = b_vals[2 * (col_idx - a_col_ct)];
+    const int32_t v1 = b_vals[2 * (col_idx - a_col_ct) + 1];
+    cur[col_idx] = v0;
+    cur[col_ct + col_idx] = v1;
+    cur[2 * col_ct + col_idx] = ctxp->col_tots[col_idx] - v0 - v1;
+  }
+}
+
+static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl);
+
+// Called in place of Fisher3xkLevel(ctxp, 3 * (a_col_ct - 1)).
+static uint32_t Fisher3xkMitmRecord(Fisher3xkCtx* ctxp) {
+  Fisher3xkMitm* mitmp = ctxp->mitm;
+  const uint32_t col_ct = ctxp->col_ct;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const int32_t* cur = ctxp->cur;
+  const dd_real lnlik_b_ddr = ddr_sub(ddr_negate(Fisher3xkLfactSum(ctxp, a_col_ct, col_ct)), ctxp->starting_lnprobv_ddr);
+  int64_t s0 = ctxp->row_tots[0];
+  int64_t s1 = ctxp->row_tots[1];
+  for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+    s0 -= cur[col_idx];
+    s1 -= cur[col_ct + col_idx];
+  }
+  const int64_t key = s0 * (ctxp->row_tots[1] + 1) + s1;
+  Fisher3xkMitmModeCacheEntry* cache_entryp = &(mitmp->mode_cache[S_CAST(uint64_t, key) & (kFisher3xkMitmModeCacheSize - 1)]);
+  if (cache_entryp->key != key) {
+    // cur[] currently holds the inner mode.
+    cache_entryp->key = key;
+    cache_entryp->neg_lnlik_a = Fisher3xkLfactSum(ctxp, 0, a_col_ct);
+  }
+  const double mode_lnlik = ddr_sub(lnlik_b_ddr, cache_entryp->neg_lnlik_a).x[0];
+  if (mode_lnlik < -kSmallEpsilon) {
+    return kFisher2xkEmpty;
+  }
+  if (mode_lnlik <= kSmallEpsilon) {
+    const intptr_t cmp_result = Fisher3xkCompare(ctxp);
+    if (cmp_result <= 0) {
+      return cmp_result? kFisher2xkEmpty : kFisher2xkEmptyTie;
+    }
+  }
+  int32_t* b_buf = mitmp->b_buf;
+  for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+    b_buf[2 * (col_idx - a_col_ct)] = cur[col_idx];
+    b_buf[2 * (col_idx - a_col_ct) + 1] = cur[col_ct + col_idx];
+  }
+  FisherMitmAppend(&mitmp->core, key, lnlik_b_ddr, 1.0, b_buf);
+  return kFisher2xkNonempty;
+}
+
+// Sets the inner cells of cur[] to the mode of the inner subproblem with row
+// totals (s0, s1, <remainder>).
+static void Fisher3xkMitmInitInnerMode(Fisher3xkCtx* ctxp, uint32_t a_col_ct, int32_t s0, int32_t s1) {
+  const uint32_t col_ct = ctxp->col_ct;
+  const int32_t* col_tots = ctxp->col_tots;
+  int32_t* cur = ctxp->cur;
+  int64_t inner_tot = 0;
+  for (uint32_t col_idx = 0; col_idx != a_col_ct; ++col_idx) {
+    inner_tot += col_tots[col_idx];
+  }
+  const int32_t inner_row_tots[2] = {s0, s1};
+  for (uint32_t row_idx = 0; row_idx != 2; ++row_idx) {
+    const int32_t target = inner_row_tots[row_idx];
+    int32_t row_sum = 0;
+    int32_t* cur_row = &(cur[row_idx * col_ct]);
+    for (uint32_t col_idx = 0; col_idx != a_col_ct; ++col_idx) {
+      const int32_t val = inner_tot? S_CAST(int32_t, (S_CAST(int64_t, col_tots[col_idx]) * target) / inner_tot) : 0;
+      cur_row[col_idx] = val;
+      row_sum += val;
+    }
+    // Capacity is sufficient since s0 + s1 <= inner_tot.
+    for (uint32_t col_idx = 0; row_sum != target; col_idx = (col_idx + 1 == a_col_ct)? 0 : (col_idx + 1)) {
+      if (cur[col_idx] + (row_idx? cur[col_ct + col_idx] : 0) < col_tots[col_idx]) {
+        cur_row[col_idx] += 1;
+        ++row_sum;
+      }
+    }
+  }
+  for (uint32_t col_idx = 0; col_idx != a_col_ct; ++col_idx) {
+    cur[2 * col_ct + col_idx] = col_tots[col_idx] - cur[col_idx] - cur[col_ct + col_idx];
+  }
+  while (Fisher3xkScanCycles(ctxp, 3 * a_col_ct - 2, 1)) {
+  }
+}
+
+// Innermost enumeration: columns 0 and 1 vary, with column 1's row-0 and
+// row-1 entries (x, y) free.  On entry, they must be at the mode of this
+// subproblem; they're restored on exit.  partial_ddr is lB_1 minus the
+// log-factorials of the inner cells in columns 2+.
+static void Fisher3xkMitmEnumBase(Fisher3xkCtx* ctxp, dd_real partial_ddr, double excess_limit) {
+  Fisher3xkMitm* mitmp = ctxp->mitm;
+  FisherMitm* corep = &mitmp->core;
+  const uint32_t col_ct = ctxp->col_ct;
+  int32_t* cur = ctxp->cur;
+  LfactCache* lfact_cachep = ctxp->lfact_cachep;
+  const int64_t c1 = ctxp->col_tots[1];
+  const int64_t c0 = ctxp->col_tots[0];
+  const int64_t t0 = cur[0] + cur[1];
+  const int64_t t1 = cur[col_ct] + cur[col_ct + 1];
+  const int64_t t2 = cur[2 * col_ct] + cur[2 * col_ct + 1];
+  const int64_t mode_x = cur[1];
+  const int64_t mode_y = cur[col_ct + 1];
+  const int64_t x_min = MAXV(MAXV(0, t0 - c0), c1 - t1 - t2);
+  const int64_t x_max = MINV(c1, t0);
+  const double lik_limit = exp(excess_limit) * kFisherMitmLikTolHi;
+  for (int64_t x_dir = 1; x_dir >= -1; x_dir -= 2) {
+    int64_t y_star = mode_y;
+    for (int64_t x = (x_dir == 1)? mode_x : (mode_x - 1); (x >= x_min) && (x <= x_max); x += x_dir) {
+      // Cells: (0,1)=x, (1,1)=y, (2,1)=c1-x-y, (0,0)=t0-x, (1,0)=t1-y,
+      // (2,0)=t2-c1+x+y.
+      const int64_t y_lo = MAXV(0, c1 - x - t2);
+      const int64_t y_hi = MINV(t1, c1 - x);
+      y_star = MINV(MAXV(y_star, y_lo), y_hi);
+      // Conditional mode over y.  Ratio tests are exact, since all factors
+      // are < 2^31.
+      while ((y_star < y_hi) && ((c1 - x - y_star) * (t1 - y_star) > (y_star + 1) * (t2 - c1 + x + y_star + 1))) {
+        ++y_star;
+      }
+      while ((y_star > y_lo) && (y_star * (t2 - c1 + x + y_star) > (c1 - x - y_star + 1) * (t1 - y_star + 1))) {
+        --y_star;
+      }
+      cur[0] = t0 - x;
+      cur[1] = x;
+      // The maximum over y is log-concave in x, so we're done in this
+      // direction once it isn't more probable than the observed table.
+      uint32_t any_nonempty = 0;
+      const double cx = S_CAST(double, x);
+      for (int64_t y_dir = 1; y_dir >= -1; y_dir -= 2) {
+        uint32_t steps_since_sync = kFisherMitmSyncInterval;
+        double lik = 0.0;
+        uint32_t bucket_idx = corep->group_query_ct;
+        for (int64_t y = (y_dir == 1)? y_star : (y_star - 1); (y >= y_lo) && (y <= y_hi); y += y_dir) {
+          if (steps_since_sync < kFisherMitmSyncInterval) {
+            const double prev_y = S_CAST(double, y - y_dir);
+            if (y_dir == 1) {
+              lik *= ((S_CAST(double, c1) - cx - prev_y) * (S_CAST(double, t1) - prev_y)) / ((prev_y + 1) * (S_CAST(double, t2 - c1) + cx + prev_y + 1));
+            } else {
+              lik *= (prev_y * (S_CAST(double, t2 - c1) + cx + prev_y)) / ((S_CAST(double, c1) - cx - prev_y + 1) * (S_CAST(double, t1) - prev_y + 1));
+            }
+            ++steps_since_sync;
+            if (lik > kFisherMitmLikTolHi) {
+              if ((lik > lik_limit) || (!FisherMitmAddLik(corep, lik, &bucket_idx))) {
+                continue;
+              }
+            }
+          }
+          cur[col_ct] = t1 - y;
+          cur[col_ct + 1] = y;
+          cur[2 * col_ct] = t2 - c1 + x + y;
+          cur[2 * col_ct + 1] = c1 - x - y;
+          dd_real lfact_sum_ddr = ddr_add(CachedLfact(lfact_cachep, x), CachedLfact(lfact_cachep, t0 - x));
+          lfact_sum_ddr = ddr_add(lfact_sum_ddr, ddr_add(CachedLfact(lfact_cachep, y), CachedLfact(lfact_cachep, t1 - y)));
+          lfact_sum_ddr = ddr_add(lfact_sum_ddr, ddr_add(CachedLfact(lfact_cachep, c1 - x - y), CachedLfact(lfact_cachep, t2 - c1 + x + y)));
+          const dd_real excess_ddr = ddr_sub(partial_ddr, lfact_sum_ddr);
+          if (!Fisher3xkMoreProbable(ctxp, excess_ddr)) {
+            break;
+          }
+          any_nonempty = 1;
+          lik = DdrExpd(excess_ddr);
+          steps_since_sync = 0;
+          if (excess_ddr.x[0] <= excess_limit) {
+            FisherMitmAddEntry(corep, excess_ddr);
+          }
+        }
+        if ((y_dir == 1) && (!any_nonempty)) {
+          // The conditional mode isn't more probable than the observed table.
+          break;
+        }
+      }
+      if (!any_nonempty) {
+        break;
+      }
+    }
+  }
+  cur[0] = t0 - mode_x;
+  cur[1] = mode_x;
+  cur[col_ct] = t1 - mode_y;
+  cur[col_ct + 1] = mode_y;
+  cur[2 * col_ct] = t2 - c1 + mode_x + mode_y;
+  cur[2 * col_ct + 1] = c1 - mode_x - mode_y;
+}
+
+// Enumerates inner tables a with 0 < e(a), passing those with e(a) <=
+// excess_limit to the sweep.  On entry, cur[] must be the mode of the
+// subproblem where cells with key <= lvl are free.  It is restored on exit.
+static void Fisher3xkMitmEnum(Fisher3xkCtx* ctxp, int32_t lvl, dd_real lnlik_b1_ddr, double excess_limit) {
+  if (lvl == 3) {
+    const dd_real partial_ddr = ddr_sub(lnlik_b1_ddr, Fisher3xkLfactSum(ctxp, 2, ctxp->mitm->a_col_ct));
+    Fisher3xkMitmEnumBase(ctxp, partial_ddr, excess_limit);
+    return;
+  }
+  const uint32_t col_ct = ctxp->col_ct;
+  const uint32_t table_size = 3 * col_ct;
+  const uint32_t a_col_ct = ctxp->mitm->a_col_ct;
+  int32_t* cur = ctxp->cur;
+  const uint32_t col_idx = (lvl + 2) / 3;
+  const uint32_t row_idx = (lvl % 3)? 1 : 0;
+  const int32_t next_lvl = row_idx? (lvl - 2) : (lvl - 1);
+  int32_t* saved = &(ctxp->saved_tables[S_CAST(uintptr_t, lvl) * table_size]);
+  memcpy(saved, cur, table_size * sizeof(int32_t));
+  for (uint32_t decreasing = 0; decreasing != 2; ++decreasing) {
+    const int32_t dir = decreasing? -1 : 1;
+    if (decreasing) {
+      memcpy(cur, saved, table_size * sizeof(int32_t));
+      if (!Fisher3xkShift(ctxp, row_idx, col_idx, -1)) {
+        break;
+      }
+    }
+    uint32_t is_start = !decreasing;
+    while (1) {
+      const dd_real mode_excess_ddr = ddr_sub(lnlik_b1_ddr, Fisher3xkLfactSum(ctxp, 0, a_col_ct));
+      if (!Fisher3xkMoreProbable(ctxp, mode_excess_ddr)) {
+        if (is_start) {
+          // Modal rank is empty, so all ranks are empty.
+          decreasing = 1;
+        }
+        break;
+      }
+      Fisher3xkMitmEnum(ctxp, next_lvl, lnlik_b1_ddr, excess_limit);
+      is_start = 0;
+      if (!Fisher3xkShift(ctxp, row_idx, col_idx, dir)) {
+        break;
+      }
+    }
+  }
+  memcpy(cur, saved, table_size * sizeof(int32_t));
+}
+
+static void Fisher3xkMitmProcessGroup(void* table_ctx, const FisherMitmQuery* queries, uint32_t query_ct) {
+  Fisher3xkMitm* mitmp = S_CAST(Fisher3xkMitm*, table_ctx);
+  Fisher3xkCtx* ctxp = mitmp->ctxp;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  const int64_t key = queries[0].key;
+  const int64_t key_mult = ctxp->row_tots[1] + 1;
+  Fisher3xkMitmLoadOuter(ctxp, a_col_ct, FisherMitmBVals(&mitmp->core, &(queries[0])));
+  Fisher3xkMitmInitInnerMode(ctxp, a_col_ct, S_CAST(int32_t, key / key_mult), S_CAST(int32_t, key % key_mult));
+  ctxp->outer_sum = 0.0;
+  ctxp->tie_ct = 0.0;
+  if (ctxp->memo) {
+    const uint32_t col_ct = ctxp->col_ct;
+    ctxp->fixed_lfact_sums[3 * (a_col_ct - 1)] = Fisher3xkLfactSum(ctxp, a_col_ct, col_ct);
+    uint64_t prod_hash = 0;
+    for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+      for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+        prod_hash += FisherMemoFactHash(ctxp->memo, ctxp->cur[row_idx * col_ct + col_idx]);
+      }
+    }
+    ctxp->fixed_prod_hashes[3 * (a_col_ct - 1)] = prod_hash;
+  }
+  ctxp->mitm = nullptr;
+  Fisher3xkLevel(ctxp, 3 * (a_col_ct - 1));
+  ctxp->mitm = mitmp;
+  const double base_sum = ctxp->outer_sum;
+  const double base_tie_ct = ctxp->tie_ct;
+  double excess_limit;
+  if (!FisherMitmSweepBegin(&mitmp->core, queries, query_ct, base_sum, base_tie_ct, &excess_limit)) {
+    return;
+  }
+  Fisher3xkMitmEnum(ctxp, 3 * (a_col_ct - 1), queries[0].lnlik_b, excess_limit);
+  FisherMitmSweepEnd(&mitmp->core, queries, base_sum, base_tie_ct);
+}
+
+static intptr_t Fisher3xkMitmCompareOuter(void* table_ctx, const int32_t* b_vals) {
+  Fisher3xkMitm* mitmp = S_CAST(Fisher3xkMitm*, table_ctx);
+  Fisher3xkCtx* ctxp = mitmp->ctxp;
+  const uint32_t table_size = 3 * ctxp->col_ct;
+  memcpy(mitmp->scratch_cur, ctxp->cur, table_size * sizeof(int32_t));
+  Fisher3xkMitmLoadOuter(ctxp, mitmp->a_col_ct, b_vals);
+  const intptr_t result = Fisher3xkCompare(ctxp);
+  memcpy(ctxp->cur, mitmp->scratch_cur, table_size * sizeof(int32_t));
+  return result;
+}
+
+static uint32_t Fisher3xkMitmOuterFacArgs(void* table_ctx, const int32_t* b_vals, uint64_t* fac_args) {
+  Fisher3xkMitm* mitmp = S_CAST(Fisher3xkMitm*, table_ctx);
+  const Fisher3xkCtx* ctxp = mitmp->ctxp;
+  const uint32_t col_ct = ctxp->col_ct;
+  const uint32_t a_col_ct = mitmp->a_col_ct;
+  uint32_t arg_ct = 0;
+  for (uint32_t col_idx = a_col_ct; col_idx != col_ct; ++col_idx) {
+    const int32_t v0 = b_vals[2 * (col_idx - a_col_ct)];
+    const int32_t v1 = b_vals[2 * (col_idx - a_col_ct) + 1];
+    fac_args[arg_ct++] = v0;
+    fac_args[arg_ct++] = v1;
+    fac_args[arg_ct++] = ctxp->col_tots[col_idx] - v0 - v1;
+  }
+  return arg_ct;
+}
+
+static void Fisher3xkMitmSaveState(void* table_ctx) {
+  Fisher3xkMitm* mitmp = S_CAST(Fisher3xkMitm*, table_ctx);
+  Fisher3xkCtx* ctxp = mitmp->ctxp;
+  memcpy(mitmp->saved_cur, ctxp->cur, 3 * ctxp->col_ct * sizeof(int32_t));
+  mitmp->saved_outer_sum = ctxp->outer_sum;
+  mitmp->saved_tie_ct = ctxp->tie_ct;
+}
+
+static void Fisher3xkMitmRestoreState(void* table_ctx) {
+  Fisher3xkMitm* mitmp = S_CAST(Fisher3xkMitm*, table_ctx);
+  Fisher3xkCtx* ctxp = mitmp->ctxp;
+  memcpy(ctxp->cur, mitmp->saved_cur, 3 * ctxp->col_ct * sizeof(int32_t));
+  ctxp->outer_sum = mitmp->saved_outer_sum;
+  ctxp->tie_ct = mitmp->saved_tie_ct;
+}
+
+// Approximate cost of a 3xk outer query, relative to an inner enumeration
+// step.
+static const double kFisher3xkMitmQueryCost = 3.0;
+
+// See Fisher2xkMitmSplit().  With three rows, each column contributes two
+// dimensions; under the multivariate hypergeometric distribution, the
+// covariance matrix of a column's (row-0, row-1) entries has determinant
+// ~(c * f)^2 * p0 * p1 * p2, where f = (n - c) / (n - 1) and p_r is row r's
+// share of the total.
+static uint32_t Fisher3xkMitmSplit(const int32_t* col_tots, const int32_t* row_tots, uint32_t col_ct, int32_t tot, double mode_lnlik, double* ln_cost_ptr) {
+  *ln_cost_ptr = -DBL_MAX;
+  if ((col_ct < 4) || (col_ct > kFisher2xkMitmMaxCols)) {
+    return 0;
+  }
+  const char* env_override = FisherDebugEnv("FISHER3XK_MITM_H");
+  if (env_override) {
+    const uint32_t hh = atoi(env_override);
+    if ((hh >= 2) && (hh + 1 < col_ct)) {
+      return hh;
+    }
+    return 0;
+  }
+  const double dtot = tot;
+  const double ln_p_prod = log(row_tots[0] / dtot) + log(row_tots[1] / dtot) + log(row_tots[2] / dtot);
+  const double ln_radius = 0.5 * log(2 * MAXV(mode_lnlik, 0.5));
+  double ln_col_vols[kFisher2xkMitmMaxCols];
+  for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+    const double col_tot = col_tots[col_idx];
+    const double cf = col_tot * (dtot - col_tot) / MAXV(dtot - 1, 1);
+    ln_col_vols[col_idx] = MAXV(2 * ln_radius + log(cf) + 0.5 * ln_p_prod, -2 * kLn2);
+  }
+  uint32_t best_hh = 0;
+  double best_ln_cost = DBL_MAX;
+  for (uint32_t hh = 2; hh + 1 < col_ct; ++hh) {
+    double ln_a = log(kPi);
+    for (uint32_t col_idx = 0; col_idx != hh; ++col_idx) {
+      ln_a += ln_col_vols[col_idx];
+    }
+    ln_a += (hh - 1) * log(kPi) - lgamma(S_CAST(double, hh));
+    double ln_b = log(kFisher3xkMitmQueryCost);
+    for (uint32_t col_idx = hh; col_idx != col_ct; ++col_idx) {
+      ln_b += ln_col_vols[col_idx];
+    }
+    ln_b += (col_ct - hh) * log(kPi) - lgamma(S_CAST(double, col_ct - hh) + 1);
+    const double ln_cost = MAXV(ln_a, ln_b) + log1p(exp(-fabs(ln_a - ln_b)));
+    if (ln_cost < best_ln_cost) {
+      best_ln_cost = ln_cost;
+      best_hh = hh;
+    }
+  }
+  *ln_cost_ptr = best_ln_cost;
+  return best_hh;
+}
+
 // On entry, cur[] must be the mode of the subproblem where cells with key <=
 // lvl are free.  It is restored on exit.  Return values are as for
 // Fisher2xkLevel().
-static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
+static uint32_t Fisher3xkLevelInner(Fisher3xkCtx* ctxp, int32_t lvl) {
   if (lvl == 3) {
     return Fisher33Base(ctxp);
   }
@@ -3193,7 +4963,23 @@ static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
     }
     uint32_t is_start = !decreasing;
     while (1) {
+      ctxp->work += 4;
+      if (ctxp->memo) {
+        const int32_t level_val = cur[row_idx * col_ct + col_idx];
+        dd_real fixed_lfact_sum_ddr = ddr_add(ctxp->fixed_lfact_sums[lvl], CachedLfact(ctxp->lfact_cachep, level_val));
+        uint64_t prod_hash = ctxp->fixed_prod_hashes[lvl] + FisherMemoFactHash(ctxp->memo, level_val);
+        if (row_idx) {
+          const int32_t row2_val = cur[2 * col_ct + col_idx];
+          fixed_lfact_sum_ddr = ddr_add(fixed_lfact_sum_ddr, CachedLfact(ctxp->lfact_cachep, row2_val));
+          prod_hash += FisherMemoFactHash(ctxp->memo, row2_val);
+        }
+        ctxp->fixed_lfact_sums[next_lvl] = fixed_lfact_sum_ddr;
+        ctxp->fixed_prod_hashes[next_lvl] = prod_hash;
+      }
       const uint32_t inner_status = Fisher3xkLevel(ctxp, next_lvl);
+      if (ctxp->aborted) {
+        return kFisher2xkNonempty;
+      }
       if (inner_status != kFisher2xkNonempty) {
         if (is_start) {
           // Modal rank is empty, so all ranks are empty.
@@ -3215,7 +5001,106 @@ static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
   return kFisher2xkNonempty;
 }
 
-static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
+// On entry, cur[] must be the mode of the subproblem where cells with key <=
+// lvl are free.  It is restored on exit.  Return values are as for
+// Fisher2xkLevel().
+static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
+  if (ctxp->mitm) {
+    if (lvl == 3 * S_CAST(int32_t, ctxp->mitm->a_col_ct) - 3) {
+      return Fisher3xkMitmRecord(ctxp);
+    }
+    return Fisher3xkLevelInner(ctxp, lvl);
+  }
+  FisherMemo* memop = ctxp->memo;
+  if (!memop) {
+    return Fisher3xkLevelInner(ctxp, lvl);
+  }
+  // The subproblem is determined by lvl, the remaining row-0 and row-1
+  // totals, and (if lvl is a row-1 level) the fixed row-0 entry of the
+  // current column.
+  const uint32_t col_ct = ctxp->col_ct;
+  const int32_t* cur = ctxp->cur;
+  const uint32_t col_idx = (lvl + 2) / 3;
+  const uint32_t row1_level = (lvl % 3) != 0;
+  const dd_real fixed_lfact_sum_ddr = ctxp->fixed_lfact_sums[lvl];
+  {
+    // Since multinomial coefficients are >= 1, every table in this
+    // subproblem is at least as probable as
+    //   exp(-fixed_lfact_sum - sum over free columns of lfact(free total)).
+    // If that's more probable than the observed table, the subproblem
+    // contributes nothing.
+    dd_real bound_ddr = ddr_add(fixed_lfact_sum_ddr, ctxp->col_lfact_prefix_sums[col_idx]);
+    bound_ddr = ddr_add(bound_ddr, CachedLfact(ctxp->lfact_cachep, ctxp->col_tots[col_idx] - (row1_level? cur[col_idx] : 0)));
+    if (ddr_sub(ddr_negate(bound_ddr), ctxp->starting_lnprobv_ddr).x[0] > kSmallEpsilon) {
+      return kFisher2xkNonempty;
+    }
+  }
+  // Remaining row totals of the free cells.
+  int32_t rems[3];
+  for (uint32_t row_idx = 0; row_idx != 3; ++row_idx) {
+    rems[row_idx] = ctxp->row_tots[row_idx];
+    const int32_t* cur_row = &(cur[row_idx * col_ct]);
+    for (uint32_t col2_idx = col_idx + 1; col2_idx != col_ct; ++col2_idx) {
+      rems[row_idx] -= cur_row[col2_idx];
+    }
+  }
+  // Permuting the rows of the subproblem doesn't change its result.  At a
+  // row-1 level, only rows 1 and 2 are interchangeable, since row 0's entry
+  // in the current column is fixed.
+  int32_t state[4];
+  state[0] = lvl;
+  if (row1_level) {
+    state[1] = rems[0] - cur[col_idx];
+    state[2] = MINV(rems[1], rems[2]);
+    state[3] = cur[col_idx];
+  } else {
+    // Sort, and drop the largest (which is determined by the others).
+    int32_t r0 = rems[0];
+    int32_t r1 = rems[1];
+    int32_t r2 = rems[2];
+    if (r0 > r1) {
+      const int32_t tmp = r0;
+      r0 = r1;
+      r1 = tmp;
+    }
+    if (r1 > r2) {
+      r1 = r2;
+    }
+    if (r0 > r1) {
+      const int32_t tmp = r0;
+      r0 = r1;
+      r1 = tmp;
+    }
+    state[1] = r0;
+    state[2] = r1;
+    state[3] = -1;
+  }
+  const uint64_t prod_hash = ctxp->fixed_prod_hashes[lvl];
+  FisherMemoEntry* entryp = FisherMemoLookup(memop, state, prod_hash, fixed_lfact_sum_ddr);
+  if (entryp) {
+    ctxp->outer_sum += entryp->sum_incr;
+    ctxp->tie_ct += entryp->tie_incr;
+    return entryp->status;
+  }
+  if (ctxp->work > ctxp->work_budget) {
+    ctxp->aborted = 1;
+    return kFisher2xkNonempty;
+  }
+  const double saved_outer_sum = ctxp->outer_sum;
+  const double saved_tie_ct = ctxp->tie_ct;
+  ctxp->outer_sum = 0.0;
+  ctxp->tie_ct = 0.0;
+  const uint32_t status = Fisher3xkLevelInner(ctxp, lvl);
+  if (ctxp->aborted) {
+    return kFisher2xkNonempty;
+  }
+  FisherMemoInsert(memop, state, prod_hash, fixed_lfact_sum_ddr, status, ctxp->outer_sum, ctxp->tie_ct);
+  ctxp->outer_sum += saved_outer_sum;
+  ctxp->tie_ct += saved_tie_ct;
+  return status;
+}
+
+double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
   int64_t row_tots_i64[3] = {0, 0, 0};
   uint32_t nz_col_ct = 0;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
@@ -3262,6 +5147,11 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
   const uintptr_t table_size = 3 * col_ct;
   unsigned char* alloc_base;
   if (unlikely(pgl_malloc((table_size + 8) * sizeof(double) + (col_ct + 3 + 2 * table_size + table_size * table_size) * sizeof(int32_t) + table_size, &alloc_base))) {
+    return S_CAST(double, NAN);
+  }
+  unsigned char* view_alloc;
+  if (unlikely(pgl_malloc(table_size * (sizeof(int32_t) + 2 * sizeof(int64_t) + sizeof(double)) + 16 * sizeof(double), &view_alloc))) {
+    free(alloc_base);
     return S_CAST(double, NAN);
   }
   double* lfact_args_buf = R_CAST(double*, alloc_base);
@@ -3313,6 +5203,11 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
   ctx.saved_tables = saved_tables;
   ctx.flex_buf = flex_buf;
   ctx.lfact_args_buf = lfact_args_buf;
+  ctx.view_fac_args = R_CAST(uint64_t*, view_alloc);
+  ctx.view_lfact_args = R_CAST(double*, &(ctx.view_fac_args[2 * table_size]));
+  ctx.view_fixed_cells = R_CAST(int32_t*, &(ctx.view_lfact_args[table_size + 16]));
+  ctx.mitm = nullptr;
+  ctx.memo = nullptr;
   ctx.outer_sum = 0.0;
   ctx.tie_ct = 0.0;
   for (uintptr_t cell_idx = 0; cell_idx != table_size; ++cell_idx) {
@@ -3350,6 +5245,7 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
     ln_p_bound += fabs(ln_p_bound) * k2m35;
     if (ln_p_bound < ln_p_cutoff) {
       free(alloc_base);
+      free(view_alloc);
       return MINV(ln_p_bound, 0.0);
     }
   }
@@ -3378,7 +5274,129 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
   LfactCache lfact_cache;
   LfactCacheInit(tot, &lfact_cache);
   ctx.lfact_cachep = &lfact_cache;
-  const uint32_t status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
+  // Log-likelihood of the mode relative to the observed table.
+  const double mode_lnlik = ddr_sub(ddr_negate(Fisher3xkLfactSum(&ctx, 0, col_ct)), ctx.starting_lnprobv_ddr).x[0];
+  double mitm_ln_cost;
+  const uint32_t mitm_a_col_ct = Fisher3xkMitmSplit(col_tots, row_tots, col_ct, tot, mode_lnlik, &mitm_ln_cost);
+  Fisher3xkMitm mitm;
+  int32_t* mitm_bufs = nullptr;
+  Fisher3xkMitmModeCacheEntry* mitm_mode_cache = nullptr;
+  if (mitm_a_col_ct) {
+    const uint32_t b_col_ct = col_ct - mitm_a_col_ct;
+    mitm_bufs = S_CAST(int32_t*, malloc(3 * table_size * sizeof(int32_t)));
+    mitm_mode_cache = S_CAST(Fisher3xkMitmModeCacheEntry*, malloc(kFisher3xkMitmModeCacheSize * sizeof(Fisher3xkMitmModeCacheEntry)));
+    if (unlikely((!mitm_bufs) || (!mitm_mode_cache) || FisherMitmInit(&mitm, 2 * b_col_ct, 3 * b_col_ct, &mitm.core))) {
+      free(mitm_bufs);
+      free(mitm_mode_cache);
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      free(view_alloc);
+      return S_CAST(double, NAN);
+    }
+    mitm.core.process_group = Fisher3xkMitmProcessGroup;
+    mitm.core.compare_outer = Fisher3xkMitmCompareOuter;
+    mitm.core.outer_fac_args = Fisher3xkMitmOuterFacArgs;
+    mitm.core.save_state = Fisher3xkMitmSaveState;
+    mitm.core.restore_state = Fisher3xkMitmRestoreState;
+    mitm.ctxp = &ctx;
+    mitm.a_col_ct = mitm_a_col_ct;
+    for (uint32_t uii = 0; uii != kFisher3xkMitmModeCacheSize; ++uii) {
+      mitm_mode_cache[uii].key = -1;
+    }
+    mitm.mode_cache = mitm_mode_cache;
+    mitm.saved_cur = mitm_bufs;
+    mitm.scratch_cur = &(mitm_bufs[table_size]);
+    mitm.b_buf = &(mitm_bufs[2 * table_size]);
+  }
+  FisherMemo memo;
+  dd_real* memo_fixed_lfact_sums = nullptr;
+  uint64_t* memo_fixed_prod_hashes = nullptr;
+  const uint32_t use_memo = (col_ct >= kFisher3xkMemoMinCols) && (tot <= kFisherMemoMaxTot) && (!FisherDebugEnv("FISHER_NO_MEMO"));
+  if (use_memo) {
+    memo_fixed_lfact_sums = S_CAST(dd_real*, malloc((table_size + col_ct + 1) * sizeof(dd_real)));
+    memo_fixed_prod_hashes = S_CAST(uint64_t*, malloc(table_size * sizeof(int64_t)));
+    if (unlikely((!memo_fixed_lfact_sums) || (!memo_fixed_prod_hashes) || FisherMemoInit(tot, &memo))) {
+      FisherMemoCleanup(&memo);
+      free(memo_fixed_lfact_sums);
+      free(memo_fixed_prod_hashes);
+      if (mitm_a_col_ct) {
+        FisherMitmCleanup(&mitm.core);
+        free(mitm_bufs);
+        free(mitm_mode_cache);
+      }
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      free(view_alloc);
+      return S_CAST(double, NAN);
+    }
+    memo_fixed_lfact_sums[3 * (col_ct - 1)] = ddr_maked(0.0);
+    memo_fixed_prod_hashes[3 * (col_ct - 1)] = 0;
+    dd_real* col_lfact_prefix_sums = &(memo_fixed_lfact_sums[table_size]);
+    col_lfact_prefix_sums[0] = ddr_maked(0.0);
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      col_lfact_prefix_sums[col_idx + 1] = ddr_add(col_lfact_prefix_sums[col_idx], CachedLfact(&lfact_cache, col_tots[col_idx]));
+    }
+    ctx.col_lfact_prefix_sums = col_lfact_prefix_sums;
+    ctx.memo = &memo;
+    ctx.fixed_lfact_sums = memo_fixed_lfact_sums;
+    ctx.fixed_prod_hashes = memo_fixed_prod_hashes;
+  }
+  ctx.work = 0;
+  ctx.work_budget = ~0LLU;
+  ctx.aborted = 0;
+  uint32_t run_mitm = (mitm_a_col_ct != 0);
+  uint32_t status = kFisher2xkNonempty;
+  if (run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX)) {
+    // See Fisher2xkLnP().
+    memcpy(mitm.saved_cur, cur, table_size * sizeof(int32_t));
+    ctx.work_budget = S_CAST(uint64_t, kFisher3xkMemoBudgetMult * exp(MINV(mitm_ln_cost, 50.0)));
+    status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
+    if (!ctx.aborted) {
+      run_mitm = 0;
+    } else {
+      ctx.aborted = 0;
+      ctx.work_budget = ~0LLU;
+      ctx.outer_sum = 0.0;
+      ctx.tie_ct = 0.0;
+      memcpy(cur, mitm.saved_cur, table_size * sizeof(int32_t));
+    }
+  } else if (!run_mitm) {
+    status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
+  }
+  if (run_mitm) {
+    ctx.mitm = &mitm;
+    status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
+  }
+  if (mitm_a_col_ct) {
+    uint32_t nomem = 0;
+    if (run_mitm) {
+      FisherMitmProcess(&mitm.core);
+      ctx.mitm = nullptr;
+      nomem = mitm.core.nomem;
+      ctx.outer_sum += mitm.core.sum + mitm.core.sum_err;
+      ctx.tie_ct += mitm.core.tie_ct;
+    }
+    FisherMitmCleanup(&mitm.core);
+    free(mitm_bufs);
+    free(mitm_mode_cache);
+    if (unlikely(nomem)) {
+      if (use_memo) {
+        FisherMemoCleanup(&memo);
+        free(memo_fixed_lfact_sums);
+        free(memo_fixed_prod_hashes);
+      }
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      free(view_alloc);
+      return S_CAST(double, NAN);
+    }
+  }
+  if (use_memo) {
+    ctx.memo = nullptr;
+    FisherMemoCleanup(&memo);
+    free(memo_fixed_lfact_sums);
+    free(memo_fixed_prod_hashes);
+  }
   LfactCacheCleanup(&lfact_cache);
   double result;
   if (status != kFisher2xkNonempty) {
@@ -3397,6 +5415,7 @@ static double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, d
     }
   }
   free(alloc_base);
+  free(view_alloc);
   return result;
 }
 

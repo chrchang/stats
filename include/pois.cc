@@ -265,6 +265,234 @@ double PpoisApprox(double obs_k, dd_real lambda_ddr, int32_t complement, int32_t
   return pois_finish_small(ln_small_ddr, (small_is_lower != (!complement)), logp);
 }
 
+// ***** High-accuracy (Ppois()) support *****
+//
+// Error budget: Ppois() aims for <1 ULP relative error (almost always <0.6
+// ULP), like Pbinom().  pois_ln_prob_loader() is accurate to ~2^{-100}
+// relative to its components, so the tail-sum (relative to pmf(k)) is the
+// bottleneck; each method below targets ~2^{-67} relative error.
+static const double kPoisHpSimpleMaxTerms = 2048;
+static const double kPoisHpAsymMaxRelDist = 0.03;
+
+// Starting from lik_ddr = pmf(k_cur)/pmf(k) and tailsum_ddr (which already
+// includes lik_ddr), continues summing outward.  Each term is accumulated with
+// dd_real precision until the remainder (bounded by the geometric series with
+// the current likelihood ratio r, which only decreases as we move outward) is
+// small enough that float64 accumulation of the rest can't contribute more
+// than ~2^{-68} relative error:
+//   remainder * (number of non-negligible terms) <= lik * r / (1-r)^2
+//                                               <= 2^{-15} * tailsum.
+static dd_real pois_ltail_lik_simple_ddr(double k, dd_real lambda_ddr) {
+  const dd_real inv_lambda_ddr = ddr_accurate_div(ddr_maked(1), lambda_ddr);
+  const double lambda = lambda_ddr.x[0];
+  dd_real lik_ddr = ddr_maked(1);
+  dd_real tailsum_ddr = lik_ddr;
+  while (k > 0) {
+    lik_ddr = ddr_mul(lik_ddr, ddr_muld(inv_lambda_ddr, k));
+    k -= 1;
+    tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+    const double r = k / lambda;
+    const double one_minus_r = 1 - r;
+    if (lik_ddr.x[0] * r <= tailsum_ddr.x[0] * (1.0 / (1 << 15)) * one_minus_r * one_minus_r) {
+      break;
+    }
+  }
+  if (k > 0) {
+    const double inv_lambda = inv_lambda_ddr.x[0];
+    double lik = lik_ddr.x[0];
+    double tailsum = 0.0;
+    while (k > 0) {
+      lik *= k * inv_lambda;
+      k -= 1;
+      const double preadd = tailsum;
+      tailsum += lik;
+      if (tailsum == preadd) {
+        break;
+      }
+    }
+    tailsum_ddr = ddr_addd(tailsum_ddr, tailsum);
+  }
+  return tailsum_ddr;
+}
+
+static dd_real pois_rtail_lik_simple_ddr(double k, dd_real lambda_ddr) {
+  const double lambda = lambda_ddr.x[0];
+  dd_real lik_ddr = ddr_maked(1);
+  dd_real tailsum_ddr = lik_ddr;
+  while (1) {
+    k += 1;
+    lik_ddr = ddr_mul(lik_ddr, ddr_divd(lambda_ddr, k));
+    tailsum_ddr = ddr_add(tailsum_ddr, lik_ddr);
+    const double r = lambda / (k + 1);
+    const double one_minus_r = 1 - r;
+    if ((one_minus_r > 0.0) && (lik_ddr.x[0] * r <= tailsum_ddr.x[0] * (1.0 / (1 << 15)) * one_minus_r * one_minus_r)) {
+      break;
+    }
+  }
+  double lik = lik_ddr.x[0];
+  double tailsum = 0.0;
+  while (1) {
+    k += 1;
+    lik *= lambda / k;
+    const double preadd = tailsum;
+    tailsum += lik;
+    if (tailsum == preadd) {
+      break;
+    }
+  }
+  return ddr_addd(tailsum_ddr, tailsum);
+}
+
+// Continued fractions evaluated with dd_real arithmetic, terminating when the
+// Lentz multiplier is within 2^{-67} of 1 (see ibeta_continued_fraction_ddr()
+// for the rationale).  These are only used when we're at least 0.03 * k from
+// the mean, and k >= 2048, so the iteration count is limited.
+static const double kPoisCfEps = 1.0 / (k2p64 * 8);
+
+static dd_real pois_ltail_lik_cf_ddr(double k, dd_real lambda_ddr) {
+  const double aa = k + 1;
+  const dd_real b0_ddr = ddr_subd(lambda_ddr, k);
+  dd_real ff_ddr = b0_ddr;
+  dd_real cc_ddr = b0_ddr;
+  dd_real dd_ddr = ddr_maked(0);
+  for (double mm = 1; mm < aa; mm += 1) {
+    const dd_real cur_a_ddr = ddr_mul2d(mm, aa - mm);
+    const dd_real cur_b_ddr = ddr_addd(b0_ddr, 2 * mm);
+    dd_ddr = ddr_accurate_div(ddr_maked(1), ddr_add(ddr_mul(cur_a_ddr, dd_ddr), cur_b_ddr));
+    cc_ddr = ddr_add(cur_b_ddr, ddr_accurate_div(cur_a_ddr, cc_ddr));
+    const dd_real delta_ddr = ddr_mul(cc_ddr, dd_ddr);
+    ff_ddr = ddr_mul(ff_ddr, delta_ddr);
+    if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= kPoisCfEps)) {
+      break;
+    }
+  }
+  return ddr_accurate_div(lambda_ddr, ff_ddr);
+}
+
+static dd_real pois_rtail_lik_cf_ddr(double k, dd_real lambda_ddr) {
+  const dd_real a_ddr = ddr_maked(k);
+  const dd_real lambda_p1_ddr = ddr_addd(ddr_negate(ddr_subd(lambda_ddr, k)), 1.0);
+  dd_real cc_ddr = ddr_mul(lambda_p1_ddr, ddr_accurate_div(a_ddr, ddr_add2d(k, 1)));
+  dd_real ff_ddr = cc_ddr;
+  dd_real dd_ddr = ddr_maked(0);
+  for (double mm = 1; ; mm += 1) {
+    const dd_real denom_ddr = ddr_add2d(k, 2 * mm - 1);
+    const dd_real x_div_denom_ddr = ddr_accurate_div(lambda_ddr, denom_ddr);
+    // ((a+m-1)/(a+2m-1)) * (x/(a+2m-1)) * x * m
+    const dd_real cur_a_ddr = ddr_mul(ddr_mul(ddr_accurate_div(ddr_add2d(k, mm - 1), denom_ddr), x_div_denom_ddr),
+                                      ddr_muld(lambda_ddr, mm));
+    // ((a+m)/(a+2m+1)) * (2m + lambda' + 1) + m + m*x/(a+2m-1)
+    const dd_real cur_b_ddr = ddr_add(ddr_mul(ddr_accurate_div(ddr_add2d(k, mm), ddr_add2d(k, 2 * mm + 1)),
+                                              ddr_addd(lambda_p1_ddr, 2 * mm)),
+                                      ddr_addd(ddr_muld(x_div_denom_ddr, mm), mm));
+    dd_ddr = ddr_accurate_div(ddr_maked(1), ddr_add(ddr_mul(cur_a_ddr, dd_ddr), cur_b_ddr));
+    cc_ddr = ddr_add(cur_b_ddr, ddr_accurate_div(cur_a_ddr, cc_ddr));
+    const dd_real delta_ddr = ddr_mul(cc_ddr, dd_ddr);
+    if ((delta_ddr.x[0] == 1.0) && (fabs(delta_ddr.x[1]) <= kPoisCfEps)) {
+      break;
+    }
+    ff_ddr = ddr_mul(ff_ddr, delta_ddr);
+  }
+  return ddr_accurate_div(a_ddr, ff_ddr);
+}
+
+static inline uint32_t pois_hp_simple_sum_ok(double dist, double lambda, double max_terms) {
+  const double est_terms = sqrt(dist * dist + 75 * lambda) - dist;
+  return (MINV(est_terms, max_terms) <= kPoisHpSimpleMaxTerms);
+}
+
+// log(P[X <= k]), assuming k < lambda.
+static dd_real pois_ln_ltail_hp(double k, dd_real lambda_ddr, dd_real lnpmf_ddr) {
+  const double lambda = lambda_ddr.x[0];
+  const double dist = ddr_subd(lambda_ddr, k).x[0];
+  dd_real tail_lik_ddr;
+  if (pois_hp_simple_sum_ok(dist, lambda, k + 1)) {
+    tail_lik_ddr = pois_ltail_lik_simple_ddr(k, lambda_ddr);
+  } else {
+    const double aa = k + 1;
+    const double a_dist = fabs(ddr_subd(lambda_ddr, aa).x[0]);
+    if (a_dist <= kPoisHpAsymMaxRelDist * aa) {
+      dd_real ln_tail_ddr = gasym(ddr_maked(aa), lambda_ddr);
+      if (!ddr_gtd(lambda_ddr, aa)) {
+        // gasym() returned log(P[X >= k+1]).
+        ln_tail_ddr = ddr_log1p(ddr_negate(ddr_exp(ln_tail_ddr)));
+      }
+      return ln_tail_ddr;
+    }
+    tail_lik_ddr = pois_ltail_lik_cf_ddr(k, lambda_ddr);
+  }
+  return ddr_add(lnpmf_ddr, ddr_log(tail_lik_ddr));
+}
+
+// log(P[X >= k]), assuming k > lambda.
+static dd_real pois_ln_rtail_hp(double k, dd_real lambda_ddr, dd_real lnpmf_ddr) {
+  const double lambda = lambda_ddr.x[0];
+  const double dist = ddr_negate(ddr_subd(lambda_ddr, k)).x[0];
+  dd_real tail_lik_ddr;
+  if (pois_hp_simple_sum_ok(dist, lambda, INFINITY_D)) {
+    tail_lik_ddr = pois_rtail_lik_simple_ddr(k, lambda_ddr);
+  } else if (dist <= kPoisHpAsymMaxRelDist * k) {
+    return gasym(ddr_maked(k), lambda_ddr);
+  } else {
+    tail_lik_ddr = pois_rtail_lik_cf_ddr(k, lambda_ddr);
+  }
+  return ddr_add(lnpmf_ddr, ddr_log(tail_lik_ddr));
+}
+
+// exp(ln_ddr) rounded once to double, including into the subnormal range.
+static inline double pois_ddr_exp_to_double(dd_real ln_ddr) {
+  if (ln_ddr.x[0] >= -708.0) {
+    return ddr_exp(ln_ddr).x[0];
+  }
+  if (ln_ddr.x[0] < -760.0) {
+    // Below half the smallest subnormal.
+    return 0.0;
+  }
+  return ddr_to_double_unscale128(ddr_exp(ddr_add(ln_ddr, _ddr_128log2)));
+}
+
+double Ppois(double obs_k, dd_real lambda_ddr, int32_t complement, uint32_t logp) {
+  if (obs_k < 0) {
+    if (complement) {
+      return logp? 0.0 : 1.0;
+    }
+    return logp? -INFINITY_D : 0.0;
+  }
+  obs_k = floor(obs_k);
+  const double lambda = lambda_ddr.x[0];
+  if ((lambda == 0.0) || (obs_k >= S_CAST(double, 1LL << 53))) {
+    // Point mass at 0; or caller has ensured lambda < 2^51, in which case
+    // P[X > obs_k] is far smaller than DBL_MIN.
+    if (complement) {
+      return logp? -INFINITY_D : 0.0;
+    }
+    return logp? 0.0 : 1.0;
+  }
+  dd_real ln_small_ddr;
+  uint32_t small_is_lower;
+  if (ddr_gtd(lambda_ddr, obs_k)) {
+    ln_small_ddr = pois_ln_ltail_hp(obs_k, lambda_ddr, pois_ln_prob_loader(obs_k, lambda_ddr));
+    small_is_lower = 1;
+  } else {
+    ln_small_ddr = pois_ln_rtail_hp(obs_k + 1, lambda_ddr, pois_ln_prob_loader(obs_k + 1, lambda_ddr));
+    small_is_lower = 0;
+  }
+  if (ln_small_ddr.x[0] > 0.0) {
+    ln_small_ddr = ddr_maked(0.0);
+  }
+  if (small_is_lower != (!complement)) {
+    // Return 1 - small, or its log.
+    if (logp) {
+      return ddr_log1p_negexp(ln_small_ddr);
+    }
+    return ddr_negate(ddr_subd(ddr_exp(ln_small_ddr), 1.0)).x[0];
+  }
+  if (logp) {
+    return ln_small_ddr.x[0];
+  }
+  return pois_ddr_exp_to_double(ln_small_ddr);
+}
+
 // Sets *diff_ptr to (approximately) log(pmf(k)) - log(pmf(obs_k)), and
 // returns its sign, with near-ties resolved by CompareFactorialProducts().
 static intptr_t pois_cmp(int64_t obs_k, int64_t k, dd_real lambda_ddr, dd_real obs_lnpmf_ddr, td_real* starting_lnprobv_tdr_ptr, td_real* ln_lambda_tdr_ptr, double* diff_ptr, dd_real* lnpmf_ddr_ptr) {

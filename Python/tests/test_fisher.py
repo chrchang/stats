@@ -100,9 +100,31 @@ def test_fisher_2xk_33():
         assert exact_tests.fisher_exact(table) == 0.0
         assert exact_tests.fisher_exact(table, logp=True) < -745
     with pytest.raises(RuntimeError):
-        exact_tests.fisher_exact([[1, 2, 3], [4, 5, 6], [7, 8, 9], [1, 2, 3]])
-    with pytest.raises(RuntimeError):
-        exact_tests.fisher_exact([[1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4]])
+        exact_tests.fisher_exact([[1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4], [5, 6, 7, 8]])
+
+
+# Reference values were computed by (pruned) exact enumeration with 256-bit
+# MPFR arithmetic.  Each case is (table, log-p-value, log-midp-value).
+fisher_2xk_3xk_large_cases = [
+    ([[59, 79, 38, 90, 82, 60, 70], [64, 94, 45, 86, 82, 72, 79]], -0.071938761276373928, -0.071938815194004191),
+    ([[69, 66, 90, 28, 68, 90, 77], [85, 75, 86, 37, 70, 84, 75]], -0.25190433769013532, -0.25190440603994091),
+    ([[1, 1, 3, 2, 0, 0, 0, 3, 3], [2, 4, 1, 5, 1, 1, 2, 4, 2]], -0.35329748516790693, -0.41242615795654952),
+    ([[1, 3, 1, 1, 0, 3, 3, 5, 3], [1, 1, 1, 0, 2, 1, 7, 2, 0]], -1.4843038728469717, -1.4918907420522329),
+    ([[1, 1, 3, 0, 2, 2], [1, 1, 0, 1, 2, 3], [0, 0, 1, 1, 2, 1]], -0.11365018305619758, -0.17781090707359118),
+    ([[4, 0, 0, 1, 1, 1], [1, 0, 2, 0, 0, 3], [1, 1, 1, 2, 3, 1]], -1.4070116119685145, -1.5536083327901693),
+    ([[0, 1, 4, 0, 7], [1, 2, 1, 6, 4], [0, 0, 2, 1, 1]], -2.8640803039982159, -2.9425671320127691),
+    ([[3, 2, 3, 1, 1], [0, 1, 0, 1, 1], [0, 2, 0, 1, 2]], -0.54059281778090373, -0.64751570884718135),
+    ([[1, 0, 1, 4], [0, 0, 2, 1], [2, 1, 2, 5]], -0.18301893558768439, -0.21874741757827967),
+    ]
+
+
+def test_fisher_2xk_3xk_large():
+    for table, ln_p, ln_midp in fisher_2xk_3xk_large_cases:
+        transposed = [list(col) for col in zip(*table)]
+        for tbl in (table, transposed):
+            assert exact_tests.fisher_exact(tbl) == pytest.approx(math.exp(ln_p), rel=1e-13, abs=0), str(tbl)
+            assert exact_tests.fisher_exact(tbl, logp=True) == pytest.approx(ln_p, rel=1e-13, abs=1e-15), str(tbl)
+            assert exact_tests.fisher_exact(tbl, midp=True) == pytest.approx(math.exp(ln_midp), rel=1e-13, abs=0), str(tbl)
 
 
 def test_cond_odds_ratio():

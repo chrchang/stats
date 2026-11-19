@@ -926,6 +926,81 @@ dd_real basym(dd_real a_ddr, dd_real b_ddr, dd_real lambda_ddr) {
   return ddr_add(ddr_sub(ddr_add(t_ddr, ln_e0_ddr), bcorr_ddr(abmin_ddr, abmax_ddr)), ddr_log(sum_ddr));
 }
 
+// High-accuracy Poisson limit of basym(); see gasym_approx() for the
+// correspondence.  With h = 0, the hn/s recurrences collapse to constants.
+dd_real gasym(dd_real a_ddr, dd_real lambda_ddr) {
+  const dd_real e1_ddr = {{0.3535533905932738, -2.4168233283632284e-17}};  // 2^{-3/2}
+  const dd_real ln_e0_ddr = {{0.12078223763524522, 4.1797047492946264e-18}};  // log(2/sqrt(pi))
+
+  dd_real a0_ddr[kBasymIter + 1];
+  dd_real b0_ddr[kBasymIter + 1];
+  dd_real c_ddr[kBasymIter + 1];
+  dd_real d_ddr[kBasymIter + 1];
+
+  const dd_real lambda_minus_a_ddr = ddr_sub(lambda_ddr, a_ddr);
+  dd_real t_ddr = ddr_mul(ddr_log1pmx(ddr_accurate_div(lambda_minus_a_ddr, a_ddr)), a_ddr);
+  if (t_ddr.x[0] > 0.0) {
+    t_ddr = ddr_maked(0.0);
+  }
+  const double r1 = (lambda_minus_a_ddr.x[0] > 0.0)? -1.0 : 1.0;
+  const dd_real f_ddr = ddr_negate(t_ddr);
+  const dd_real z0_ddr = ddr_sqrt(f_ddr);
+  const dd_real w0sqr_ddr = ddr_accurate_div(ddr_maked(1), a_ddr);
+  const dd_real zw0sqr_ddr = ddr_mul(w0sqr_ddr, ddr_mul_pwr2(f_ddr, 2));
+  const dd_real w0_ddr = ddr_sqrt(w0sqr_ddr);
+
+  a0_ddr[0] = ddr_muld(_ddr_2_3rds, r1);
+  d_ddr[0] = ddr_mul_pwr2(a0_ddr[0], 0.5);
+  c_ddr[0] = ddr_negate(d_ddr[0]);
+  dd_real j0w_ddr = ddr_mul(_ddr_half_e0_recip, erfcx_ddr(z0_ddr));
+  dd_real j1w_ddr = ddr_mul(e1_ddr, w0_ddr);
+  dd_real sum_ddr = ddr_add(ddr_mul(d_ddr[0], j1w_ddr), j0w_ddr);
+
+  dd_real e1_znm1_w0n_ddr = ddr_mul(ddr_mul(z0_ddr, e1_ddr), ddr_mul(w0sqr_ddr, _ddr_sqrt2));
+  dd_real e1_zn_w0np1_ddr = ddr_mul(j1w_ddr, zw0sqr_ddr);
+  for (int32_t n = 2; n <= kBasymIter; n += 2) {
+    a0_ddr[n - 1] = ddr_accurate_div(ddr_maked(2), ddr_maked(n + 2));
+    const int32_t np1 = n + 1;
+    a0_ddr[n] = ddr_accurate_div(ddr_maked(2 * r1), ddr_maked(n + 3));
+
+    for (int32_t i = n; i <= np1; ++i) {
+      const double r = (-i - 1) * 0.5;
+      b0_ddr[0] = ddr_muld(a0_ddr[0], r);
+      for (int32_t m = 2; m <= i; ++m) {
+        dd_real bsum_ddr = ddr_maked(0);
+        for (int32_t j = 1; j < m; ++j) {
+          const int32_t mmj = m - j;
+          bsum_ddr = ddr_add(bsum_ddr, ddr_mul(ddr_muld(a0_ddr[j - 1], j * r - mmj), b0_ddr[mmj - 1]));
+        }
+        b0_ddr[m - 1] = ddr_add(ddr_muld(a0_ddr[m - 1], r), ddr_divd(bsum_ddr, m));
+      }
+      c_ddr[i - 1] = ddr_divd(b0_ddr[i - 1], i + 1);
+
+      dd_real dsum_ddr = ddr_maked(0);
+      for (int32_t j = 1; j < i; ++j) {
+        dsum_ddr = ddr_add(dsum_ddr, ddr_mul(d_ddr[i - j - 1], c_ddr[j - 1]));
+      }
+      d_ddr[i - 1] = ddr_negate(ddr_add(dsum_ddr, c_ddr[i - 1]));
+    }
+
+    j0w_ddr = ddr_add(ddr_mul(j0w_ddr, ddr_muld(w0sqr_ddr, n - 1)), e1_znm1_w0n_ddr);
+    j1w_ddr = ddr_add(ddr_mul(j1w_ddr, ddr_muld(w0sqr_ddr, n)), e1_zn_w0np1_ddr);
+    e1_znm1_w0n_ddr = ddr_mul(zw0sqr_ddr, e1_znm1_w0n_ddr);
+    e1_zn_w0np1_ddr = ddr_mul(zw0sqr_ddr, e1_zn_w0np1_ddr);
+    const dd_real t0_ddr = ddr_mul(d_ddr[n - 1], j0w_ddr);
+    const dd_real t1_ddr = ddr_mul(d_ddr[n], j1w_ddr);
+    sum_ddr = ddr_add(sum_ddr, ddr_add(t0_ddr, t1_ddr));
+
+    // erfcx limited to ~18-digit precision
+    const double eps = k2m60;
+    if (fabs(t0_ddr.x[0]) + fabs(t1_ddr.x[0]) <= eps * sum_ddr.x[0]) {
+      break;
+    }
+  }
+
+  return ddr_add(ddr_sub(ddr_add(t_ddr, ln_e0_ddr), ddr_stirlerr(a_ddr)), ddr_log(sum_ddr));
+}
+
 // Adaptations of DiDonato and Morris's BFRAC and BASYM.  BFRAC is based on a
 // continued fraction introduced in
 //   Aroian LA (1941) Continued fractions for the incomplete beta function.

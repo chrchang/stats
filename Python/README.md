@@ -1,10 +1,10 @@
 exact-tests
 ===========
 
-This package implements the binomial, Hardy-Weinberg equilibrium, and Fisher's
-(2x2..2x6 and 3x3 so far) exact tests, along with corresponding discrete
-distributions (binomial, hypergeometric).  scipy- and R-style interfaces are
-provided.  cdf-like functions offer a fast 'approx' mode.
+This package implements the binomial, Poisson, Hardy-Weinberg equilibrium, and
+Fisher's (2xk and 3xk so far) exact tests, along with corresponding
+discrete distributions (binomial, hypergeometric, Poisson).  scipy- and R-style
+interfaces are provided.  cdf-like functions offer a fast 'approx' mode.
 
 As of this writing, these functions (even in 'approx' mode) are more accurate,
 and often simultaneously more efficient, than their scipy counterparts: see the
@@ -113,14 +113,22 @@ You can test the package with `pytest`.
 ##### Example usage:
 ```
 import exact_tests
+from fractions import Fraction
 
 exact_tests.binomtest(3, n=15, p=0.1, alternative="greater")
 exact_tests.binomtest(2, 29, 0.1)
 exact_tests.binomtest(2, 29, "0.1")
 exact_tests.binomtest(2, 29, "0.1", midp=True)
 exact_tests.binomtest(100, 10000, "0.000001", logp=True)
+exact_tests.poissontest(137, t=24.19893)  # R poisson.test(137, 24.19893)
+exact_tests.poissontest(1000123456, r=1e9, alternative="greater")
+exact_tests.poissontest(0, t=3, r=Fraction(1, 3), midp=True)  # t*r exactly 1
+exact_tests.poissontest2(11, 21, t1=800, t2=3011)  # R poisson.test(c(11, 21), c(800, 3011))
+exact_tests.ppois(950, 1000.5, logp=True)
+exact_tests.poisson.sf([1003000, 1004000], 1e6)
 exact_tests.fisher_exact([[4, 0], [0, 4]], alternative="greater", midp=True)
 exact_tests.fisher_exact([[10000, 20000], [30000, 40000], [50000, 60000]], logp=True)
 exact_tests.fisher_exact([[3, 10, 4, 7], [9, 2, 4, 1]], midp=True)
 exact_tests.fisher_exact([[400, 520, 580], [510, 470, 520], [600, 480, 420]], logp=True)
+exact_tests.fisher_exact([[25, 15, 18, 12, 15], [20, 22, 12, 18, 10], [15, 20, 10, 8, 5]])
 ```

@@ -4,7 +4,7 @@
 \alias{ppois}
 \title{Poisson distribution cdf}
 \usage{
-ppois(q, lambda, lower.tail = TRUE, log.p = FALSE)
+ppois(q, lambda, lower.tail = TRUE, log.p = FALSE, approx = FALSE)
 }
 \arguments{
 \item{q}{vector of event counts.}
@@ -15,6 +15,10 @@ ppois(q, lambda, lower.tail = TRUE, log.p = FALSE)
 otherwise, P[X > x].}
 
 \item{log.p}{logical; if TRUE, probabilities p are given as log(p).}
+
+\item{approx}{logical; if FALSE (the default), aim for bit-exact results,
+otherwise use a faster algorithm (which is still more accurate than R
+4.6.1 ppois() and scipy 1.18 stats.poisson.cdf()).}
 }
 \value{
 cdf(q).
@@ -27,6 +31,8 @@ Cumulative distribution function for Poisson distribution with parameter
 Probabilities are computed as (Loader's-algorithm log-pmf) times
 (relative-likelihood tail sum), where the tail sum is evaluated by direct
 summation, a continued fraction, or Temme's uniform asymptotic expansion,
-depending on the region.  Relative error is usually within a few ULPs.
+depending on the region.  When \code{approx=FALSE}, these are evaluated with
+double-double arithmetic, and relative error should be <1 ULP (usually
+<0.5 ULP); otherwise, relative error is usually within a few ULPs.
 }
 \keyword{internal}

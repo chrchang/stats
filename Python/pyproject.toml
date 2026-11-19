@@ -10,14 +10,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "exact-tests"
-version = "0.10.1"
+version = "0.11.0"
 authors = [
   { name="Christopher Chang", email="chrchang@alumni.caltech.edu" },
 ]
 dependencies = [
     "numpy>=1.21.3", # runtime requirement < build requirement
 ]
-description = "Accurate and efficient binomial, Hardy-Weinberg equilibrium, and Fisher's exact tests."
+description = "Accurate and efficient binomial, Poisson, Hardy-Weinberg equilibrium, and Fisher's exact tests."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [

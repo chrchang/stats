@@ -288,16 +288,21 @@ binom.test <- function(x, n, p=0.5,
 #' @param lower.tail logical; if TRUE, probabilities are P\[X <= x\],
 #'   otherwise, P\[X > x\].
 #' @param log.p logical; if TRUE, probabilities p are given as log(p).
+#' @param approx logical; if FALSE (the default), aim for bit-exact results,
+#'   otherwise use a faster algorithm (which is still more accurate than R
+#'   4.6.1 ppois() and scipy 1.18 stats.poisson.cdf()).
 #'
 #' @details Probabilities are computed as (Loader's-algorithm log-pmf) times
 #'   (relative-likelihood tail sum), where the tail sum is evaluated by direct
 #'   summation, a continued fraction, or Temme's uniform asymptotic expansion,
-#'   depending on the region.  Relative error is usually within a few ULPs.
+#'   depending on the region.  When `approx=FALSE`, these are evaluated with
+#'   double-double arithmetic, and relative error should be <1 ULP (usually
+#'   <0.5 ULP); otherwise, relative error is usually within a few ULPs.
 #'
 #' @return cdf(q).
 #'
 #' @keywords internal
-ppois <- function(q, lambda, lower.tail=TRUE, log.p=FALSE) {
+ppois <- function(q, lambda, lower.tail=TRUE, log.p=FALSE, approx=FALSE) {
   if (!is.numeric(q)) {
     stop("'q' must be a numeric vector")
   }
@@ -310,7 +315,10 @@ ppois <- function(q, lambda, lower.tail=TRUE, log.p=FALSE) {
   if (!is.boolean(log.p)) {
     stop("'log.p' must be a single boolean value")
   }
-  result <- ppois_cpp(q, lambda, lower.tail, log.p, FALSE)
+  if (!is.boolean(approx)) {
+    stop("'approx' must be a single boolean value")
+  }
+  result <- ppois_cpp(q, lambda, lower.tail, log.p, FALSE, approx)
   return(result)
 }
 
@@ -609,7 +617,14 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   p-values on tables handled by `FEXACT` (see 'Details').  This also
 #'   increases the internal stack size which allows larger problems to be
 #'   solved, sometimes needing hours.  In such cases,
-#'   `simulate.p.values = TRUE` may be more reasonable.
+#'   `simulate.p.values = TRUE` may be more reasonable.  The default of
+#'   64000000 (256 MB) is in line with the memory limit of the algorithm used
+#'   for 2xk and 3xk tables; it is much larger than `stats::fisher.test()`'s
+#'   default of 200000, which is too small for many moderately-sized tables.
+#'   (`FEXACT` allocates the entire workspace on each call, which costs
+#'   roughly a millisecond.)  (2xk and 3xk tables
+#'   are handled by a different algorithm, which manages its own memory; see
+#'   'Details'.)
 #' @param hybrid a logical.  Only used for tables handled by `FEXACT`, in
 #'   which cases it indicates whether the exact probabilities (default) or a
 #'   hybrid approximation thereof should be computed.
@@ -648,15 +663,24 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   Incomplete cases are removed, vectors are coerced into factor objects, and
 #'   the contingency table is computed from these.
 #'
-#'   For `or=1` two-sided tests on 2x2 tables, 2x3 tables, 2xk tables with at
-#'   most 6 nonempty columns (or any number of them when `midp = TRUE`), and
-#'   3x3 tables, computations are based on the algorithm described in Chang et
-#'   al. (2015) and extensions of it.  (When `simulate.p.value = TRUE`, all
-#'   tables larger than 2x3 are instead handled by the base R code.)  For
-#'   other tests on 2x2 tables, p-values are obtained directly using the
-#'   (central or non-central) hypergeometric distribution.
+#'   For `or=1` two-sided tests on 2x2, 2xk, kx2, 3xk, and kx3 tables,
+#'   computations are based on the algorithm described in Chang et al. (2015)
+#'   and extensions of it.  For larger 2xk and 3xk tables, these are combined
+#'   with two ideas from the network algorithm of Mehta and Patel (1983):
+#'   merging all partial tables which leave the same subproblem behind (via a
+#'   meet-in-the-middle split of the columns, which works well with large
+#'   counts), and reusing the results of subproblems whose fixed cells have
+#'   the same probability (which works well with small counts).  Unlike
+#'   `FEXACT`, which merges partial tables whose probabilities are within a
+#'   relative tolerance of about 1e-7, only exactly-equal probabilities are
+#'   merged, so the p-value is computed to nearly full double precision.
+#'   (When `simulate.p.value = TRUE`, all tables larger than 2x3 are instead
+#'   handled by the base R code.)  For other tests on 2x2 tables, p-values are
+#'   obtained directly using the (central or non-central) hypergeometric
+#'   distribution.
 #'
-#'   For other tables, computations are based on a C version of the FORTRAN
+#'   For other tables (with at least 4 rows and 4 columns), computations are
+#'   based on a C version of the FORTRAN
 #'   subroutine `FEXACT` which implements the network developed by Mehta and
 #'   Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 #'   FORTRAN code can be obtained from <https://netlib.org/toms/643>.  Note the
@@ -686,11 +710,22 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   otherwise the exact calculation is used.  A corresponding `if()` decision
 #'   is made for all sub-tables considered.
 #'
-#'   In the `r`x`c` case with `r>2` or `c>2`, internal tables can be too
-#'   large for the exact test in which case an error is signalled.  Apart from
-#'   increasing `workspace` sufficiently, which then may lead to very long
-#'   running times, using `simulate.p.value = TRUE` may then often be
-#'   sufficient and hence advisable.
+#'   For tables handled by `FEXACT`, internal tables can be too large for the
+#'   exact test in which case an error is signalled.  Apart from increasing
+#'   `workspace` sufficiently, which then may lead to very long running times,
+#'   using `simulate.p.value = TRUE` may then often be sufficient and hence
+#'   advisable.
+#'
+#'   2xk and 3xk tables are not subject to the `workspace` limit.  Their
+#'   memory use grows with the difficulty of the problem: it is usually well
+#'   under 50 MB, and internal caps bound it to roughly 250 MB for tables with
+#'   up to ~20 columns (growing slowly with more columns), which is only
+#'   approached by problems taking many seconds (e.g. a 3x5 table with total
+#'   450 and p ~= 0.02 takes ~15 seconds and ~180 MB).  Running time grows
+#'   quickly with the number of columns and the table total, especially when
+#'   the p-value is extremely small; in the latter case, note that p-values
+#'   below ~1e-323 are computed much more quickly when `log.p = FALSE`, since
+#'   they're just reported as zero.
 #'
 #'   Simulation is done conditional on the row and column marginals, and works
 #'   only if the marginals are strictly positive.  (A C translation of the
@@ -762,14 +797,20 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' (fisher.test(Convictions, conf.level = 0.95) -> ft)$conf.int
 #'  fisher.test(Convictions, conf.level = 0.99)$conf.int
 #'
-#' ## Some r x c tables which were out of reach for R 4.6's algorithm, but
-#' ## complete within ~a second with the new algorithm.
-#' result <- fisher.test(matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow=2))
+#' ## Some r x c tables with many small expected counts, so the chi-squared
+#' ## approximation is inadvisable, which were out of reach for R 4.6's
+#' ## algorithm with its default workspace, but complete within a fraction of a
+#' ## second with the new algorithm.
+#' result <- fisher.test(matrix(c(13, 22, 22, 15, 39, 17, 5, 5, 8, 1,
+#'                                6, 9, 4, 0, 18, 9, 7, 1, 24, 25), nrow=2))
 #' result$p.value
-#' fisher.test(matrix(c(3000, 2000, 1000, 2000, 1300, 600, 1000, 700, 400), nrow=3))
+#' fisher.test(matrix(c(0, 3, 2, 6, 10, 4, 57, 27, 13,
+#'                      2, 5, 3, 3, 5, 0, 8, 1, 1), nrow=3))
+#' fisher.test(matrix(c(2, 0, 0, 4, 4, 3, 4, 3, 4, 1, 2,
+#'                      4, 6, 3, 10, 11, 11, 13, 3, 21, 11), nrow=3))
 #'
 #' @export
-fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
+fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
                         hybridPars = c(expect = 5, percent = 80, Emin = 1),
                         control = list(), or = 1, alternative = "two.sided",
                         conf.int = TRUE, conf.level = 0.95,
@@ -780,13 +821,8 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   ##
   ## Start with check for conditions that currently require us to rely on the
   ## stats::fisher.test() fallback.  Specifically, if the table is larger than
-  ## 2x3 and any of the following hold:
-  ##   simulate.p.value = TRUE
-  ##   it's neither 2xk/kx2 nor 3x3
-  ##   it's 2xk/kx2 with more than 7 nonempty columns/rows, and midp = FALSE
-  ##     (our 2xk algorithm's runtime grows quickly with k, so the network
-  ##     algorithm is usually faster beyond this point)
-  ## we just forward to stats::fisher.test().
+  ## 2x3 and either simulate.p.value = TRUE or it has at least 4 rows and 4
+  ## columns, we just forward to stats::fisher.test().
 
   expr.x <- substitute(x)
   expr.y <- substitute(y)
@@ -821,16 +857,15 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
     stop("'log.p' must be a single boolean value")
   }
   use.2xk <- FALSE
-  use.33 <- FALSE
+  use.3xk <- FALSE
   if ((nr + nc > 5) && !identical(simulate.p.value, TRUE) && is.numeric(xmat) && !anyNA(xmat)) {
-    if ((nr == 3) && (nc == 3)) {
-      use.33 <- TRUE
-    } else if (min(nr, nc) == 2) {
-      nz.ct <- if (nr == 2) sum(colSums(xmat) != 0) else sum(rowSums(xmat) != 0)
-      use.2xk <- isTRUE(midp) || (nz.ct <= 6)
+    if (min(nr, nc) == 2) {
+      use.2xk <- TRUE
+    } else if (min(nr, nc) == 3) {
+      use.3xk <- TRUE
     }
   }
-  if ((nr + nc > 5) && !use.2xk && !use.33) {
+  if ((nr + nc > 5) && !use.2xk && !use.3xk) {
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
     }
@@ -906,7 +941,7 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
   }
 
   if (hybrid) {
-    warning("'hybrid' is ignored for 2x2, 2x3, small 2xk, and 3x3 tables")
+    warning("'hybrid' is ignored for 2xk and 3xk tables")
   }
   if (midp) {
     METHOD <- paste(METHOD, "(midp)")
@@ -914,10 +949,10 @@ fisher.test <- function(x, y = NULL, workspace = 200000, hybrid = FALSE,
 
   RVAL <- NULL
   if (!have.2x2) {
-    ## 2x3, 2xk, or 3x3 case, otherwise we would have forwarded to
+    ## 2x3, 2xk, or 3xk case, otherwise we would have forwarded to
     ## stats::fisher.test().
-    if (use.33) {
-      P_OR_LNPVAL <- fisher33_test_pval(x, midp, log.p)
+    if (use.3xk) {
+      P_OR_LNPVAL <- fisher3xk_test_pval(x, midp, log.p)
     } else if (use.2xk) {
       P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p)
     } else {

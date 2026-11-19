@@ -3,8 +3,7 @@ stats
 
 Implementations of the binomial, Poisson, Hardy-Weinberg equilibrium, and
 Fisher's exact tests (2x2..2x6 and 3x3 so far), along with corresponding
-discrete distributions (binomial, hypergeometric, Poisson).  (The Poisson test
-is currently only exposed by the R package.)
+discrete distributions (binomial, hypergeometric, Poisson).
 
 As of this writing, these functions are more accurate, and often simultaneously
 more efficient, than their scipy counterparts; see the MPFR-comparison and

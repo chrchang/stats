@@ -7,7 +7,7 @@
 fisher.test(
   x,
   y = NULL,
-  workspace = 2e+05,
+  workspace = 6.4e+07,
   hybrid = FALSE,
   hybridPars = c(expect = 5, percent = 80, Emin = 1),
   control = list(),
@@ -33,7 +33,14 @@ network algorithm.  In units of 4 bytes.  Only used for non-simulated
 p-values on tables handled by \code{FEXACT} (see 'Details').  This also
 increases the internal stack size which allows larger problems to be
 solved, sometimes needing hours.  In such cases,
-\code{simulate.p.values = TRUE} may be more reasonable.}
+\code{simulate.p.values = TRUE} may be more reasonable.  The default of
+64000000 (256 MB) is in line with the memory limit of the algorithm used
+for 2xk and 3xk tables; it is much larger than \code{stats::fisher.test()}'s
+default of 200000, which is too small for many moderately-sized tables.
+(\code{FEXACT} allocates the entire workspace on each call, which costs
+roughly a millisecond.)  (2xk and 3xk tables
+are handled by a different algorithm, which manages its own memory; see
+'Details'.)}
 
 \item{hybrid}{a logical.  Only used for tables handled by \code{FEXACT}, in
 which cases it indicates whether the exact probabilities (default) or a
@@ -100,15 +107,24 @@ both \code{x} and \code{y} must be vectors or factors of the same length.
 Incomplete cases are removed, vectors are coerced into factor objects, and
 the contingency table is computed from these.
 
-For \code{or=1} two-sided tests on 2x2 tables, 2x3 tables, 2xk tables with at
-most 6 nonempty columns (or any number of them when \code{midp = TRUE}), and
-3x3 tables, computations are based on the algorithm described in Chang et
-al. (2015) and extensions of it.  (When \code{simulate.p.value = TRUE}, all
-tables larger than 2x3 are instead handled by the base R code.)  For
-other tests on 2x2 tables, p-values are obtained directly using the
-(central or non-central) hypergeometric distribution.
+For \code{or=1} two-sided tests on 2x2, 2xk, kx2, 3xk, and kx3 tables,
+computations are based on the algorithm described in Chang et al. (2015)
+and extensions of it.  For larger 2xk and 3xk tables, these are combined
+with two ideas from the network algorithm of Mehta and Patel (1983):
+merging all partial tables which leave the same subproblem behind (via a
+meet-in-the-middle split of the columns, which works well with large
+counts), and reusing the results of subproblems whose fixed cells have
+the same probability (which works well with small counts).  Unlike
+\code{FEXACT}, which merges partial tables whose probabilities are within a
+relative tolerance of about 1e-7, only exactly-equal probabilities are
+merged, so the p-value is computed to nearly full double precision.
+(When \code{simulate.p.value = TRUE}, all tables larger than 2x3 are instead
+handled by the base R code.)  For other tests on 2x2 tables, p-values are
+obtained directly using the (central or non-central) hypergeometric
+distribution.
 
-For other tables, computations are based on a C version of the FORTRAN
+For other tables (with at least 4 rows and 4 columns), computations are
+based on a C version of the FORTRAN
 subroutine \code{FEXACT} which implements the network developed by Mehta and
 Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 FORTRAN code can be obtained from \url{https://netlib.org/toms/643}.  Note the
@@ -137,11 +153,22 @@ is if no cell has expected counts less than 1 (\verb{= Emin}) and more than 80\%
 otherwise the exact calculation is used.  A corresponding \verb{if()} decision
 is made for all sub-tables considered.
 
-In the \code{r}x\code{c} case with \code{r>2} or \code{c>2}, internal tables can be too
-large for the exact test in which case an error is signalled.  Apart from
-increasing \code{workspace} sufficiently, which then may lead to very long
-running times, using \code{simulate.p.value = TRUE} may then often be
-sufficient and hence advisable.
+For tables handled by \code{FEXACT}, internal tables can be too large for the
+exact test in which case an error is signalled.  Apart from increasing
+\code{workspace} sufficiently, which then may lead to very long running times,
+using \code{simulate.p.value = TRUE} may then often be sufficient and hence
+advisable.
+
+2xk and 3xk tables are not subject to the \code{workspace} limit.  Their
+memory use grows with the difficulty of the problem: it is usually well
+under 50 MB, and internal caps bound it to roughly 250 MB for tables with
+up to ~20 columns (growing slowly with more columns), which is only
+approached by problems taking many seconds (e.g. a 3x5 table with total
+450 and p ~= 0.02 takes ~15 seconds and ~180 MB).  Running time grows
+quickly with the number of columns and the table total, especially when
+the p-value is extremely small; in the latter case, note that p-values
+below ~1e-323 are computed much more quickly when \code{log.p = FALSE}, since
+they're just reported as zero.
 
 Simulation is done conditional on the row and column marginals, and works
 only if the marginals are strictly positive.  (A C translation of the
@@ -175,11 +202,17 @@ fisher.test(Convictions, conf.int = FALSE)
 (fisher.test(Convictions, conf.level = 0.95) -> ft)$conf.int
  fisher.test(Convictions, conf.level = 0.99)$conf.int
 
-## Some r x c tables which were out of reach for R 4.6's algorithm, but
-## complete within ~a second with the new algorithm.
-result <- fisher.test(matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow=2))
+## Some r x c tables with many small expected counts, so the chi-squared
+## approximation is inadvisable, which were out of reach for R 4.6's
+## algorithm with its default workspace, but complete within a fraction of a
+## second with the new algorithm.
+result <- fisher.test(matrix(c(13, 22, 22, 15, 39, 17, 5, 5, 8, 1,
+                               6, 9, 4, 0, 18, 9, 7, 1, 24, 25), nrow=2))
 result$p.value
-fisher.test(matrix(c(3000, 2000, 1000, 2000, 1300, 600, 1000, 700, 400), nrow=3))
+fisher.test(matrix(c(0, 3, 2, 6, 10, 4, 57, 27, 13,
+                     2, 5, 3, 3, 5, 0, 8, 1, 1), nrow=3))
+fisher.test(matrix(c(2, 0, 0, 4, 4, 3, 4, 3, 4, 1, 2,
+                     4, 6, 3, 10, 11, 11, 13, 3, 21, 11), nrow=3))
 
 }
 \references{

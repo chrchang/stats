@@ -74,8 +74,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // ppois_cpp
-NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp);
-RcppExport SEXP _exactr_ppois_cpp(SEXP qSEXP, SEXP lambdaSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP) {
+NumericVector ppois_cpp(NumericVector q, NumericVector lambda, bool lower_tail, bool log_p, bool midp, bool approx);
+RcppExport SEXP _exactr_ppois_cpp(SEXP qSEXP, SEXP lambdaSEXP, SEXP lower_tailSEXP, SEXP log_pSEXP, SEXP midpSEXP, SEXP approxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -84,7 +84,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type lower_tail(lower_tailSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
-    rcpp_result_gen = Rcpp::wrap(ppois_cpp(q, lambda, lower_tail, log_p, midp));
+    Rcpp::traits::input_parameter< bool >::type approx(approxSEXP);
+    rcpp_result_gen = Rcpp::wrap(ppois_cpp(q, lambda, lower_tail, log_p, midp, approx));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -194,16 +195,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// fisher33_test_pval
-double fisher33_test_pval(IntegerMatrix x, bool midp, bool log_p);
-RcppExport SEXP _exactr_fisher33_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
+// fisher3xk_test_pval
+double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p);
+RcppExport SEXP _exactr_fisher3xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
-    rcpp_result_gen = Rcpp::wrap(fisher33_test_pval(x, midp, log_p));
+    rcpp_result_gen = Rcpp::wrap(fisher3xk_test_pval(x, midp, log_p));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -295,7 +296,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_pbinom_cpp", (DL_FUNC) &_exactr_pbinom_cpp, 8},
     {"_exactr_qbinom_cpp", (DL_FUNC) &_exactr_qbinom_cpp, 5},
     {"_exactr_binom_2sided_pval", (DL_FUNC) &_exactr_binom_2sided_pval, 6},
-    {"_exactr_ppois_cpp", (DL_FUNC) &_exactr_ppois_cpp, 5},
+    {"_exactr_ppois_cpp", (DL_FUNC) &_exactr_ppois_cpp, 6},
     {"_exactr_poisson_1sided_pval", (DL_FUNC) &_exactr_poisson_1sided_pval, 6},
     {"_exactr_poisson_2sided_pval", (DL_FUNC) &_exactr_poisson_2sided_pval, 5},
     {"_exactr_dhyper", (DL_FUNC) &_exactr_dhyper, 5},
@@ -303,7 +304,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
     {"_exactr_fisher23_test_pval", (DL_FUNC) &_exactr_fisher23_test_pval, 3},
     {"_exactr_fisher2xk_test_pval", (DL_FUNC) &_exactr_fisher2xk_test_pval, 3},
-    {"_exactr_fisher33_test_pval", (DL_FUNC) &_exactr_fisher33_test_pval, 3},
+    {"_exactr_fisher3xk_test_pval", (DL_FUNC) &_exactr_fisher3xk_test_pval, 3},
     {"_exactr_fisher22_2sided_pval", (DL_FUNC) &_exactr_fisher22_2sided_pval, 6},
     {"_exactr_fisher22_1sided_pval_ex", (DL_FUNC) &_exactr_fisher22_1sided_pval_ex, 8},
     {"_exactr_fisher22_2sided_pval_ex", (DL_FUNC) &_exactr_fisher22_2sided_pval_ex, 8},

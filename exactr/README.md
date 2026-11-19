@@ -2,7 +2,7 @@ exactr
 ======
 
 This package contains accurate and efficient implementations of the binomial,
-Poisson, and Fisher's (2x2..2x6 and 3x3 so far) exact tests.
+Poisson, and Fisher's (2xk and 3xk so far) exact tests.
 
 It also has unexported implementations of the related discrete distribution
 functions (dbinom, dhyper, pbinom, ppois, qbinom, phyper, qhyper), which are
