@@ -113,6 +113,21 @@ double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t ob
 // with total 450 and p ~= 0.02 takes ~15 s and ~180 MiB.
 double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff);
 
+// Cancellation hook for the *Ex() functions below.  Runtime is hard to
+// predict in advance (cheap cost estimates are often off by 10x or more, and
+// the memoized search frequently finishes in a tiny fraction of the
+// estimate), so callers wanting a time limit or interruptibility should poll
+// instead.  If check_fn is non-null, it's called with check_arg periodically
+// during the search (roughly every 1-10 ms on a modern CPU); if it returns
+// nonzero, the search is abandoned and NaN is returned.  (NaN is also
+// returned on allocation failure; the caller can distinguish the two cases by
+// tracking whether its check function returned nonzero.)  check_fn must not
+// longjmp out (e.g. via R_CheckUserInterrupt()), since that leaks memory.
+typedef uint32_t (*FisherCheckFn)(void* check_arg);
+
+// Fisher2xkLnP() with a cancellation hook.
+double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg);
+
 // obs[] is a 3xk table in row-major order: obs[0..(col_ct-1)] is the first
 // row, etc.  Entries must be nonnegative and sum to less than 2^31.  Other
 // semantics are the same as for Fisher2xkLnP().  (Search cost is roughly
@@ -120,14 +135,40 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
 // use is as described for Fisher2xkLnP().)
 double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff);
 
+// Fisher3xkLnP() with a cancellation hook.
+double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg);
+
 // obs[] is a 3x3 table in row-major order.  Equivalent to
 // Fisher3xkLnP(obs, 3, midp, ln_p_cutoff).
 double Fisher33LnP(const int32_t* obs, uint32_t midp, double ln_p_cutoff);
 
-// Probable todos:
+// Possible todos:
 // - Larger jxk tables.  The meet-in-the-middle and memoization machinery is
 //   mostly table-shape-agnostic, but the outward-from-the-mode search
-//   currently relies on 2- and 3-row-specific mode updates.
+//   currently relies on 2- and 3-row-specific mode updates.  Gains over
+//   FEXACT (which R uses for these tables) would be fairly narrow, though.
+//   A Nov 2026 standalone jxk prototype (meet-in-the-middle + exact
+//   memoization, but no outward-from-the-mode search; its pruning used only
+//   the partial-table probability, without any bound on the most probable
+//   completion) gave these single-core results against FEXACT (workspace =
+//   64000000):
+//   - 4x4 with n = 300-600: ~8-10x faster.  FEXACT took 35-110 s or more at
+//     n = 300-400, and sometimes failed with "LDSTP too small"; the prototype
+//     took 4-20 s, and ~65 s at n = 600.  Near p = 1 the gap was only ~2x.
+//   - 4x5 with n ~= 160: roughly even (~15-20 s).
+//   - 5x5 (n = 60-100) and 4x6 (n = 60-170) with small cell counts: FEXACT was
+//     2.5-5x faster, and FEXACT finished 4x6 tables with n = 170 in 25-43 s
+//     while the prototype took >120 s.  Memoization made the prototype 5-25x
+//     faster on these tables but didn't close the gap; the remaining
+//     difference is probably due to FEXACT's bounds on the most and least
+//     probable completions of each subproblem, which a generalized
+//     outward-from-the-mode search would need to match.
+//   (On 3xk tables the prototype took 0.8-3x as long as Fisher3xkLnP(), so
+//   a full implementation should do somewhat better than this.)  We'd also
+//   get midp, log-p-values, and exact tie handling; at 4x4 n=300, R's 1e-7
+//   tie tolerance vs. exact ties can change the p-value by ~1e-6.  So this
+//   is mainly worthwhile for 4x4 (maybe 4x5) tables with larger counts,
+//   unless better completion bounds are developed.
 
 // Practical limits of Fisher2xkLnP() and Fisher3xkLnP() (with ln_p_cutoff =
 // -DBL_MAX), as of Nov 2026 on one core of an Apple M2 Pro.  Each entry is the

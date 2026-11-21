@@ -131,4 +131,11 @@ exact_tests.fisher_exact([[10000, 20000], [30000, 40000], [50000, 60000]], logp=
 exact_tests.fisher_exact([[3, 10, 4, 7], [9, 2, 4, 1]], midp=True)
 exact_tests.fisher_exact([[400, 520, 580], [510, 470, 520], [600, 480, 420]], logp=True)
 exact_tests.fisher_exact([[25, 15, 18, 12, 15], [20, 22, 12, 18, 10], [15, 20, 10, 8, 5]])
+exact_tests.fisher_exact([[25, 15, 18, 12, 15], [20, 22, 12, 18, 10], [15, 20, 10, 8, 5]], time_limit=60)
 ```
+
+fisher_exact() running time on larger 2xk and 3xk tables is hard to predict
+in advance (it can vary by orders of magnitude between tables of similar
+shape and total), so it raises TimeoutError once the exact computation has
+run for time_limit seconds (default 3600; pass None for no limit).  These
+computations can also be interrupted with Ctrl-C.

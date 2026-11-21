@@ -588,3 +588,25 @@ test_that("fisher.test works on larger 2xk and 3xk tables", {
   big <- matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow = 2)
   expect_gt(fisher.test(big)$p.value, 0)
 })
+
+test_that("fisher.test respects time.limit", {
+  ## Near-modal 2x4 and 3x3 tables with huge totals take many minutes.
+  m <- 2500000
+  d <- m %/% 250
+  x24 <- matrix(c(m, m, m, m, m - d, m + d, m + d / 2, m - d / 2), nrow = 2,
+                byrow = TRUE)
+  expect_error(fisher.test(x24, time.limit = 0.05), "time.limit")
+  expect_error(fisher.test(t(x24), time.limit = 0.05), "time.limit")
+  m <- 3000000
+  d <- m %/% 1000
+  x33 <- matrix(c(m, m, m, m, m, m, m, m, m - d), nrow = 3, byrow = TRUE)
+  expect_error(fisher.test(x33, time.limit = 0.05), "time.limit")
+  ## Fast tables are unaffected by the limit.
+  x35 <- matrix(c(10, 12, 8, 15, 9, 7, 11, 13, 6, 10, 9, 8, 12, 7, 11),
+                nrow = 3)
+  expect_identical(fisher.test(x35, time.limit = Inf)$p.value,
+                   fisher.test(x35)$p.value)
+  for (bad in list(0, -1, NA, "60", c(1, 2))) {
+    expect_error(fisher.test(x35, time.limit = bad), "time.limit")
+  }
+})

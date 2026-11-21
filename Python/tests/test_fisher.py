@@ -2,6 +2,7 @@
 import exact_tests
 import math
 import pytest
+import signal
 import sys
 
 DBL_MIN = sys.float_info.min
@@ -125,6 +126,50 @@ def test_fisher_2xk_3xk_large():
             assert exact_tests.fisher_exact(tbl) == pytest.approx(math.exp(ln_p), rel=1e-13, abs=0), str(tbl)
             assert exact_tests.fisher_exact(tbl, logp=True) == pytest.approx(ln_p, rel=1e-13, abs=1e-15), str(tbl)
             assert exact_tests.fisher_exact(tbl, midp=True) == pytest.approx(math.exp(ln_midp), rel=1e-13, abs=0), str(tbl)
+
+
+# Near-modal 2x4 and 3x3 tables with huge totals take many minutes.
+def _slow_tables():
+    m = 2500000
+    d = m // 250
+    t24 = [[m, m, m, m], [m - d, m + d, m + d // 2, m - d // 2]]
+    m = 3000000
+    d = m // 1000
+    t33 = [[m, m, m], [m, m, m], [m, m, m - d]]
+    return (t24, [list(col) for col in zip(*t24)], t33)
+
+
+def test_fisher_time_limit():
+    for tbl in _slow_tables():
+        with pytest.raises(TimeoutError):
+            exact_tests.fisher_exact(tbl, time_limit=0.05)
+    # Fast tables are unaffected by the limit.
+    table, ln_p, _ = fisher_2xk_3xk_large_cases[0]
+    for time_limit in (math.inf, None, 3600):
+        assert exact_tests.fisher_exact(table, logp=True, time_limit=time_limit) == pytest.approx(ln_p, rel=1e-13, abs=1e-15)
+    for bad in (0, -1, math.nan):
+        with pytest.raises(ValueError):
+            exact_tests.fisher_exact(table, time_limit=bad)
+
+
+@pytest.mark.skipif(not hasattr(signal, "setitimer"), reason="requires signal.setitimer")
+def test_fisher_signal():
+    # An exception raised by a signal handler during a long computation is
+    # propagated promptly.
+    class Alarm(Exception):
+        pass
+
+    def handler(signum, frame):
+        raise Alarm()
+
+    old_handler = signal.signal(signal.SIGALRM, handler)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, 0.05)
+        with pytest.raises(Alarm):
+            exact_tests.fisher_exact(_slow_tables()[0], time_limit=60)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def test_cond_odds_ratio():

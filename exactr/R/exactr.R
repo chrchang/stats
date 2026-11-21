@@ -656,6 +656,10 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   p.value underflows to zero; a warning is printed when that is not the
 #'   case.
 #' @param or.denom optional denominator of hypothesized odds ratio.
+#' @param time.limit maximum running time in seconds (default 3600) for
+#'   2xk and 3xk tables larger than 2x3; if the exact computation takes
+#'   longer, it is abandoned and an error is signalled.  `Inf` removes the
+#'   limit.  See 'Details'.
 #'
 #' @details If `x` is a matrix, it is taken as a two-dimensional contingency
 #'   table, and hence its entries should be nonnegative integers.  Otherwise,
@@ -726,6 +730,15 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   the p-value is extremely small; in the latter case, note that p-values
 #'   below ~1e-323 are computed much more quickly when `log.p = FALSE`, since
 #'   they're just reported as zero.
+#'
+#'   Running time is hard to predict in advance for these tables (it can
+#'   vary by orders of magnitude between tables of similar shape and total),
+#'   so instead of refusing hopeless problems up front, the computation is
+#'   abandoned with an error once it has run for `time.limit` seconds (one
+#'   hour by default); `simulate.p.value = TRUE` is then usually the best
+#'   option.  These computations can also be interrupted in the usual way
+#'   (e.g. with Ctrl-C).  `time.limit` does not apply to tables handled by
+#'   `FEXACT`.
 #'
 #'   Simulation is done conditional on the row and column marginals, and works
 #'   only if the marginals are strictly positive.  (A C translation of the
@@ -816,7 +829,7 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
                         control = list(), or = 1, alternative = "two.sided",
                         conf.int = TRUE, conf.level = 0.95,
                         simulate.p.value = FALSE, B = 2000, midp = FALSE,
-                        log.p = FALSE, or.denom = 1) {
+                        log.p = FALSE, or.denom = 1, time.limit = 3600) {
   ## This closely follows parts of the GPL-2.0-or-later fisher.test.R from R
   ## 4.6.0, since it is designed to be a drop-in replacement.
   ##
@@ -856,6 +869,9 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
   nc <- ncol(xmat)
   if (!is.boolean(log.p)) {
     stop("'log.p' must be a single boolean value")
+  }
+  if (!(is.numeric(time.limit) && (length(time.limit) == 1L) && !is.na(time.limit) && (time.limit > 0))) {
+    stop("'time.limit' must be a single positive number (or Inf)")
   }
   use.2xk <- FALSE
   use.3xk <- FALSE
@@ -953,11 +969,14 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
     ## 2x3, 2xk, or 3xk case, otherwise we would have forwarded to
     ## stats::fisher.test().
     if (use.3xk) {
-      P_OR_LNPVAL <- fisher3xk_test_pval(x, midp, log.p)
+      P_OR_LNPVAL <- fisher3xk_test_pval(x, midp, log.p, as.double(time.limit))
     } else if (use.2xk) {
-      P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p)
+      P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p, as.double(time.limit))
     } else {
       P_OR_LNPVAL <- fisher23_test_pval(x, midp, log.p)
+    }
+    if (is.na(P_OR_LNPVAL)) {
+      stop(gettextf("exact computation exceeded 'time.limit' (%g seconds); consider 'simulate.p.value = TRUE', or a larger 'time.limit'", time.limit))
     }
     if (log.p) {
       RVAL <- list(p.value = exp(P_OR_LNPVAL),

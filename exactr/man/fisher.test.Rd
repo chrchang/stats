@@ -19,7 +19,8 @@ fisher.test(
   B = 2000,
   midp = FALSE,
   log.p = FALSE,
-  or.denom = 1
+  or.denom = 1,
+  time.limit = 3600
 )
 }
 \arguments{
@@ -84,6 +85,11 @@ p.value underflows to zero; a warning is printed when that is not the
 case.}
 
 \item{or.denom}{optional denominator of hypothesized odds ratio.}
+
+\item{time.limit}{maximum running time in seconds (default 3600) for
+2xk and 3xk tables larger than 2x3; if the exact computation takes
+longer, it is abandoned and an error is signalled.  \code{Inf} removes the
+limit.  See 'Details'.}
 }
 \value{
 A list with class "\code{htest}" containing the following components:
@@ -169,6 +175,15 @@ quickly with the number of columns and the table total, especially when
 the p-value is extremely small; in the latter case, note that p-values
 below ~1e-323 are computed much more quickly when \code{log.p = FALSE}, since
 they're just reported as zero.
+
+Running time is hard to predict in advance for these tables (it can
+vary by orders of magnitude between tables of similar shape and total),
+so instead of refusing hopeless problems up front, the computation is
+abandoned with an error once it has run for \code{time.limit} seconds (one
+hour by default); \code{simulate.p.value = TRUE} is then usually the best
+option.  These computations can also be interrupted in the usual way
+(e.g. with Ctrl-C).  \code{time.limit} does not apply to tables handled by
+\code{FEXACT}.
 
 Simulation is done conditional on the row and column marginals, and works
 only if the marginals are strictly positive.  (A C translation of the

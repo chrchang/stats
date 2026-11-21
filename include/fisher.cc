@@ -1779,10 +1779,42 @@ typedef struct FisherMemoStruct {
 // runtime for that prediction.
 static const double kFisher2xkMemoBudgetMult = 1.2;
 static const double kFisher3xkMemoBudgetMult = 3.0;
+// For 3xk tables with small counts, the meet-in-the-middle cost prediction
+// can be low by orders of magnitude (e.g. it predicted ~35k steps for a 3x12
+// table with total 60, which then took 6 s), so the budget above can abort a
+// memoized search that would have finished in ~0.02 s.  So the budget is
+// never set below this many work units (~40 ms).  In Nov 2026 tests on ~800
+// 3xk tables (k = 4..15), this cut runtime by ~32% (geometric mean, tables
+// taking >= 0.05 s), and by up to ~1000x on all-small-count tables with
+// 12-15 columns, with no table slowed by more than 1.3x.  (Simulations
+// suggested larger floors would gain a few percent more, but slow some 3x5
+// and 3x6 tables by up to 3x.)
+static const double kFisher3xkMemoMinBudget = 1e6;
 
 // Memoization is only used for at least this many nonempty columns.
 static const uint32_t kFisher2xkMemoMinCols = 5;
 static const uint32_t kFisher3xkMemoMinCols = 4;
+
+// The memoized recursion is only raced against meet-in-the-middle when there
+// are few "large" columns, i.e. columns whose expected cell count in the
+// smallest row (under independence) exceeds kFisherMemoLargeCell.  Memo hits
+// require exactly-equal factorial products, which are rare unless cells are
+// small, so each large column multiplies the memoized search's cost by
+// roughly its full width, while meet-in-the-middle only pays about its square
+// root.  So we skip the race when there are more than kFisher{2,3}xkMemo-
+// MaxLargeCols large columns, and they make up at least a third of the
+// columns.  (Each small column adds a dimension to the meet-in-the-middle
+// search but little to the memoized one, so with many small columns the
+// memoized search can still win.)  Calibrated in Nov 2026, counting only
+// tables taking >= 0.05 s; p-values were unchanged up to summation-order
+// rounding (< 1e-14 in ln p), and no table slowed by more than 1.3x:
+// - ~850 2xk tables with k = 5..25: runtime cut by ~57% (geometric mean), and
+//   by up to ~20x.
+// - ~800 3xk tables with k = 4..15: runtime cut by ~37% (geometric mean), and
+//   by up to ~7x.
+static const double kFisherMemoLargeCell = 10.0;
+static const uint32_t kFisher2xkMemoMaxLargeCols = 3;
+static const uint32_t kFisher3xkMemoMaxLargeCols = 2;
 
 // Memoization is disabled for larger tables, since the fact_hashes table
 // would be too large, and exact collisions are rare with large counts
@@ -1802,6 +1834,36 @@ static inline uint64_t SplitMix64(uint64_t xx) {
   xx = (xx ^ (xx >> 30)) * 0xbf58476d1ce4e5b9LLU;
   xx = (xx ^ (xx >> 27)) * 0x94d049bb133111ebLLU;
   return xx ^ (xx >> 31);
+}
+
+// --- Cancellation checks (see FisherCheckFn).
+
+typedef struct FisherCheckStruct {
+  FisherCheckFn fn;
+  void* arg;
+  // Work-counter value at which fn should next be called; UINT64_MAX when fn
+  // is null, so the common case costs a single comparison.
+  uint64_t next_work;
+} FisherCheck;
+
+// Work units between check_fn calls.  A unit is ~20 ns in the plain/memoized
+// recursion and ~40-50 ns in the meet-in-the-middle sweep, so this is roughly
+// every 1-3 ms.
+static const uint64_t kFisherCheckInterval = 1 << 16;
+
+static void FisherCheckInit(FisherCheckFn fn, void* arg, FisherCheck* checkp) {
+  checkp->fn = fn;
+  checkp->arg = arg;
+  checkp->next_work = fn? kFisherCheckInterval : ~0LLU;
+}
+
+// Returns 1 iff check_fn was due and asked us to stop.
+static inline uint32_t FisherCheckCancel(FisherCheck* checkp, uint64_t work) {
+  if (likely(work < checkp->next_work)) {
+    return 0;
+  }
+  checkp->next_work = work + kFisherCheckInterval;
+  return (checkp->fn(checkp->arg) != 0);
 }
 
 // tot must be <= kFisherMemoMaxTot.
@@ -1983,13 +2045,33 @@ typedef struct Fisher2xkCtxStruct {
   // When fixed_lfact_sums is non-null, col_lfact_prefix_sums[j] is
   // lfact(col_tots[0]) + ... + lfact(col_tots[j]).
   const dd_real* col_lfact_prefix_sums;
-  // Work counter for the memoized recursion, in units of roughly 20ns (4 per
-  // rank visited, 1 per closed-form-sum or tail-boundary step).  When it
-  // exceeds work_budget, aborted is set and the recursion unwinds.
+  // Work counter, in units of roughly 20ns (4 per rank visited, 1 per
+  // closed-form-sum or tail-boundary step; the meet-in-the-middle sweep adds
+  // 1 per inner table visited).  When the memoized recursion's work exceeds
+  // work_budget, aborted is set and the recursion unwinds.
   uint64_t work;
   uint64_t work_budget;
   uint32_t aborted;
+  // Set (along with aborted) when the caller's check function asks us to
+  // stop; the result is then discarded.
+  uint32_t cancelled;
+  FisherCheck check;
+  // Work that only counts toward cancellation-check timing, not work_budget
+  // (which was calibrated without it): the tail-summation steps in
+  // Fisher2xkBaseTailsum().
+  uint64_t check_only_work;
 } Fisher2xkCtx;
+
+// Returns 1 (setting aborted and cancelled) iff a cancellation check was due
+// and the caller asked us to stop.
+static inline uint32_t Fisher2xkCancelCheck(Fisher2xkCtx* ctxp) {
+  if (unlikely(FisherCheckCancel(&ctxp->check, ctxp->work + ctxp->check_only_work))) {
+    ctxp->aborted = 1;
+    ctxp->cancelled = 1;
+    return 1;
+  }
+  return 0;
+}
 
 // Returns index of the column whose row-1 entry should be incremented to
 // maximize the likelihood, setting *numer_ptr and *denom_ptr to the
@@ -2405,6 +2487,7 @@ static void Fisher2xkBaseTailsum(Fisher2xkCtx* ctxp, uint32_t swap01, uint32_t e
   m12 = m12_tail;
   m21 = m21_tail;
   m22 = m22_tail;
+  const double m11_start = m11;
   while (1) {
     m12 += 1;
     m21 += 1;
@@ -2417,6 +2500,7 @@ static void Fisher2xkBaseTailsum(Fisher2xkCtx* ctxp, uint32_t swap01, uint32_t e
       break;
     }
   }
+  ctxp->check_only_work += S_CAST(uint64_t, m11_start - m11);
   *totalp = total;
 }
 
@@ -2562,6 +2646,9 @@ static uint32_t Fisher2xkLevel2(Fisher2xkCtx* ctxp, int32_t row1_tot) {
       m13_decr_last = -MINV(col_tots[2] - mode2, mode0 + mode1);
     }
     for (int32_t m13_decr = 0; m13_decr != m13_decr_last; ) {
+      if (Fisher2xkCancelCheck(ctxp)) {
+        return kFisher2xkNonempty;
+      }
       m13_decr += m13_decreasing * 2 - 1;
       double lik_mult;
       if (m13_decreasing) {
@@ -2753,6 +2840,9 @@ typedef struct FisherMitmStruct {
   uint32_t (*outer_fac_args)(void* table_ctx, const int32_t* b_vals, uint64_t* fac_args);
   void (*save_state)(void* table_ctx);
   void (*restore_state)(void* table_ctx);
+  // Points to the table code's aborted flag; once it's set (by a
+  // cancellation check), remaining queries are skipped.
+  const uint32_t* abortedp;
   uint32_t b_val_ct;
   FisherMitmQuery* queries;
   int32_t* b_vals;
@@ -2814,9 +2904,10 @@ static inline void SumAdd(double addend, double* sump, double* errp) {
   *sump = new_sum;
 }
 
-static BoolErr FisherMitmInit(void* table_ctx, uint32_t b_val_ct, uint32_t max_outer_fac_args, FisherMitm* mitmp) {
+static BoolErr FisherMitmInit(void* table_ctx, const uint32_t* abortedp, uint32_t b_val_ct, uint32_t max_outer_fac_args, FisherMitm* mitmp) {
   memset(mitmp, 0, sizeof(FisherMitm));
   mitmp->table_ctx = table_ctx;
+  mitmp->abortedp = abortedp;
   mitmp->b_val_ct = b_val_ct;
   mitmp->fac_args = S_CAST(uint64_t*, malloc(2 * max_outer_fac_args * sizeof(int64_t)));
   return (mitmp->fac_args == nullptr);
@@ -2986,15 +3077,14 @@ static inline uint32_t FisherMitmAddLik(FisherMitm* mitmp, double lik, uint32_t*
   const double lik_lo = lik * kFisherMitmLikTolLo;
   if (bucket_idx && (threshold_liks[bucket_idx - 1] >= lik_lo)) {
     // Binary search for the new first threshold >= lik_lo.
+    // threshold_liks[bucket_idx - 1] >= lik_lo, so the answer is in
+    // [0, bucket_idx - 1].
     uint32_t lo = 0;
-    uint32_t hi = bucket_idx - 1;
-    while (lo < hi) {
-      const uint32_t mid = (lo + hi) / 2;
-      if (threshold_liks[mid] < lik_lo) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
+    uint32_t len = bucket_idx;
+    while (len > 1) {
+      const uint32_t half = len / 2;
+      lo = (threshold_liks[lo + half - 1] < lik_lo)? (lo + half) : lo;
+      len -= half;
     }
     bucket_idx = lo;
     *bucket_idx_ptr = bucket_idx;
@@ -3115,6 +3205,10 @@ static void FisherMitmProcess(FisherMitm* mitmp) {
   if ((!query_ct) || mitmp->nomem) {
     return;
   }
+  if (*mitmp->abortedp) {
+    mitmp->query_ct = 0;
+    return;
+  }
   void* table_ctx = mitmp->table_ctx;
   mitmp->save_state(table_ctx);
   FisherMitmSortQueries(mitmp);
@@ -3127,7 +3221,7 @@ static void FisherMitmProcess(FisherMitm* mitmp) {
       ++group_end;
     }
     mitmp->process_group(table_ctx, &(queries[group_start]), group_end - group_start);
-    if (mitmp->nomem) {
+    if (mitmp->nomem || (*mitmp->abortedp)) {
       break;
     }
     group_start = group_end;
@@ -3240,6 +3334,7 @@ static void Fisher2xkMitmEnum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_t
     const double c1 = col_tots[1];
     for (int32_t dir = 1; dir >= -1; dir -= 2) {
       int32_t x = (dir == 1)? mode1 : (mode1 - 1);
+      const int32_t x_first = x;
       uint32_t steps_since_sync = kFisherMitmSyncInterval;
       double lik = 0.0;
       uint32_t bucket_idx = corep->group_query_ct;
@@ -3273,6 +3368,7 @@ static void Fisher2xkMitmEnum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_t
           FisherMitmAddEntry(corep, excess_ddr);
         }
       }
+      ctxp->work += S_CAST(uint32_t, abs(x - x_first));
     }
     cur_r1[0] = row1_tot - mode1;
     cur_r1[1] = mode1;
@@ -3310,6 +3406,10 @@ static void Fisher2xkMitmEnum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_t
         break;
       }
       Fisher2xkMitmEnum(ctxp, level - 1, row1_tot - x, inner_partial_ddr, excess_limit);
+      ctxp->work += 4;
+      if (ctxp->aborted || Fisher2xkCancelCheck(ctxp)) {
+        return;
+      }
       if (x_decreasing) {
         if (x == x_min) {
           break;
@@ -3352,6 +3452,9 @@ static void Fisher2xkMitmProcessGroup(void* table_ctx, const FisherMitmQuery* qu
   ctxp->mitm = nullptr;
   Fisher2xkLevel(ctxp, a_col_ct - 1, row1_tot);
   ctxp->mitm = mitmp;
+  if (ctxp->aborted) {
+    return;
+  }
   const double base_sum = ctxp->outer_sum;
   const double base_tie_ct = ctxp->tie_ct;
   double excess_limit;
@@ -3434,6 +3537,9 @@ static uint32_t Fisher2xkLevelInner(Fisher2xkCtx* ctxp, uint32_t level, int32_t 
     while (1) {
       cur_r1[level] = x;
       ctxp->work += 4;
+      if (Fisher2xkCancelCheck(ctxp)) {
+        return kFisher2xkNonempty;
+      }
       dd_real* fixed_lfact_sums = ctxp->fixed_lfact_sums;
       if (fixed_lfact_sums) {
         fixed_lfact_sums[level - 1] = ddr_add(fixed_lfact_sums[level], Fisher2xkColLfacts(ctxp, level, x));
@@ -3503,6 +3609,21 @@ static uint32_t Fisher2xkLevelInner(Fisher2xkCtx* ctxp, uint32_t level, int32_t 
   return kFisher2xkNonempty;
 }
 
+// Fisher2xkLevelInner(), with the subproblem's contribution summed separately
+// before it's added to outer_sum.  Without this, the plain recursion (and the
+// outer recursion of meet-in-the-middle) added every closed-form sum and tail
+// sum directly to a single running total, and the accumulated rounding error
+// reached ~2e-12 relative for 2x12 tables and ~4e-11 for 3x12 tables (vs.
+// ~1e-15 with this change, which matches what the memoized recursion was
+// already doing).
+static uint32_t Fisher2xkLevelSubsum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_tot) {
+  const double saved_outer_sum = ctxp->outer_sum;
+  ctxp->outer_sum = 0.0;
+  const uint32_t status = Fisher2xkLevelInner(ctxp, level, row1_tot);
+  ctxp->outer_sum += saved_outer_sum;
+  return status;
+}
+
 // On entry, cur_r1[0..level] must be the mode of the 2x(level+1) subproblem
 // with row-1 total row1_tot and the current cur_r1[(level+1)..] values.  It is
 // restored on exit.
@@ -3511,11 +3632,11 @@ static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_
     if (level + 1 == ctxp->mitm->a_col_ct) {
       return Fisher2xkMitmRecord(ctxp, row1_tot);
     }
-    return Fisher2xkLevelInner(ctxp, level, row1_tot);
+    return Fisher2xkLevelSubsum(ctxp, level, row1_tot);
   }
   FisherMemo* memop = ctxp->memo;
   if (!memop) {
-    return Fisher2xkLevelInner(ctxp, level, row1_tot);
+    return Fisher2xkLevelSubsum(ctxp, level, row1_tot);
   }
   const dd_real fixed_lfact_sum_ddr = ctxp->fixed_lfact_sums[level];
   {
@@ -3645,6 +3766,10 @@ static uint32_t Fisher2xkMitmSplit(const int32_t* col_tots, uint32_t col_ct, int
 }
 
 double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
+  return Fisher2xkLnPEx(obs, col_ct, midp, ln_p_cutoff, nullptr, nullptr);
+}
+
+double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) {
   uint32_t nz_col_ct = 0;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
     nz_col_ct += (obs[col_idx] + obs[col_ct + col_idx] != 0);
@@ -3841,9 +3966,21 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   ctx.work = 0;
   ctx.work_budget = ~0LLU;
   ctx.aborted = 0;
+  ctx.cancelled = 0;
+  FisherCheckInit(check_fn, check_arg, &ctx.check);
+  ctx.check_only_work = 0;
   uint32_t run_mitm = (mitm_a_col_ct != 0);
   uint32_t status = kFisher2xkNonempty;
-  if (run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX)) {
+  uint32_t race_memo = run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX);
+  if (race_memo) {
+    const double smaller_row_frac = S_CAST(double, MINV(row1_tot, tot - row1_tot)) / S_CAST(double, tot);
+    uint32_t large_col_ct = 0;
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      large_col_ct += (smaller_row_frac * col_tots[col_idx] > kFisherMemoLargeCell);
+    }
+    race_memo = (large_col_ct <= kFisher2xkMemoMaxLargeCols) || (3 * large_col_ct < col_ct);
+  }
+  if (race_memo) {
     // With small counts, the memoized recursion is often much faster than
     // meet-in-the-middle (which doesn't benefit much from memoization), but
     // it's hard to predict in advance.  So we try it first, with a work
@@ -3851,7 +3988,7 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
     // back if that's exceeded.  (Memo entries are kept.)
     ctx.work_budget = S_CAST(uint64_t, kFisher2xkMemoBudgetMult * exp(MINV(mitm_ln_cost, 50.0)));
     status = Fisher2xkLevel(&ctx, col_ct - 1, row1_tot);
-    if (!ctx.aborted) {
+    if ((!ctx.aborted) || ctx.cancelled) {
       run_mitm = 0;
     } else {
       ctx.aborted = 0;
@@ -3869,7 +4006,7 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   Fisher2xkMitmModeCacheEntry* mitm_mode_cache = nullptr;
   if (run_mitm) {
     mitm_mode_cache = S_CAST(Fisher2xkMitmModeCacheEntry*, malloc(kFisher2xkMitmModeCacheSize * sizeof(Fisher2xkMitmModeCacheEntry)));
-    if (unlikely((!mitm_mode_cache) || FisherMitmInit(&mitm, col_ct - mitm_a_col_ct, 2 * (col_ct - mitm_a_col_ct), &mitm.core))) {
+    if (unlikely((!mitm_mode_cache) || FisherMitmInit(&mitm, &ctx.aborted, col_ct - mitm_a_col_ct, 2 * (col_ct - mitm_a_col_ct), &mitm.core))) {
       free(mitm_mode_cache);
       if (use_memo) {
         FisherMemoCleanup(&memo);
@@ -3918,6 +4055,10 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   }
   free(memo_alloc);
   LfactCacheCleanup(&lfact_cache);
+  if (ctx.cancelled) {
+    free(alloc_base);
+    return S_CAST(double, NAN);
+  }
   double result;
   if (status != kFisher2xkNonempty) {
     // Observed table is modal (kFisher2xkEmpty should be impossible), so the
@@ -3931,8 +4072,14 @@ double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
       ctx.outer_sum -= ctx.tie_ct * 0.5;
     }
     result = log(ctx.outer_sum) + starting_lnprob;
-    if (result > -k2m35) {
-      // true p-value should always be 1 here
+    // Unlike in Fisher23LnP(), we can't round values within 2^{-35} of zero
+    // down to zero here.  Some table is strictly more probable than the
+    // observed table, so the true p-value is at most 1 - (probability of the
+    // mode), and with many columns the mode's probability can be far below
+    // 2^{-35}.  (E.g. for a 2x12 table with total ~3000 one step from its
+    // mode, the mode's probability is ~2^{-45}, and ln(p) = -5.24e-12.)  We
+    // only clamp rounding error that pushed the result above zero.
+    if (result > 0.0) {
       result = 0.0;
     }
   }
@@ -4014,7 +4161,19 @@ typedef struct Fisher3xkCtxStruct {
   uint64_t work;
   uint64_t work_budget;
   uint32_t aborted;
+  uint32_t cancelled;
+  FisherCheck check;
 } Fisher3xkCtx;
+
+// See Fisher2xkCancelCheck().
+static inline uint32_t Fisher3xkCancelCheck(Fisher3xkCtx* ctxp) {
+  if (unlikely(FisherCheckCancel(&ctxp->check, ctxp->work))) {
+    ctxp->aborted = 1;
+    ctxp->cancelled = 1;
+    return 1;
+  }
+  return 0;
+}
 
 static inline int32_t Fisher3xkCellKey(uint32_t row_idx, uint32_t col_idx) {
   if (!col_idx) {
@@ -4499,6 +4658,11 @@ static uint32_t Fisher33Base(Fisher3xkCtx* ctxp) {
   view.mitm = nullptr;
   view.work = 0;
   view.memo = nullptr;
+  // Fisher2xkLevel2() doesn't make cancellation checks; the caller does.
+  FisherCheckInit(nullptr, nullptr, &view.check);
+  view.aborted = 0;
+  view.cancelled = 0;
+  view.check_only_work = 0;
   view.fixed_lfact_sums = nullptr;
   view.fixed_prod_hashes = nullptr;
   const uint32_t status = Fisher2xkLevel2(&view, ctxp->col_tots[0]);
@@ -4684,7 +4848,7 @@ static void Fisher3xkMitmEnumBase(Fisher3xkCtx* ctxp, dd_real partial_ddr, doubl
   const int64_t x_min = MAXV(MAXV(0, t0 - c0), c1 - t1 - t2);
   const int64_t x_max = MINV(c1, t0);
   const double lik_limit = exp(excess_limit) * kFisherMitmLikTolHi;
-  for (int64_t x_dir = 1; x_dir >= -1; x_dir -= 2) {
+  for (int64_t x_dir = 1; (x_dir >= -1) && (!ctxp->aborted); x_dir -= 2) {
     int64_t y_star = mode_y;
     for (int64_t x = (x_dir == 1)? mode_x : (mode_x - 1); (x >= x_min) && (x <= x_max); x += x_dir) {
       // Cells: (0,1)=x, (1,1)=y, (2,1)=c1-x-y, (0,0)=t0-x, (1,0)=t1-y,
@@ -4710,7 +4874,9 @@ static void Fisher3xkMitmEnumBase(Fisher3xkCtx* ctxp, dd_real partial_ddr, doubl
         uint32_t steps_since_sync = kFisherMitmSyncInterval;
         double lik = 0.0;
         uint32_t bucket_idx = corep->group_query_ct;
-        for (int64_t y = (y_dir == 1)? y_star : (y_star - 1); (y >= y_lo) && (y <= y_hi); y += y_dir) {
+        const int64_t y_first = (y_dir == 1)? y_star : (y_star - 1);
+        int64_t y = y_first;
+        for (; (y >= y_lo) && (y <= y_hi); y += y_dir) {
           if (steps_since_sync < kFisherMitmSyncInterval) {
             const double prev_y = S_CAST(double, y - y_dir);
             if (y_dir == 1) {
@@ -4743,12 +4909,13 @@ static void Fisher3xkMitmEnumBase(Fisher3xkCtx* ctxp, dd_real partial_ddr, doubl
             FisherMitmAddEntry(corep, excess_ddr);
           }
         }
+        ctxp->work += S_CAST(uint64_t, (y > y_first)? (y - y_first) : (y_first - y));
         if ((y_dir == 1) && (!any_nonempty)) {
           // The conditional mode isn't more probable than the observed table.
           break;
         }
       }
-      if (!any_nonempty) {
+      if ((!any_nonempty) || Fisher3xkCancelCheck(ctxp)) {
         break;
       }
     }
@@ -4798,6 +4965,10 @@ static void Fisher3xkMitmEnum(Fisher3xkCtx* ctxp, int32_t lvl, dd_real lnlik_b1_
         break;
       }
       Fisher3xkMitmEnum(ctxp, next_lvl, lnlik_b1_ddr, excess_limit);
+      ctxp->work += 4;
+      if (ctxp->aborted || Fisher3xkCancelCheck(ctxp)) {
+        return;
+      }
       is_start = 0;
       if (!Fisher3xkShift(ctxp, row_idx, col_idx, dir)) {
         break;
@@ -4831,6 +5002,9 @@ static void Fisher3xkMitmProcessGroup(void* table_ctx, const FisherMitmQuery* qu
   ctxp->mitm = nullptr;
   Fisher3xkLevel(ctxp, 3 * (a_col_ct - 1));
   ctxp->mitm = mitmp;
+  if (ctxp->aborted) {
+    return;
+  }
   const double base_sum = ctxp->outer_sum;
   const double base_tie_ct = ctxp->tie_ct;
   double excess_limit;
@@ -4964,6 +5138,9 @@ static uint32_t Fisher3xkLevelInner(Fisher3xkCtx* ctxp, int32_t lvl) {
     uint32_t is_start = !decreasing;
     while (1) {
       ctxp->work += 4;
+      if (Fisher3xkCancelCheck(ctxp)) {
+        return kFisher2xkNonempty;
+      }
       if (ctxp->memo) {
         const int32_t level_val = cur[row_idx * col_ct + col_idx];
         dd_real fixed_lfact_sum_ddr = ddr_add(ctxp->fixed_lfact_sums[lvl], CachedLfact(ctxp->lfact_cachep, level_val));
@@ -5001,6 +5178,15 @@ static uint32_t Fisher3xkLevelInner(Fisher3xkCtx* ctxp, int32_t lvl) {
   return kFisher2xkNonempty;
 }
 
+// See Fisher2xkLevelSubsum().
+static uint32_t Fisher3xkLevelSubsum(Fisher3xkCtx* ctxp, int32_t lvl) {
+  const double saved_outer_sum = ctxp->outer_sum;
+  ctxp->outer_sum = 0.0;
+  const uint32_t status = Fisher3xkLevelInner(ctxp, lvl);
+  ctxp->outer_sum += saved_outer_sum;
+  return status;
+}
+
 // On entry, cur[] must be the mode of the subproblem where cells with key <=
 // lvl are free.  It is restored on exit.  Return values are as for
 // Fisher2xkLevel().
@@ -5009,11 +5195,11 @@ static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
     if (lvl == 3 * S_CAST(int32_t, ctxp->mitm->a_col_ct) - 3) {
       return Fisher3xkMitmRecord(ctxp);
     }
-    return Fisher3xkLevelInner(ctxp, lvl);
+    return Fisher3xkLevelSubsum(ctxp, lvl);
   }
   FisherMemo* memop = ctxp->memo;
   if (!memop) {
-    return Fisher3xkLevelInner(ctxp, lvl);
+    return Fisher3xkLevelSubsum(ctxp, lvl);
   }
   // The subproblem is determined by lvl, the remaining row-0 and row-1
   // totals, and (if lvl is a row-1 level) the fixed row-0 entry of the
@@ -5101,6 +5287,10 @@ static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
 }
 
 double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
+  return Fisher3xkLnPEx(obs, col_ct, midp, ln_p_cutoff, nullptr, nullptr);
+}
+
+double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) {
   int64_t row_tots_i64[3] = {0, 0, 0};
   uint32_t nz_col_ct = 0;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
@@ -5123,7 +5313,7 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
       const uint32_t row_b = (row_idx == 2)? 1 : 2;
       memcpy(two_row_obs, &(obs[row_a * col_ct]), col_ct * sizeof(int32_t));
       memcpy(&(two_row_obs[col_ct]), &(obs[row_b * col_ct]), col_ct * sizeof(int32_t));
-      const double result = Fisher2xkLnP(two_row_obs, col_ct, midp, ln_p_cutoff);
+      const double result = Fisher2xkLnPEx(two_row_obs, col_ct, midp, ln_p_cutoff, check_fn, check_arg);
       free(two_row_obs);
       return result;
     }
@@ -5140,7 +5330,7 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
         ++write_idx;
       }
     }
-    return Fisher2xkLnP(transposed, 3, midp, ln_p_cutoff);
+    return Fisher2xkLnPEx(transposed, 3, midp, ln_p_cutoff, check_fn, check_arg);
   }
   const uint32_t raw_col_ct = col_ct;
   col_ct = nz_col_ct;
@@ -5285,7 +5475,7 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
     const uint32_t b_col_ct = col_ct - mitm_a_col_ct;
     mitm_bufs = S_CAST(int32_t*, malloc(3 * table_size * sizeof(int32_t)));
     mitm_mode_cache = S_CAST(Fisher3xkMitmModeCacheEntry*, malloc(kFisher3xkMitmModeCacheSize * sizeof(Fisher3xkMitmModeCacheEntry)));
-    if (unlikely((!mitm_bufs) || (!mitm_mode_cache) || FisherMitmInit(&mitm, 2 * b_col_ct, 3 * b_col_ct, &mitm.core))) {
+    if (unlikely((!mitm_bufs) || (!mitm_mode_cache) || FisherMitmInit(&mitm, &ctx.aborted, 2 * b_col_ct, 3 * b_col_ct, &mitm.core))) {
       free(mitm_bufs);
       free(mitm_mode_cache);
       LfactCacheCleanup(&lfact_cache);
@@ -5344,14 +5534,26 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
   ctx.work = 0;
   ctx.work_budget = ~0LLU;
   ctx.aborted = 0;
+  ctx.cancelled = 0;
+  FisherCheckInit(check_fn, check_arg, &ctx.check);
   uint32_t run_mitm = (mitm_a_col_ct != 0);
   uint32_t status = kFisher2xkNonempty;
-  if (run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX)) {
+  uint32_t race_memo = run_mitm && use_memo && (mitm_ln_cost != -DBL_MAX);
+  if (race_memo) {
+    // See kFisherMemoLargeCell.
+    const double smallest_row_frac = S_CAST(double, MINV(MINV(row_tots[0], row_tots[1]), row_tots[2])) / S_CAST(double, tot);
+    uint32_t large_col_ct = 0;
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      large_col_ct += (smallest_row_frac * col_tots[col_idx] > kFisherMemoLargeCell);
+    }
+    race_memo = (large_col_ct <= kFisher3xkMemoMaxLargeCols) || (3 * large_col_ct < col_ct);
+  }
+  if (race_memo) {
     // See Fisher2xkLnP().
     memcpy(mitm.saved_cur, cur, table_size * sizeof(int32_t));
-    ctx.work_budget = S_CAST(uint64_t, kFisher3xkMemoBudgetMult * exp(MINV(mitm_ln_cost, 50.0)));
+    ctx.work_budget = S_CAST(uint64_t, MAXV(kFisher3xkMemoBudgetMult * exp(MINV(mitm_ln_cost, 50.0)), kFisher3xkMemoMinBudget));
     status = Fisher3xkLevel(&ctx, 3 * (col_ct - 1));
-    if (!ctx.aborted) {
+    if ((!ctx.aborted) || ctx.cancelled) {
       run_mitm = 0;
     } else {
       ctx.aborted = 0;
@@ -5398,6 +5600,11 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
     free(memo_fixed_prod_hashes);
   }
   LfactCacheCleanup(&lfact_cache);
+  if (ctx.cancelled) {
+    free(alloc_base);
+    free(view_alloc);
+    return S_CAST(double, NAN);
+  }
   double result;
   if (status != kFisher2xkNonempty) {
     // Observed table is modal, so the non-mid p-value is 1.
@@ -5410,7 +5617,8 @@ double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double l
       ctx.outer_sum -= ctx.tie_ct * 0.5;
     }
     result = log(ctx.outer_sum) + starting_lnprob;
-    if (result > -k2m35) {
+    // See Fisher2xkLnP().
+    if (result > 0.0) {
       result = 0.0;
     }
   }

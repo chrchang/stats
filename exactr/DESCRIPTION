@@ -1,8 +1,8 @@
 Package: exactr
 Type: Package
 Title: Accurate and Efficient Exact Tests
-Version: 0.1.2
-Date: 2026-11-18
+Version: 0.1.3
+Date: 202x-yy-zz
 Authors@R: c(person(given="Christopher",
                     family="Chang",
                     role = c("aut", "cre"),

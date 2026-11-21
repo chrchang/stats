@@ -1,13 +1,13 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t
-from libc.math cimport INFINITY, rint, log
+from libc.math cimport INFINITY, isnan, rint, log
 from libc.float cimport DBL_MAX, DBL_MIN
 from libc.stdlib cimport malloc, free
 import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -95,9 +95,21 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     double Fisher23LnP(int32_t obs_m11, int32_t obs_m12, int32_t obs_m13, int32_t obs_m21, int32_t obs_m22, int32_t obs_m23, uint32_t midp) nogil
 
-    double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) nogil
+    ctypedef uint32_t (*FisherCheckFn)(void* check_arg) noexcept nogil
 
-    double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) nogil
+    double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) nogil
+
+    double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) nogil
+
+
+cdef extern from "fisher_check.h":
+    ctypedef struct FisherPyCheckState:
+        int timed_out
+        int signalled
+
+    void FisherPyCheckInit(double time_limit, FisherPyCheckState* statep) nogil
+
+    uint32_t FisherPyCheck(void* arg) noexcept nogil
 
 
 cdef extern from "../include/plink2_float.h" namespace "plink2":
@@ -1183,7 +1195,33 @@ hypergeom = _HypergeomDist()
 #   "two-sided": default, must be this if table is larger than 2x2.
 #   "less": alt hypothesis is that table[0][0] is smaller than expected.
 #   "greater": alt hypothesis is that table[0][0] is larger than expected.
-def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp=0):
+cdef int _raise_pending_exception() except -1:
+    # Propagates an exception which was raised by a signal handler during a
+    # nogil computation (see fisher_check.h).
+    return -1
+
+
+cdef int _fisher_check_failure(const FisherPyCheckState* statep, double time_limit) except -1:
+    # Called when Fisher{2,3}xkLnPEx() returns NaN.
+    if statep.signalled:
+        return _raise_pending_exception()
+    if statep.timed_out:
+        raise TimeoutError(f"exact computation exceeded time_limit ({time_limit:g} seconds); consider a larger time_limit")
+    raise MemoryError()
+
+
+def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp=0, object time_limit=3600.0):
+    # time_limit: maximum running time in seconds for 2xk and 3xk tables
+    # larger than 2x3 (None or math.inf for no limit).  Running time is hard
+    # to predict in advance for these tables, so TimeoutError is raised once
+    # the limit is reached.  These computations can also be interrupted with
+    # Ctrl-C (KeyboardInterrupt).
+    cdef double time_limit_d = INFINITY
+    if time_limit is not None:
+        time_limit_d = time_limit
+        if isnan(time_limit_d) or time_limit_d <= 0:
+            raise ValueError("time_limit must be a positive number, math.inf, or None")
+    cdef FisherPyCheckState check_state
     cdef uint32_t nrow = len(table)
     if nrow < 2:
         raise RuntimeError("table has less than 2 rows.")
@@ -1266,12 +1304,13 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
                 obs_buf[k + idx] = <int32_t>b
             if total > 0x7fffffff:
                 raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+            FisherPyCheckInit(time_limit_d, &check_state)
             with nogil:
-                ln_result = Fisher2xkLnP(obs_buf, k, midp, ln_p_cutoff)
+                ln_result = Fisher2xkLnPEx(obs_buf, k, midp, ln_p_cutoff, FisherPyCheck, &check_state)
         finally:
             free(obs_buf)
         if ln_result != ln_result:
-            raise MemoryError()
+            _fisher_check_failure(&check_state, time_limit_d)
     elif nrow == 3 or ncol == 3:
         k = ncol if nrow == 3 else nrow
         obs_buf = <int32_t*>malloc(3 * k * sizeof(int32_t))
@@ -1288,12 +1327,13 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
                     obs_buf[row_idx * k + idx] = <int32_t>a
             if total > 0x7fffffff:
                 raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+            FisherPyCheckInit(time_limit_d, &check_state)
             with nogil:
-                ln_result = Fisher3xkLnP(obs_buf, k, midp, ln_p_cutoff)
+                ln_result = Fisher3xkLnPEx(obs_buf, k, midp, ln_p_cutoff, FisherPyCheck, &check_state)
         finally:
             free(obs_buf)
         if ln_result != ln_result:
-            raise MemoryError()
+            _fisher_check_failure(&check_state, time_limit_d)
     else:
          raise RuntimeError("only 2xk, kx2, 3xk, and kx3 tables are currently supported")
     if logp:

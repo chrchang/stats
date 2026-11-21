@@ -12,6 +12,7 @@
 #include "include/plink2_highprec.h"
 
 #include <float.h>
+#include <chrono>
 #include <vector>
 
 #include <Rcpp.h>
@@ -875,11 +876,74 @@ double fisher23_test_pval(IntegerMatrix x, bool midp, bool log_p) {
 // smaller than that; the result is unchanged.
 static const double kLnPCutoffNonlog = -1075 * plink2::kLn2 - 1e-9;
 
+// Cancellation support for the 2xk/3xk searches: a wall-clock time limit,
+// plus user interrupts.  (R_CheckUserInterrupt() can't be called directly
+// from the search, since it longjmps past the search's cleanup code; instead,
+// it's wrapped in R_ToplevelExec(), as Rcpp::checkUserInterrupt() does, and
+// we unwind the search before raising the interrupt.)
+typedef std::chrono::steady_clock FisherClock;
+
+struct FisherCheckState {
+  FisherClock::time_point deadline;
+  FisherClock::time_point next_interrupt_check;
+  bool has_deadline;
+  bool timed_out;
+  bool interrupted;
+};
+
+static void fisher_check_interrupt_fn(void* /* unused */) {
+  R_CheckUserInterrupt();
+}
+
+static uint32_t fisher_check(void* arg) {
+  FisherCheckState* statep = static_cast<FisherCheckState*>(arg);
+  const FisherClock::time_point now = FisherClock::now();
+  if (statep->has_deadline && (now >= statep->deadline)) {
+    statep->timed_out = true;
+    return 1;
+  }
+  // The search calls this every few milliseconds or more often; checking for
+  // interrupts is a bit more expensive, so it's rate-limited.
+  if (now >= statep->next_interrupt_check) {
+    statep->next_interrupt_check = now + std::chrono::milliseconds(100);
+    if (!R_ToplevelExec(fisher_check_interrupt_fn, nullptr)) {
+      statep->interrupted = true;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// time_limit is in seconds; non-finite or very large values mean no limit.
+static void fisher_check_init(double time_limit, FisherCheckState* statep) {
+  const FisherClock::time_point now = FisherClock::now();
+  statep->has_deadline = (time_limit < 1e9);
+  if (statep->has_deadline) {
+    statep->deadline = now + std::chrono::duration_cast<FisherClock::duration>(std::chrono::duration<double>(time_limit));
+  }
+  statep->next_interrupt_check = now + std::chrono::milliseconds(100);
+  statep->timed_out = false;
+  statep->interrupted = false;
+}
+
+// Handles a NaN return from Fisher{2,3}xkLnPEx().  Returns true if the time
+// limit was exceeded (the caller then returns NA_REAL, so fisher.test() can
+// report the error); otherwise raises an interrupt or error.
+static bool fisher_check_nan(const FisherCheckState& state) {
+  if (state.timed_out) {
+    return true;
+  }
+  if (state.interrupted) {
+    throw Rcpp::internal::InterruptedException();
+  }
+  stop("out of memory");
+}
+
 //' @title Fisher 2xk test log-p-value
 //' @description Implements main p-value calculation for 2xk and kx2 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
+double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit) {
   const bool two_rows = (x.nrow() == 2);
   const uint32_t k = two_rows? x.ncol() : x.nrow();
   std::vector<int32_t> obs(2 * k);
@@ -894,9 +958,13 @@ double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
   if (tot >= (1LL << 31)) {
     stop("problem instance too large (2xk table entries must sum to less than 2^31)");
   }
-  const double ln_pval = plink2::Fisher2xkLnP(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
+  FisherCheckState check_state;
+  fisher_check_init(time_limit, &check_state);
+  const double ln_pval = plink2::Fisher2xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, fisher_check, &check_state);
   if (ln_pval != ln_pval) {
-    stop("out of memory");
+    if (fisher_check_nan(check_state)) {
+      return NA_REAL;
+    }
   }
   if (log_p) {
     return ln_pval;
@@ -908,7 +976,7 @@ double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
 //' @description Implements main p-value calculation for 3xk and kx3 tables.
 //' @noRd
 // [[Rcpp::export]]
-double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
+double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit) {
   const bool three_rows = (x.nrow() == 3);
   const uint32_t k = three_rows? x.ncol() : x.nrow();
   std::vector<int32_t> obs(3 * k);
@@ -923,9 +991,13 @@ double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p) {
   if (tot >= (1LL << 31)) {
     stop("problem instance too large (3xk table entries must sum to less than 2^31)");
   }
-  const double ln_pval = plink2::Fisher3xkLnP(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog);
+  FisherCheckState check_state;
+  fisher_check_init(time_limit, &check_state);
+  const double ln_pval = plink2::Fisher3xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, fisher_check, &check_state);
   if (ln_pval != ln_pval) {
-    stop("out of memory");
+    if (fisher_check_nan(check_state)) {
+      return NA_REAL;
+    }
   }
   if (log_p) {
     return ln_pval;
