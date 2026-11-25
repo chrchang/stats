@@ -7,7 +7,7 @@
 fisher.test(
   x,
   y = NULL,
-  workspace = 6.4e+07,
+  workspace = 67108864,
   hybrid = FALSE,
   hybridPars = c(expect = 5, percent = 80, Emin = 1),
   control = list(),
@@ -35,7 +35,7 @@ p-values on tables larger than 2x3 (see 'Details').  For \code{FEXACT}, this
 also increases the internal stack size which allows larger problems to
 be solved, sometimes needing hours.  In such cases,
 \code{simulate.p.values = TRUE} may be more reasonable.  The default of
-64000000 (256 MB) is much larger than \code{stats::fisher.test()}'s default of
+67108864 (256 MiB) is much larger than \code{stats::fisher.test()}'s default of
 200000, which is too small for many moderately-sized tables.  (\code{FEXACT}
 allocates the entire workspace on each call, which costs roughly a
 millisecond.)  For the network algorithm used for most other tables,
@@ -243,17 +243,19 @@ fisher.test(Convictions, conf.int = FALSE)
  fisher.test(Convictions, conf.level = 0.99)$conf.int
 
 ## Some r x c tables with many small expected counts, so the chi-squared
-## approximation is inadvisable.  R 4.6's algorithm can't handle these within
-## a minute, even with workspace = 64000000 (it runs for about two minutes on
-## the first two, and fails with a hash key overflow on the third), but they
-## complete within a fraction of a second with the new algorithm.
-result <- fisher.test(matrix(c(297, 209, 322, 218, 145, 226, 7, 4, 3,
-                               394, 260, 406, 2, 4, 3), nrow=3))
+## approximation is inadvisable: chisq.test() reports p-values of 0.0020,
+## 0.92, and 0.00013 for these, vs. exact p-values of 0.018, 0.98, and 0.012.
+## R 4.6's algorithm can't handle these within a minute, even with
+## workspace = 67108864 (it runs for over two minutes on the first two, and
+## fails with a hash key overflow on the third), but they complete within a
+## fraction of a second with the new algorithm.
+result <- fisher.test(matrix(c(33, 44, 23, 14, 31, 40, 24, 24,
+                               73, 55, 29, 26, 0, 0, 0, 3), nrow=4))
 result$p.value
 fisher.test(matrix(c(166, 141, 110, 2, 0, 0, 4, 6, 3,
                      160, 138, 108, 173, 163, 118, 82, 73, 53), nrow=3))
 fisher.test(matrix(c(212, 992, 1099, 53, 339, 373, 84, 374, 469,
-                     0, 2, 3), nrow=3))
+                     2, 0, 0), nrow=3))
 
 }
 \references{
