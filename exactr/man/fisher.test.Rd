@@ -29,19 +29,23 @@ factor object.}
 
 \item{y}{a factor object; ignored if \code{x} is a matrix.}
 
-\item{workspace}{an integer specifying the size of the workspace used in the
-network algorithm.  In units of 4 bytes.  Only used for non-simulated
-p-values on tables handled by \code{FEXACT} (see 'Details').  This also
-increases the internal stack size which allows larger problems to be
-solved, sometimes needing hours.  In such cases,
+\item{workspace}{a number specifying the size of the workspace used in the
+network algorithm, in units of 4 bytes.  Only used for non-simulated
+p-values on tables larger than 2x3 (see 'Details').  For \code{FEXACT}, this
+also increases the internal stack size which allows larger problems to
+be solved, sometimes needing hours.  In such cases,
 \code{simulate.p.values = TRUE} may be more reasonable.  The default of
-64000000 (256 MB) is in line with the memory limit of the algorithm used
-for 2xk and 3xk tables; it is much larger than \code{stats::fisher.test()}'s
-default of 200000, which is too small for many moderately-sized tables.
-(\code{FEXACT} allocates the entire workspace on each call, which costs
-roughly a millisecond.)  (2xk and 3xk tables
-are handled by a different algorithm, which manages its own memory; see
-'Details'.)}
+64000000 (256 MB) is much larger than \code{stats::fisher.test()}'s default of
+200000, which is too small for many moderately-sized tables.  (\code{FEXACT}
+allocates the entire workspace on each call, which costs roughly a
+millisecond.)  For the network algorithm used for most other tables,
+\code{max(4 * workspace, 256 * 2^20)} bytes (256 MiB with the default) is the
+memory limit (\code{Inf} for no limit); see 'Details'.  Removing the limit, or
+setting it above the free physical memory, is dangerous: on a hard table
+the network algorithm can consume several GB within seconds (well before
+a typical \code{time.limit}, and often before you would notice and interrupt
+it) until the system runs out of memory, which can make the machine
+unresponsive, crash it, or get R or other processes killed.}
 
 \item{hybrid}{a logical.  Only used for tables handled by \code{FEXACT}, in
 which cases it indicates whether the exact probabilities (default) or a
@@ -77,7 +81,7 @@ Monte Carlo simulation, in larger-than-2x3 tables.}
 Carlo test when \code{simulate.p.value} is true.}
 
 \item{midp}{logical; if TRUE, midp-value is returned in place of p-value.
-Not yet supported for tables handled by \code{FEXACT}.}
+Not yet supported for tables forwarded to \code{FEXACT} (see 'Details').}
 
 \item{log.p}{logical; if TRUE, log.p.value is calculated and returned.
 (p.value is still returned.)  log.p.value usually remains accurate when
@@ -129,8 +133,12 @@ handled by the base R code.)  For other tests on 2x2 tables, p-values are
 obtained directly using the (central or non-central) hypergeometric
 distribution.
 
-For other tables (with at least 4 rows and 4 columns), computations are
-based on a C version of the FORTRAN
+Tables with at least 4 rows and 4 columns (but at most 8 nonempty rows or
+at most 8 nonempty columns) are handled by the network algorithm described
+below for 3xk tables, with the same exact tie handling, \code{midp} support,
+and accuracy.  If its memory limit (see \code{workspace}) would be exceeded, or
+the table is larger, the computation is forwarded to
+\code{stats::fisher.test()}, which is based on a C version of the FORTRAN
 subroutine \code{FEXACT} which implements the network developed by Mehta and
 Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 FORTRAN code can be obtained from \url{https://netlib.org/toms/643}.  Note the
@@ -165,12 +173,29 @@ exact test in which case an error is signalled.  Apart from increasing
 using \code{simulate.p.value = TRUE} may then often be sufficient and hence
 advisable.
 
-2xk and 3xk tables are not subject to the \code{workspace} limit.  Their
-memory use grows with the difficulty of the problem: it is usually well
-under 50 MB, and internal caps bound it to roughly 250 MB for tables with
-up to ~20 columns (growing slowly with more columns), which is only
-approached by problems taking many seconds (e.g. a 3x5 table with total
-450 and p ~= 0.02 takes ~15 seconds and ~180 MB).  Running time grows
+3xk tables (unless the observed table is close to the mode), and 2xk
+tables with at least 8 nonempty columns and small counts (total at most
+288, and at most 25 times the number of columns), are first handled by a network
+algorithm, which merges partial tables leaving the same subproblem and
+bounds each subproblem's most and least probable completions; it is
+usually much faster than the alternative on these tables.  Its main
+workspace (its past-value lists, node records, hash tables, sort buffers,
+and log-factorial tables) is limited to \code{max(4 * workspace, 256 * 2^20)}
+bytes, leaving room for the fallback below within roughly the same total;
+small allocations are not counted, so memory use can exceed the limit
+slightly (by up to ~5\% in tests).  With many columns and moderate counts,
+a larger \code{workspace} can help a lot (e.g. many 2x10-2x32 tables with
+totals ~200-300 need a limit of 256-512 MiB, and then take under a second
+instead of many seconds to minutes).  When the limit would be exceeded, the
+computation falls back to the search described below.
+
+The search (used for other 2xk and 3xk tables, and as the fallback) is
+not subject to the \code{workspace} limit.  Their memory use grows with the difficulty of the
+problem: it is usually well under 50 MB, and internal caps bound it to
+roughly 250 MB for tables with up to ~20 columns (growing slowly with
+more columns), which is only approached by problems taking many seconds
+(e.g. a 3x5 table with total 450 and p ~= 0.02 took ~15 seconds and
+~180 MB before the network algorithm was added).  Running time grows
 quickly with the number of columns and the table total, especially when
 the p-value is extremely small; in the latter case, note that p-values
 below ~1e-323 are computed much more quickly when \code{log.p = FALSE}, since

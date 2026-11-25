@@ -1,5 +1,5 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
-from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t
+from libc.stdint cimport int64_t, uintptr_t, uint32_t, int32_t, uint64_t
 from libc.math cimport INFINITY, isnan, rint, log
 from libc.float cimport DBL_MAX, DBL_MIN
 from libc.stdlib cimport malloc, free
@@ -7,7 +7,7 @@ import fractions
 import numpy as np
 cimport numpy as cnp
 
-__version__ = "0.11.1"
+__version__ = "0.11.2"
 
 cdef extern from "../include/plink2_highprec.h" namespace "plink2":
     cdef struct td_real_struct:
@@ -97,9 +97,13 @@ cdef extern from "../include/fisher.h" namespace "plink2":
 
     ctypedef uint32_t (*FisherCheckFn)(void* check_arg) noexcept nogil
 
-    double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) nogil
+    double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg) nogil
 
-    double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) nogil
+    double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg) nogil
+    double FisherRxcLnPEx(const int32_t* obs, uint32_t row_ct, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg, uint32_t* status_out) nogil
+    enum:
+        kFisherRxcMemLimit
+        kFisherRxcUnsupported
 
 
 cdef extern from "fisher_check.h":
@@ -1210,17 +1214,49 @@ cdef int _fisher_check_failure(const FisherPyCheckState* statep, double time_lim
     raise MemoryError()
 
 
-def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp=0, object time_limit=3600.0):
-    # time_limit: maximum running time in seconds for 2xk and 3xk tables
-    # larger than 2x3 (None or math.inf for no limit).  Running time is hard
+def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp=0, object time_limit=3600.0, object mem_limit=256):
+    # Supports 2xk, 3xk, and larger tables with at most 8 nonempty rows or at
+    # most 8 nonempty columns (alternative must be "two-sided" unless 2x2).
+    # time_limit: maximum running time in seconds for tables larger than 2x3
+    # (None or math.inf for no limit).  Running time is hard
     # to predict in advance for these tables, so TimeoutError is raised once
     # the limit is reached.  These computations can also be interrupted with
     # Ctrl-C (KeyboardInterrupt).
+    # mem_limit: memory limit in MiB (default 256; None or math.inf for no
+    # limit) for the network algorithm, used first on most 3xk tables, on 2xk
+    # tables with at least 8 nonempty columns and small counts (total at most
+    # 288, and at most 25 times the number of columns), and on all tables with at least 4 rows
+    # and 4 columns.  It covers the algorithm's main workspace; small
+    # allocations aren't counted, so memory use can exceed it slightly (by up
+    # to ~5% in tests).  With many columns and moderate counts, a larger limit
+    # can help a lot (e.g. many 2x10-2x32 tables with totals ~200-300 need a
+    # limit of 256-512 MiB, and then take under a second instead of many
+    # seconds to minutes).  If the limit would be exceeded, 2xk/3xk
+    # computations fall back to the outward search, whose
+    # memory use is bounded separately (usually well under 50 MiB, at most
+    # ~250 MiB with up to ~20 columns); for larger tables, MemoryError is
+    # raised.  Removing the limit (or setting it above the free physical
+    # memory) is dangerous: on a hard table the network algorithm can consume
+    # several GiB within seconds (well before a typical time_limit, and often
+    # before you would notice and press Ctrl-C) until the system runs out of
+    # memory, which can make the machine unresponsive, crash it, or get Python
+    # or other processes killed.
     cdef double time_limit_d = INFINITY
     if time_limit is not None:
         time_limit_d = time_limit
         if isnan(time_limit_d) or time_limit_d <= 0:
             raise ValueError("time_limit must be a positive number, math.inf, or None")
+    cdef double mem_limit_d = INFINITY
+    if mem_limit is not None:
+        mem_limit_d = mem_limit
+        if isnan(mem_limit_d) or mem_limit_d <= 0:
+            raise ValueError("mem_limit must be a positive number (MiB), math.inf, or None")
+    # 0 = no limit
+    cdef uint64_t mem_limit_bytes = 0
+    if mem_limit_d * 1048576.0 < 1.8e19:
+        mem_limit_bytes = <uint64_t>(mem_limit_d * 1048576.0)
+        if mem_limit_bytes == 0:
+            mem_limit_bytes = 1
     cdef FisherPyCheckState check_state
     cdef uint32_t nrow = len(table)
     if nrow < 2:
@@ -1264,6 +1300,7 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
     cdef int64_t a
     cdef int64_t b
     cdef int32_t* obs_buf
+    cdef uint32_t rxc_status = 0
     # When logp isn't requested, the return value is exp_flush(ln_result),
     # which is zero whenever exp(ln_result) < DBL_MIN.  So we can let the
     # 2xk/3xk functions return early (with an upper bound on ln_result) when
@@ -1306,7 +1343,7 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
                 raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
             FisherPyCheckInit(time_limit_d, &check_state)
             with nogil:
-                ln_result = Fisher2xkLnPEx(obs_buf, k, midp, ln_p_cutoff, FisherPyCheck, &check_state)
+                ln_result = Fisher2xkLnPEx(obs_buf, k, midp, ln_p_cutoff, mem_limit_bytes, FisherPyCheck, &check_state)
         finally:
             free(obs_buf)
         if ln_result != ln_result:
@@ -1329,13 +1366,39 @@ def fisher_exact(list table, str alternative="two-sided", bint midp=0, bint logp
                 raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
             FisherPyCheckInit(time_limit_d, &check_state)
             with nogil:
-                ln_result = Fisher3xkLnPEx(obs_buf, k, midp, ln_p_cutoff, FisherPyCheck, &check_state)
+                ln_result = Fisher3xkLnPEx(obs_buf, k, midp, ln_p_cutoff, mem_limit_bytes, FisherPyCheck, &check_state)
         finally:
             free(obs_buf)
         if ln_result != ln_result:
             _fisher_check_failure(&check_state, time_limit_d)
     else:
-         raise RuntimeError("only 2xk, kx2, 3xk, and kx3 tables are currently supported")
+        # 4+ rows and columns: network algorithm (at most 8 nonempty rows or
+        # columns).
+        obs_buf = <int32_t*>malloc(nrow * ncol * sizeof(int32_t))
+        if not obs_buf:
+            raise MemoryError()
+        try:
+            total = 0
+            for row_idx in range(nrow):
+                for idx in range(ncol):
+                    a = table[row_idx][idx]
+                    if a < 0 or a > 0x7fffffff:
+                        raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+                    total += a
+                    obs_buf[row_idx * ncol + idx] = <int32_t>a
+            if total > 0x7fffffff:
+                raise RuntimeError(f"{nrow}x{ncol} table entries must be nonnegative and sum to <2^31")
+            FisherPyCheckInit(time_limit_d, &check_state)
+            with nogil:
+                ln_result = FisherRxcLnPEx(obs_buf, nrow, ncol, midp, ln_p_cutoff, mem_limit_bytes, FisherPyCheck, &check_state, &rxc_status)
+        finally:
+            free(obs_buf)
+        if ln_result != ln_result:
+            if rxc_status == kFisherRxcMemLimit:
+                raise MemoryError(f"network algorithm workspace would exceed mem_limit ({mem_limit_d:g} MiB); consider a larger mem_limit")
+            if rxc_status == kFisherRxcUnsupported:
+                raise RuntimeError("tables with more than 8 nonempty rows and more than 8 nonempty columns are not currently supported")
+            _fisher_check_failure(&check_state, time_limit_d)
     if logp:
         return ln_result
     return exp_flush(ln_result)

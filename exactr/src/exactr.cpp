@@ -941,9 +941,10 @@ static bool fisher_check_nan(const FisherCheckState& state) {
 
 //' @title Fisher 2xk test log-p-value
 //' @description Implements main p-value calculation for 2xk and kx2 tables.
+//'   mem_limit is the network algorithm's memory limit in bytes (Inf for none).
 //' @noRd
 // [[Rcpp::export]]
-double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit) {
+double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit) {
   const bool two_rows = (x.nrow() == 2);
   const uint32_t k = two_rows? x.ncol() : x.nrow();
   std::vector<int32_t> obs(2 * k);
@@ -960,7 +961,9 @@ double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_l
   }
   FisherCheckState check_state;
   fisher_check_init(time_limit, &check_state);
-  const double ln_pval = plink2::Fisher2xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, fisher_check, &check_state);
+  // 0 = no limit
+  const uint64_t mem_limit_bytes = (mem_limit >= 1.8e19)? 0 : S_CAST(uint64_t, mem_limit);
+  const double ln_pval = plink2::Fisher2xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, mem_limit_bytes, fisher_check, &check_state);
   if (ln_pval != ln_pval) {
     if (fisher_check_nan(check_state)) {
       return NA_REAL;
@@ -972,11 +975,51 @@ double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_l
   return exp(ln_pval);
 }
 
-//' @title Fisher 3xk test log-p-value
-//' @description Implements main p-value calculation for 3xk and kx3 tables.
+//' @title Fisher rxc test log-p-value
+//' @description Main p-value calculation for tables with at least 4 rows and
+//'   4 columns.  Returns c(value, status): status 0 = ok, 1 = memory limit,
+//'   2 = unsupported (more than 8 nonempty rows and columns), 3 = time limit
+//'   reached or other failure (value is NA when the time limit was reached).
+//'   mem_limit is in bytes (Inf for none).
 //' @noRd
 // [[Rcpp::export]]
-double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit) {
+NumericVector fisher_rxc_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit) {
+  const uint32_t row_ct = x.nrow();
+  const uint32_t col_ct = x.ncol();
+  std::vector<int32_t> obs(S_CAST(uintptr_t, row_ct) * col_ct);
+  int64_t tot = 0;
+  for (uint32_t row_idx = 0; row_idx != row_ct; ++row_idx) {
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      const int32_t val = x(row_idx, col_idx);
+      obs[row_idx * col_ct + col_idx] = val;
+      tot += val;
+    }
+  }
+  if (tot >= (1LL << 31)) {
+    stop("problem instance too large (table entries must sum to less than 2^31)");
+  }
+  FisherCheckState check_state;
+  fisher_check_init(time_limit, &check_state);
+  // 0 = no limit
+  const uint64_t mem_limit_bytes = (mem_limit >= 1.8e19)? 0 : S_CAST(uint64_t, mem_limit);
+  uint32_t status;
+  double ln_pval = plink2::FisherRxcLnPEx(obs.data(), row_ct, col_ct, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, mem_limit_bytes, fisher_check, &check_state, &status);
+  NumericVector result(2);
+  result[1] = status;
+  if (ln_pval != ln_pval) {
+    result[0] = NA_REAL;
+    return result;
+  }
+  result[0] = log_p? ln_pval : exp(ln_pval);
+  return result;
+}
+
+//' @title Fisher 3xk test log-p-value
+//' @description Implements main p-value calculation for 3xk and kx3 tables.
+//'   mem_limit is the network algorithm's memory limit in bytes (Inf for none).
+//' @noRd
+// [[Rcpp::export]]
+double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit) {
   const bool three_rows = (x.nrow() == 3);
   const uint32_t k = three_rows? x.ncol() : x.nrow();
   std::vector<int32_t> obs(3 * k);
@@ -993,7 +1036,9 @@ double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_l
   }
   FisherCheckState check_state;
   fisher_check_init(time_limit, &check_state);
-  const double ln_pval = plink2::Fisher3xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, fisher_check, &check_state);
+  // 0 = no limit
+  const uint64_t mem_limit_bytes = (mem_limit >= 1.8e19)? 0 : S_CAST(uint64_t, mem_limit);
+  const double ln_pval = plink2::Fisher3xkLnPEx(obs.data(), k, midp, log_p? -DBL_MAX : kLnPCutoffNonlog, mem_limit_bytes, fisher_check, &check_state);
   if (ln_pval != ln_pval) {
     if (fisher_check_nan(check_state)) {
       return NA_REAL;

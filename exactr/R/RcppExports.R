@@ -123,16 +123,29 @@ fisher23_test_pval <- function(x, midp, log_p) {
 
 #' @title Fisher 2xk test log-p-value
 #' @description Implements main p-value calculation for 2xk and kx2 tables.
+#'   mem_limit is the network algorithm's memory limit in bytes (Inf for none).
 #' @noRd
-fisher2xk_test_pval <- function(x, midp, log_p, time_limit) {
-    .Call(`_exactr_fisher2xk_test_pval`, x, midp, log_p, time_limit)
+fisher2xk_test_pval <- function(x, midp, log_p, time_limit, mem_limit) {
+    .Call(`_exactr_fisher2xk_test_pval`, x, midp, log_p, time_limit, mem_limit)
+}
+
+#' @title Fisher rxc test log-p-value
+#' @description Main p-value calculation for tables with at least 4 rows and
+#'   4 columns.  Returns c(value, status): status 0 = ok, 1 = memory limit,
+#'   2 = unsupported (more than 8 nonempty rows and columns), 3 = time limit
+#'   reached or other failure (value is NA when the time limit was reached).
+#'   mem_limit is in bytes (Inf for none).
+#' @noRd
+fisher_rxc_test_pval <- function(x, midp, log_p, time_limit, mem_limit) {
+    .Call(`_exactr_fisher_rxc_test_pval`, x, midp, log_p, time_limit, mem_limit)
 }
 
 #' @title Fisher 3xk test log-p-value
 #' @description Implements main p-value calculation for 3xk and kx3 tables.
+#'   mem_limit is the network algorithm's memory limit in bytes (Inf for none).
 #' @noRd
-fisher3xk_test_pval <- function(x, midp, log_p, time_limit) {
-    .Call(`_exactr_fisher3xk_test_pval`, x, midp, log_p, time_limit)
+fisher3xk_test_pval <- function(x, midp, log_p, time_limit, mem_limit) {
+    .Call(`_exactr_fisher3xk_test_pval`, x, midp, log_p, time_limit, mem_limit)
 }
 
 #' @title Fisher 2x2 two-sided test p-value

@@ -14,6 +14,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "fisher.h"
+#include "fisher_network.h"
 
 #include <math.h>
 
@@ -3701,7 +3702,7 @@ static uint32_t Fisher2xkLevel(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_
 static const uint32_t kFisher2xkMitmMinCols = 5;
 // ...and at most this many (so saved_cur_r1 can live on the stack; runtime
 // would be astronomical for most larger tables anyway).
-static const uint32_t kFisher2xkMitmMaxCols = 256;
+CONSTI32(kFisher2xkMitmMaxCols, 256);
 
 // Approximate cost of a B-side query, relative to an A-side enumeration step.
 static const double kFisher2xkMitmQueryCost = 3.0;
@@ -3766,10 +3767,38 @@ static uint32_t Fisher2xkMitmSplit(const int32_t* col_tots, uint32_t col_ct, int
 }
 
 double Fisher2xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
-  return Fisher2xkLnPEx(obs, col_ct, midp, ln_p_cutoff, nullptr, nullptr);
+  return Fisher2xkLnPEx(obs, col_ct, midp, ln_p_cutoff, kFisherNetDefaultMemLimit, nullptr, nullptr);
 }
 
-double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) {
+// The network algorithm (fisher_network.cc) is skipped when the mode's
+// log-likelihood relative to the observed table is below this: the outward
+// search is cheap there, and it gets p-values close to 1 (whose complements
+// are tiny) to full relative precision, while the network sums the p-value
+// directly.
+static const double kFisher3xkNetMinModeLnlik = 0.5;
+
+// Fisher3xkLnPEx() also skips it when the table total is at least this.
+// (The outward search handles huge totals well, while the network would need
+// large log-factorial tables.)
+static const int32_t kFisher3xkNetMaxTot = 1 << 20;
+
+// Fisher2xkLnPEx() tries the network algorithm when there are at least
+// kFisher2xkNetMinCols nonempty columns and the table total is at most
+// min(kFisher2xkNetMaxTotPerCol * columns, kFisher2xkNetMaxTot) (and the mode
+// check above passes).  In Nov 2026 calibration runs (429 2x4-2x32 tables,
+// 256 MiB limit), the network was usually 5-100x faster on such tables, and
+// finished many 2x12-2x32 tables in under 0.5 s that the outward search
+// couldn't in 30 s.  With 256 MiB, it ran out of memory at totals above
+// ~250-290 regardless of width, usually where the outward search also took
+// over 30 s (a failed attempt cost at most ~1 s); with larger counts per
+// column the outward search was faster (2-3x at total/columns ~= 30-40 with
+// 8-12 columns).  On the calibration set, this rule was never >= 1.5x (and
+// >= 50 ms) slower than the better choice.
+static const uint32_t kFisher2xkNetMinCols = 8;
+static const int32_t kFisher2xkNetMaxTotPerCol = 25;
+static const int32_t kFisher2xkNetMaxTot = 288;
+
+double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg) {
   uint32_t nz_col_ct = 0;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
     nz_col_ct += (obs[col_idx] + obs[col_ct + col_idx] != 0);
@@ -3914,6 +3943,27 @@ double Fisher2xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double
   Fisher2xkInitMode(col_tots, col_ct, tot, row1_tot, cur_r1);
   // Log-likelihood of the mode relative to the observed table.
   const double mode_lnlik = Fisher2xkLnLik(&ctx, col_ct - 1).x[0];
+  if ((col_ct >= kFisher2xkNetMinCols) && (tot <= kFisher2xkNetMaxTot) && (tot <= kFisher2xkNetMaxTotPerCol * S_CAST(int32_t, col_ct)) && (mode_lnlik >= kFisher3xkNetMinModeLnlik)) {
+    // Many columns with small counts: try the network algorithm (see
+    // fisher_network.cc).  On memory limit or an unresolvable near-tie, fall
+    // through to the search below.
+    int32_t* net_obs;
+    if (likely(!pgl_malloc(2 * col_ct * sizeof(int32_t), &net_obs))) {
+      for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+        net_obs[col_idx] = obs_r1[col_idx];
+        net_obs[col_ct + col_idx] = col_tots[col_idx] - obs_r1[col_idx];
+      }
+      uint32_t net_status;
+      const double net_lnp = FisherNetworkLnP(net_obs, 2, col_ct, midp, mem_limit_bytes, check_fn, check_arg, &net_status);
+      free(net_obs);
+      if ((net_status == kFisherNetOk) || (net_status == kFisherNetCanceled)) {
+        LfactCacheCleanup(&lfact_cache);
+        free(alloc_base);
+        // NaN if cancelled.
+        return net_lnp;
+      }
+    }
+  }
   double mitm_ln_cost;
   const uint32_t mitm_a_col_ct = Fisher2xkMitmSplit(col_tots, col_ct, row1_tot, tot, mode_lnlik, &mitm_ln_cost);
   // Find runs of equal-total columns, ignoring columns 0 and 1.  With
@@ -5287,10 +5337,11 @@ static uint32_t Fisher3xkLevel(Fisher3xkCtx* ctxp, int32_t lvl) {
 }
 
 double Fisher3xkLnP(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff) {
-  return Fisher3xkLnPEx(obs, col_ct, midp, ln_p_cutoff, nullptr, nullptr);
+  return Fisher3xkLnPEx(obs, col_ct, midp, ln_p_cutoff, kFisherNetDefaultMemLimit, nullptr, nullptr);
 }
 
-double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, FisherCheckFn check_fn, void* check_arg) {
+
+double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg) {
   int64_t row_tots_i64[3] = {0, 0, 0};
   uint32_t nz_col_ct = 0;
   for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
@@ -5313,7 +5364,7 @@ double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double
       const uint32_t row_b = (row_idx == 2)? 1 : 2;
       memcpy(two_row_obs, &(obs[row_a * col_ct]), col_ct * sizeof(int32_t));
       memcpy(&(two_row_obs[col_ct]), &(obs[row_b * col_ct]), col_ct * sizeof(int32_t));
-      const double result = Fisher2xkLnPEx(two_row_obs, col_ct, midp, ln_p_cutoff, check_fn, check_arg);
+      const double result = Fisher2xkLnPEx(two_row_obs, col_ct, midp, ln_p_cutoff, mem_limit_bytes, check_fn, check_arg);
       free(two_row_obs);
       return result;
     }
@@ -5330,7 +5381,7 @@ double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double
         ++write_idx;
       }
     }
-    return Fisher2xkLnPEx(transposed, 3, midp, ln_p_cutoff, check_fn, check_arg);
+    return Fisher2xkLnPEx(transposed, 3, midp, ln_p_cutoff, mem_limit_bytes, check_fn, check_arg);
   }
   const uint32_t raw_col_ct = col_ct;
   col_ct = nz_col_ct;
@@ -5466,6 +5517,19 @@ double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double
   ctx.lfact_cachep = &lfact_cache;
   // Log-likelihood of the mode relative to the observed table.
   const double mode_lnlik = ddr_sub(ddr_negate(Fisher3xkLfactSum(&ctx, 0, col_ct)), ctx.starting_lnprobv_ddr).x[0];
+  if ((mode_lnlik >= kFisher3xkNetMinModeLnlik) && (tot < kFisher3xkNetMaxTot)) {
+    // Try the network algorithm first.  On memory limit, unsupported totals,
+    // or an unresolvable near-tie, fall through to the outward search.
+    uint32_t net_status;
+    const double net_lnp = FisherNetworkLnP(obs_sorted, 3, col_ct, midp, mem_limit_bytes, check_fn, check_arg, &net_status);
+    if ((net_status == kFisherNetOk) || (net_status == kFisherNetCanceled)) {
+      LfactCacheCleanup(&lfact_cache);
+      free(alloc_base);
+      free(view_alloc);
+      // NaN if cancelled.
+      return net_lnp;
+    }
+  }
   double mitm_ln_cost;
   const uint32_t mitm_a_col_ct = Fisher3xkMitmSplit(col_tots, row_tots, col_ct, tot, mode_lnlik, &mitm_ln_cost);
   Fisher3xkMitm mitm;
@@ -5629,6 +5693,163 @@ double Fisher3xkLnPEx(const int32_t* obs, uint32_t col_ct, uint32_t midp, double
 
 double Fisher33LnP(const int32_t* obs, uint32_t midp, double ln_p_cutoff) {
   return Fisher3xkLnP(obs, 3, midp, ln_p_cutoff);
+}
+
+double FisherRxcLnPEx(const int32_t* obs, uint32_t row_ct, uint32_t col_ct, uint32_t midp, double ln_p_cutoff, uint64_t mem_limit_bytes, FisherCheckFn check_fn, void* check_arg, uint32_t* status_out) {
+  *status_out = kFisherRxcOk;
+  int64_t* tots;
+  if (unlikely(pgl_malloc((row_ct + col_ct) * sizeof(int64_t), &tots))) {
+    *status_out = kFisherRxcFailed;
+    return S_CAST(double, NAN);
+  }
+  int64_t* row_tots = tots;
+  int64_t* col_tots = &(tots[row_ct]);
+  for (uint32_t row_idx = 0; row_idx != row_ct; ++row_idx) {
+    row_tots[row_idx] = 0;
+  }
+  for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+    col_tots[col_idx] = 0;
+  }
+  for (uint32_t row_idx = 0; row_idx != row_ct; ++row_idx) {
+    for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+      const int32_t val = obs[row_idx * col_ct + col_idx];
+      row_tots[row_idx] += val;
+      col_tots[col_idx] += val;
+    }
+  }
+  uint32_t nzr = 0;
+  uint32_t nzc = 0;
+  for (uint32_t row_idx = 0; row_idx != row_ct; ++row_idx) {
+    nzr += (row_tots[row_idx] != 0);
+  }
+  for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+    nzc += (col_tots[col_idx] != 0);
+  }
+  // Compact table without empty rows/columns, oriented so that it has
+  // min(nzr, nzc) rows.
+  const uint32_t transpose = (nzr > nzc);
+  const uint32_t out_rows = transpose? nzc : nzr;
+  const uint32_t out_cols = transpose? nzr : nzc;
+  // (Room for a padding row when out_rows == 1.)
+  int32_t* compact;
+  if (unlikely(pgl_malloc((S_CAST(uintptr_t, out_rows) + 1) * MAXV(out_cols, 2) * sizeof(int32_t), &compact))) {
+    free(tots);
+    *status_out = kFisherRxcFailed;
+    return S_CAST(double, NAN);
+  }
+  {
+    uint32_t out_r = 0;
+    for (uint32_t row_idx = 0; row_idx != row_ct; ++row_idx) {
+      if (!row_tots[row_idx]) {
+        continue;
+      }
+      uint32_t out_c = 0;
+      for (uint32_t col_idx = 0; col_idx != col_ct; ++col_idx) {
+        if (!col_tots[col_idx]) {
+          continue;
+        }
+        const int32_t val = obs[row_idx * col_ct + col_idx];
+        if (transpose) {
+          compact[out_c * out_cols + out_r] = val;
+        } else {
+          compact[out_r * out_cols + out_c] = val;
+        }
+        ++out_c;
+      }
+      ++out_r;
+    }
+  }
+  free(tots);
+  double result;
+  if (out_cols < 2) {
+    // At most one nonempty cell: the observed table is the only one.  Defer to
+    // the 2x2 code for the [mid]p-value convention.
+    result = Fisher22TwoSidedP(out_cols? compact[0] : 0, 0, 0, 0, midp, 1);
+  } else if (out_rows <= 2) {
+    if (out_rows < 2) {
+      for (uint32_t col_idx = 0; col_idx != out_cols; ++col_idx) {
+        compact[out_cols + col_idx] = 0;
+      }
+    }
+    if (out_cols == 2) {
+      result = Fisher22TwoSidedP(compact[0], compact[1], compact[2], compact[3], midp, 1);
+    } else {
+      result = Fisher2xkLnPEx(compact, out_cols, midp, ln_p_cutoff, mem_limit_bytes, check_fn, check_arg);
+    }
+    if (result != result) {
+      *status_out = kFisherRxcFailed;
+    }
+  } else if (out_rows == 3) {
+    result = Fisher3xkLnPEx(compact, out_cols, midp, ln_p_cutoff, mem_limit_bytes, check_fn, check_arg);
+    if (result != result) {
+      *status_out = kFisherRxcFailed;
+    }
+  } else if (out_rows > kFisherRxcMaxMinDim) {
+    *status_out = kFisherRxcUnsupported;
+    result = S_CAST(double, NAN);
+  } else {
+    result = S_CAST(double, NAN);
+    uint32_t done = 0;
+    if (ln_p_cutoff > -DBL_MAX) {
+      // Cheap upper bound, as in Fisher2xkLnP(): ln(observed table
+      // probability) + ln(bound on the number of tables with these margins),
+      // the latter from the (out_rows-1) x (out_cols-1) free cells.
+      const uintptr_t cell_ct = S_CAST(uintptr_t, out_rows) * out_cols;
+      double* lfact_args;
+      if (unlikely(pgl_malloc((cell_ct + out_rows + out_cols) * sizeof(double), &lfact_args))) {
+        free(compact);
+        *status_out = kFisherRxcFailed;
+        return S_CAST(double, NAN);
+      }
+      int64_t tot = 0;
+      for (uintptr_t cell_idx = 0; cell_idx != cell_ct; ++cell_idx) {
+        lfact_args[cell_idx] = compact[cell_idx];
+        tot += compact[cell_idx];
+      }
+      const dd_real lnprobv_ddr = ddr_negate(ddr_sort_and_add_lfacts(cell_ct, lfact_args));
+      double ln_table_ct = 0.0;
+      for (uint32_t row_idx = 0; row_idx != out_rows; ++row_idx) {
+        int64_t row_tot = 0;
+        for (uint32_t col_idx = 0; col_idx != out_cols; ++col_idx) {
+          row_tot += compact[row_idx * out_cols + col_idx];
+        }
+        lfact_args[row_idx] = S_CAST(double, row_tot);
+      }
+      for (uint32_t col_idx = 0; col_idx != out_cols; ++col_idx) {
+        int64_t col_tot = 0;
+        for (uint32_t row_idx = 0; row_idx != out_rows; ++row_idx) {
+          col_tot += compact[row_idx * out_cols + col_idx];
+        }
+        lfact_args[out_rows + col_idx] = S_CAST(double, col_tot);
+      }
+      for (uint32_t row_idx = 0; row_idx + 1 < out_rows; ++row_idx) {
+        for (uint32_t col_idx = 0; col_idx + 1 < out_cols; ++col_idx) {
+          ln_table_ct += log(MINV(lfact_args[row_idx], lfact_args[out_rows + col_idx]) + 1.0);
+        }
+      }
+      const dd_real lnprobf_ddr = ddr_sub(ddr_sort_and_add_lfacts(out_rows + out_cols, lfact_args), ddr_lfact(S_CAST(double, tot)));
+      free(lfact_args);
+      double ln_p_bound = ddr_add(lnprobf_ddr, lnprobv_ddr).x[0] + ln_table_ct;
+      ln_p_bound += fabs(ln_p_bound) * k2m35;
+      if (ln_p_bound < ln_p_cutoff) {
+        result = MINV(ln_p_bound, 0.0);
+        done = 1;
+      }
+    }
+    if (!done) {
+      uint32_t net_status;
+      result = FisherNetworkLnP(compact, out_rows, out_cols, midp, mem_limit_bytes, check_fn, check_arg, &net_status);
+      if (net_status == kFisherNetMemLimit) {
+        *status_out = kFisherRxcMemLimit;
+      } else if (net_status == kFisherNetUnsupported) {
+        *status_out = kFisherRxcUnsupported;
+      } else if (net_status != kFisherNetOk) {
+        *status_out = kFisherRxcFailed;
+      }
+    }
+  }
+  free(compact);
+  return result;
 }
 
 #ifdef __cplusplus

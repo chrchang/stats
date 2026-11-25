@@ -183,8 +183,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // fisher2xk_test_pval
-double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit);
-RcppExport SEXP _exactr_fisher2xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP time_limitSEXP) {
+double fisher2xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit);
+RcppExport SEXP _exactr_fisher2xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP time_limitSEXP, SEXP mem_limitSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -192,13 +192,29 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< double >::type time_limit(time_limitSEXP);
-    rcpp_result_gen = Rcpp::wrap(fisher2xk_test_pval(x, midp, log_p, time_limit));
+    Rcpp::traits::input_parameter< double >::type mem_limit(mem_limitSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher2xk_test_pval(x, midp, log_p, time_limit, mem_limit));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fisher_rxc_test_pval
+NumericVector fisher_rxc_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit);
+RcppExport SEXP _exactr_fisher_rxc_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP time_limitSEXP, SEXP mem_limitSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
+    Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
+    Rcpp::traits::input_parameter< double >::type time_limit(time_limitSEXP);
+    Rcpp::traits::input_parameter< double >::type mem_limit(mem_limitSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher_rxc_test_pval(x, midp, log_p, time_limit, mem_limit));
     return rcpp_result_gen;
 END_RCPP
 }
 // fisher3xk_test_pval
-double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit);
-RcppExport SEXP _exactr_fisher3xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP time_limitSEXP) {
+double fisher3xk_test_pval(IntegerMatrix x, bool midp, bool log_p, double time_limit, double mem_limit);
+RcppExport SEXP _exactr_fisher3xk_test_pval(SEXP xSEXP, SEXP midpSEXP, SEXP log_pSEXP, SEXP time_limitSEXP, SEXP mem_limitSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -206,7 +222,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type midp(midpSEXP);
     Rcpp::traits::input_parameter< bool >::type log_p(log_pSEXP);
     Rcpp::traits::input_parameter< double >::type time_limit(time_limitSEXP);
-    rcpp_result_gen = Rcpp::wrap(fisher3xk_test_pval(x, midp, log_p, time_limit));
+    Rcpp::traits::input_parameter< double >::type mem_limit(mem_limitSEXP);
+    rcpp_result_gen = Rcpp::wrap(fisher3xk_test_pval(x, midp, log_p, time_limit, mem_limit));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -305,8 +322,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_exactr_phyper_cpp", (DL_FUNC) &_exactr_phyper_cpp, 8},
     {"_exactr_qhyper_cpp", (DL_FUNC) &_exactr_qhyper_cpp, 6},
     {"_exactr_fisher23_test_pval", (DL_FUNC) &_exactr_fisher23_test_pval, 3},
-    {"_exactr_fisher2xk_test_pval", (DL_FUNC) &_exactr_fisher2xk_test_pval, 4},
-    {"_exactr_fisher3xk_test_pval", (DL_FUNC) &_exactr_fisher3xk_test_pval, 4},
+    {"_exactr_fisher2xk_test_pval", (DL_FUNC) &_exactr_fisher2xk_test_pval, 5},
+    {"_exactr_fisher_rxc_test_pval", (DL_FUNC) &_exactr_fisher_rxc_test_pval, 5},
+    {"_exactr_fisher3xk_test_pval", (DL_FUNC) &_exactr_fisher3xk_test_pval, 5},
     {"_exactr_fisher22_2sided_pval", (DL_FUNC) &_exactr_fisher22_2sided_pval, 6},
     {"_exactr_fisher22_1sided_pval_ex", (DL_FUNC) &_exactr_fisher22_1sided_pval_ex, 8},
     {"_exactr_fisher22_2sided_pval_ex", (DL_FUNC) &_exactr_fisher22_2sided_pval_ex, 8},

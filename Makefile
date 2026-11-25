@@ -4,6 +4,7 @@ CXXWARN = ${CWARN} -Wold-style-cast
 ISRC = include/binom.cc \
        include/binom_detail.cc \
        include/fisher.cc \
+       include/fisher_network.cc \
        include/hypergeom.cc \
        include/hypergeom_detail.cc \
        include/nchypergeom_fisher.cc \

@@ -489,7 +489,10 @@ test_that("fisher.test works", {
   ft44 <- do.call(fisher.test, list(t44))
   expect_equal(t44, eval(str2lang(ft44$data.name)))
 
-  ## (This case might also become tractable soon.)
+  ## stats::fisher.test() fails on this one (FEXACT hash key overflow, even
+  ## with a large workspace); now handled by the network code.  Regression
+  ## value from this implementation; a 10^6-replicate simulation gave
+  ## 0.63275 +- 0.00048.
   d <- matrix(c(1,0,5,2,1,90
                ,2,1,0,2,3,89
                ,0,0,0,1,0,14
@@ -497,7 +500,7 @@ test_that("fisher.test works", {
                ,0,0,0,0,0, 2
                ,0,0,0,0,0, 2
                 ), nrow=6, byrow=TRUE)
-  expect_error(fisher.test(d))
+  expect_equal(fisher.test(d)$p.value, 0.63221605315178575, tolerance = 1e-12)
 })
 
 test_that("fisher.test works on 2xk and 3x3 tables", {
@@ -538,8 +541,11 @@ test_that("fisher.test works on 2xk and 3x3 tables", {
     expect_lt(fisher.test(m, log.p = TRUE)$log.p.value, -745.2)
   }
 
-  ## Still forwarded to stats::fisher.test().
-  expect_error(fisher.test(matrix(1, 4, 4), midp = TRUE))
+  ## Tables with at least 4 rows and columns support midp now (exact value).
+  expect_equal(fisher.test(matrix(1, 4, 4), midp = TRUE)$p.value, exp(-0.0026339782217517601), tolerance = 1e-13)
+  expect_identical(fisher.test(matrix(1, 4, 4))$p.value, 1)
+  ## Still forwarded to stats::fisher.test() (more than 8 rows and columns).
+  expect_error(fisher.test(matrix(1, 9, 9), midp = TRUE))
   expect_error(fisher.test(matrix(1, 2, 9), midp = FALSE, simulate.p.value = TRUE, B = 10), NA)
 })
 
@@ -587,6 +593,49 @@ test_that("fisher.test works on larger 2xk and 3xk tables", {
   ## Too large for stats::fisher.test() with its default workspace.
   big <- matrix(c(500, 400, 300, 200, 100, 260, 210, 160, 110, 60), nrow = 2)
   expect_gt(fisher.test(big)$p.value, 0)
+})
+
+test_that("fisher.test works on tables with 4+ rows and columns", {
+  ## Reference values were computed by exact rational enumeration.  Each case
+  ## is (row-major entries, number of rows, log-p-value, log-midp-value).
+  cases <- list(
+    list(c(3, 0, 1, 0, 0, 2, 1, 1, 1, 0, 0, 3, 0, 2, 1, 0), 4,
+         -3.1065721504237533, -3.4441981430055453),
+    list(c(2, 1, 0, 0, 0, 1, 2, 1, 1, 0, 1, 0, 0, 1, 0, 2, 1, 0, 1, 1), 5,
+         -0.4361435607576663, -0.67329362509793245))
+  for (cc in cases) {
+    m <- matrix(cc[[1]], nrow = cc[[2]], byrow = TRUE)
+    for (mm in list(m, t(m))) {
+      expect_equal(fisher.test(mm, log.p = TRUE)$log.p.value, cc[[3]], tolerance = 1e-13)
+      expect_equal(fisher.test(mm, midp = TRUE)$p.value, exp(cc[[4]]), tolerance = 1e-13)
+    }
+  }
+  ## Agreement with stats::fisher.test() (which has a relative tolerance of
+  ## ~1e-7 for ties).
+  set.seed(17)
+  for (i in 1:3) {
+    m <- matrix(rpois(16, 6), nrow = 4)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+    m <- matrix(rpois(20, 4), nrow = 5)
+    expect_equal(fisher.test(m)$p.value, stats::fisher.test(m, workspace = 2e7)$p.value, tolerance = 1e-6)
+  }
+  ## Empty rows/columns are dropped; data.name is preserved.
+  m0 <- rbind(matrix(c(3, 0, 1, 0, 0, 2, 1, 1, 1, 0, 0, 3, 0, 2, 1, 0), nrow = 4, byrow = TRUE), 0)
+  expect_equal(fisher.test(m0, log.p = TRUE)$log.p.value, -3.1065721504237533, tolerance = 1e-13)
+})
+
+test_that("fisher.test workspace limits the 3xk network algorithm", {
+  ## The network's limit is max(4 * workspace, 256 MiB); Inf removes it.
+  ## Results must agree.
+  for (m in list(matrix(c(102, 65, 39, 19, 59, 42, 34, 30, 32, 26, 25, 27), nrow = 3, byrow = TRUE),
+                 matrix(c(23, 14, 8, 3, 0, 9, 7, 6, 6, 6, 3, 3, 4, 5, 7), nrow = 3, byrow = TRUE))) {
+    p0 <- fisher.test(m, log.p = TRUE)$log.p.value
+    expect_equal(fisher.test(m, workspace = 1000, log.p = TRUE)$log.p.value, p0, tolerance = 1e-12)
+    expect_equal(fisher.test(t(m), workspace = Inf, log.p = TRUE)$log.p.value, p0, tolerance = 1e-12)
+    expect_equal(fisher.test(m, workspace = Inf, midp = TRUE)$p.value, fisher.test(m, midp = TRUE)$p.value, tolerance = 1e-12)
+  }
+  expect_error(fisher.test(matrix(1:9, 3), workspace = -1), "workspace")
+  expect_error(fisher.test(matrix(1:9, 3), workspace = NA), "workspace")
 })
 
 test_that("fisher.test respects time.limit", {

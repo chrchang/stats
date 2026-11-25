@@ -612,19 +612,23 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @param x either a two-dimensional contingency table in matrix form, or a
 #'   factor object.
 #' @param y a factor object; ignored if `x` is a matrix.
-#' @param workspace an integer specifying the size of the workspace used in the
-#'   network algorithm.  In units of 4 bytes.  Only used for non-simulated
-#'   p-values on tables handled by `FEXACT` (see 'Details').  This also
-#'   increases the internal stack size which allows larger problems to be
-#'   solved, sometimes needing hours.  In such cases,
+#' @param workspace a number specifying the size of the workspace used in the
+#'   network algorithm, in units of 4 bytes.  Only used for non-simulated
+#'   p-values on tables larger than 2x3 (see 'Details').  For `FEXACT`, this
+#'   also increases the internal stack size which allows larger problems to
+#'   be solved, sometimes needing hours.  In such cases,
 #'   `simulate.p.values = TRUE` may be more reasonable.  The default of
-#'   64000000 (256 MB) is in line with the memory limit of the algorithm used
-#'   for 2xk and 3xk tables; it is much larger than `stats::fisher.test()`'s
-#'   default of 200000, which is too small for many moderately-sized tables.
-#'   (`FEXACT` allocates the entire workspace on each call, which costs
-#'   roughly a millisecond.)  (2xk and 3xk tables
-#'   are handled by a different algorithm, which manages its own memory; see
-#'   'Details'.)
+#'   64000000 (256 MB) is much larger than `stats::fisher.test()`'s default of
+#'   200000, which is too small for many moderately-sized tables.  (`FEXACT`
+#'   allocates the entire workspace on each call, which costs roughly a
+#'   millisecond.)  For the network algorithm used for most other tables,
+#'   `max(4 * workspace, 256 * 2^20)` bytes (256 MiB with the default) is the
+#'   memory limit (`Inf` for no limit); see 'Details'.  Removing the limit, or
+#'   setting it above the free physical memory, is dangerous: on a hard table
+#'   the network algorithm can consume several GB within seconds (well before
+#'   a typical `time.limit`, and often before you would notice and interrupt
+#'   it) until the system runs out of memory, which can make the machine
+#'   unresponsive, crash it, or get R or other processes killed.
 #' @param hybrid a logical.  Only used for tables handled by `FEXACT`, in
 #'   which cases it indicates whether the exact probabilities (default) or a
 #'   hybrid approximation thereof should be computed.
@@ -650,7 +654,7 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #' @param B an integer specifying the number of replicates used in the Monte
 #'   Carlo test when `simulate.p.value` is true.
 #' @param midp logical; if TRUE, midp-value is returned in place of p-value.
-#'   Not yet supported for tables handled by `FEXACT`.
+#'   Not yet supported for tables forwarded to `FEXACT` (see 'Details').
 #' @param log.p logical; if TRUE, log.p.value is calculated and returned.
 #'   (p.value is still returned.)  log.p.value usually remains accurate when
 #'   p.value underflows to zero; a warning is printed when that is not the
@@ -683,8 +687,12 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   obtained directly using the (central or non-central) hypergeometric
 #'   distribution.
 #'
-#'   For other tables (with at least 4 rows and 4 columns), computations are
-#'   based on a C version of the FORTRAN
+#'   Tables with at least 4 rows and 4 columns (but at most 8 nonempty rows or
+#'   at most 8 nonempty columns) are handled by the network algorithm described
+#'   below for 3xk tables, with the same exact tie handling, `midp` support,
+#'   and accuracy.  If its memory limit (see `workspace`) would be exceeded, or
+#'   the table is larger, the computation is forwarded to
+#'   `stats::fisher.test()`, which is based on a C version of the FORTRAN
 #'   subroutine `FEXACT` which implements the network developed by Mehta and
 #'   Patel (1983, 1986) and improved by Clarkson, Fan and Joe (1993).  The
 #'   FORTRAN code can be obtained from <https://netlib.org/toms/643>.  Note the
@@ -720,12 +728,29 @@ qhyper <- function(p, m, n, k, lower.tail=TRUE, log.p=FALSE) {
 #'   using `simulate.p.value = TRUE` may then often be sufficient and hence
 #'   advisable.
 #'
-#'   2xk and 3xk tables are not subject to the `workspace` limit.  Their
-#'   memory use grows with the difficulty of the problem: it is usually well
-#'   under 50 MB, and internal caps bound it to roughly 250 MB for tables with
-#'   up to ~20 columns (growing slowly with more columns), which is only
-#'   approached by problems taking many seconds (e.g. a 3x5 table with total
-#'   450 and p ~= 0.02 takes ~15 seconds and ~180 MB).  Running time grows
+#'   3xk tables (unless the observed table is close to the mode), and 2xk
+#'   tables with at least 8 nonempty columns and small counts (total at most
+#'   288, and at most 25 times the number of columns), are first handled by a network
+#'   algorithm, which merges partial tables leaving the same subproblem and
+#'   bounds each subproblem's most and least probable completions; it is
+#'   usually much faster than the alternative on these tables.  Its main
+#'   workspace (its past-value lists, node records, hash tables, sort buffers,
+#'   and log-factorial tables) is limited to `max(4 * workspace, 256 * 2^20)`
+#'   bytes, leaving room for the fallback below within roughly the same total;
+#'   small allocations are not counted, so memory use can exceed the limit
+#'   slightly (by up to ~5% in tests).  With many columns and moderate counts,
+#'   a larger `workspace` can help a lot (e.g. many 2x10-2x32 tables with
+#'   totals ~200-300 need a limit of 256-512 MiB, and then take under a second
+#'   instead of many seconds to minutes).  When the limit would be exceeded, the
+#'   computation falls back to the search described below.
+#'
+#'   The search (used for other 2xk and 3xk tables, and as the fallback) is
+#'   not subject to the `workspace` limit.  Their memory use grows with the difficulty of the
+#'   problem: it is usually well under 50 MB, and internal caps bound it to
+#'   roughly 250 MB for tables with up to ~20 columns (growing slowly with
+#'   more columns), which is only approached by problems taking many seconds
+#'   (e.g. a 3x5 table with total 450 and p ~= 0.02 took ~15 seconds and
+#'   ~180 MB before the network algorithm was added).  Running time grows
 #'   quickly with the number of columns and the table total, especially when
 #'   the p-value is extremely small; in the latter case, note that p-values
 #'   below ~1e-323 are computed much more quickly when `log.p = FALSE`, since
@@ -835,11 +860,14 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
   ##
   ## Start with check for conditions that currently require us to rely on the
   ## stats::fisher.test() fallback.  Specifically, if the table is larger than
-  ## 2x3 and either simulate.p.value = TRUE or it has at least 4 rows and 4
-  ## columns, we just forward to stats::fisher.test().
+  ## 2x3 and either simulate.p.value = TRUE or it has more than 8 rows and 8
+  ## columns, we just forward to stats::fisher.test().  Tables with 4-8 rows
+  ## or columns are also forwarded if the network algorithm would exceed its
+  ## memory limit.
 
   expr.x <- substitute(x)
   expr.y <- substitute(y)
+  caller.env <- parent.frame()
   ## preserve original x and y until we know we aren't falling back on
   ## stats::fisher.test()
   xmat <- x
@@ -875,33 +903,41 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
   }
   use.2xk <- FALSE
   use.3xk <- FALSE
+  use.rxc <- FALSE
   if ((nr + nc > 5) && !identical(simulate.p.value, TRUE) && is.numeric(xmat) && !anyNA(xmat)) {
     if (min(nr, nc) == 2) {
       use.2xk <- TRUE
     } else if (min(nr, nc) == 3) {
       use.3xk <- TRUE
+    } else if (min(nr, nc) <= 8) {
+      ## (Tables with more than 8 nonempty rows and columns are forwarded
+      ## below; the network code also reports them as unsupported.)
+      use.rxc <- TRUE
     }
   }
-  if ((nr + nc > 5) && !use.2xk && !use.3xk) {
+  ## Arguments for stats::fisher.test(), as unevaluated expressions (these
+  ## substitute() calls must stay at this level, not inside the function
+  ## below).
+  fwd.args <- list(x = expr.x)
+  if (!is.null(expr.y)) {
+    fwd.args$y <- expr.y
+  }
+  ## ugh
+  fwd.args$workspace <- substitute(workspace)
+  fwd.args$hybrid <- substitute(hybrid)
+  fwd.args$hybridPars <- substitute(hybridPars)
+  fwd.args$control <- substitute(control)
+  fwd.args$or <- substitute(or)
+  fwd.args$alternative <- substitute(alternative)
+  fwd.args$conf.int <- substitute(conf.int)
+  fwd.args$conf.level <- substitute(conf.level)
+  fwd.args$simulate.p.value <- substitute(simulate.p.value)
+  fwd.args$B <- substitute(B)
+  forward.to.stats <- function() {
     if (midp) {
       stop("'midp = TRUE' not yet supported in this case")
     }
-    args <- list(x = expr.x)
-    if (!is.null(expr.y)) {
-      args$y <- expr.y
-    }
-    ## ugh
-    args$workspace <- substitute(workspace)
-    args$hybrid <- substitute(hybrid)
-    args$hybridPars <- substitute(hybridPars)
-    args$control <- substitute(control)
-    args$or <- substitute(or)
-    args$alternative <- substitute(alternative)
-    args$conf.int <- substitute(conf.int)
-    args$conf.level <- substitute(conf.level)
-    args$simulate.p.value <- substitute(simulate.p.value)
-    args$B <- substitute(B)
-    RET <- do.call(stats::fisher.test, args, envir = parent.frame())
+    RET <- do.call(stats::fisher.test, fwd.args, envir = caller.env)
     if (log.p) {
       if (RET$p.value <= 0.0) {
         warning("p.value underflowed to zero, and direct calculation of log.p.value not yet supported in this case; setting log.p.value to -Inf")
@@ -910,7 +946,10 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
         RET$log.p.value <- log(RET$p.value)
       }
     }
-    return(RET)
+    RET
+  }
+  if ((nr + nc > 5) && !use.2xk && !use.3xk && !use.rxc) {
+    return(forward.to.stats())
   }
 
   DNAME <- deparse1(expr.x)
@@ -958,7 +997,7 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
   }
 
   if (hybrid) {
-    warning("'hybrid' is ignored for 2xk and 3xk tables")
+    warning("'hybrid' is ignored except for tables forwarded to stats::fisher.test()")
   }
   if (midp) {
     METHOD <- paste(METHOD, "(midp)")
@@ -966,12 +1005,28 @@ fisher.test <- function(x, y = NULL, workspace = 64000000, hybrid = FALSE,
 
   RVAL <- NULL
   if (!have.2x2) {
-    ## 2x3, 2xk, or 3xk case, otherwise we would have forwarded to
+    ## 2x3, 2xk, 3xk, or rxc case, otherwise we would have forwarded to
     ## stats::fisher.test().
-    if (use.3xk) {
-      P_OR_LNPVAL <- fisher3xk_test_pval(x, midp, log.p, as.double(time.limit))
+    if (use.rxc) {
+      if (!(is.numeric(workspace) && (length(workspace) == 1L) && !is.na(workspace) && (workspace > 0))) {
+        stop("'workspace' must be a single positive number")
+      }
+      RES <- fisher_rxc_test_pval(x, midp, log.p, as.double(time.limit), max(4 * as.double(workspace), 256 * 2^20))
+      if ((RES[2] == 1) || (RES[2] == 2)) {
+        ## memory limit, or more than 8 nonempty rows and columns
+        return(forward.to.stats())
+      }
+      P_OR_LNPVAL <- RES[1]
+    } else if (use.3xk) {
+      if (!(is.numeric(workspace) && (length(workspace) == 1L) && !is.na(workspace) && (workspace > 0))) {
+        stop("'workspace' must be a single positive number")
+      }
+      P_OR_LNPVAL <- fisher3xk_test_pval(x, midp, log.p, as.double(time.limit), max(4 * as.double(workspace), 256 * 2^20))
     } else if (use.2xk) {
-      P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p, as.double(time.limit))
+      if (!(is.numeric(workspace) && (length(workspace) == 1L) && !is.na(workspace) && (workspace > 0))) {
+        stop("'workspace' must be a single positive number")
+      }
+      P_OR_LNPVAL <- fisher2xk_test_pval(x, midp, log.p, as.double(time.limit), max(4 * as.double(workspace), 256 * 2^20))
     } else {
       P_OR_LNPVAL <- fisher23_test_pval(x, midp, log.p)
     }

@@ -101,7 +101,7 @@ def test_fisher_2xk_33():
         assert exact_tests.fisher_exact(table) == 0.0
         assert exact_tests.fisher_exact(table, logp=True) < -745
     with pytest.raises(RuntimeError):
-        exact_tests.fisher_exact([[1, 2, 3, 4], [5, 6, 7, 8], [1, 2, 3, 4], [5, 6, 7, 8]])
+        exact_tests.fisher_exact([[1] * 9 for _ in range(9)])  # more than 8 rows and columns
 
 
 # Reference values were computed by (pruned) exact enumeration with 256-bit
@@ -117,6 +117,39 @@ fisher_2xk_3xk_large_cases = [
     ([[3, 2, 3, 1, 1], [0, 1, 0, 1, 1], [0, 2, 0, 1, 2]], -0.54059281778090373, -0.64751570884718135),
     ([[1, 0, 1, 4], [0, 0, 2, 1], [2, 1, 2, 5]], -0.18301893558768439, -0.21874741757827967),
     ]
+
+
+# Reference values were computed by exact rational enumeration.  Each case is
+# (table, log-p-value, log-midp-value).
+fisher_rxc_cases = [
+    ([[1] * 4 for _ in range(4)], 0.0, -0.0026339782217517601),
+    ([[3, 0, 1, 0], [0, 2, 1, 1], [1, 0, 0, 3], [0, 2, 1, 0]], -3.1065721504237533, -3.4441981430055453),
+    ([[2, 1, 0, 0], [0, 1, 2, 1], [1, 0, 1, 0], [0, 1, 0, 2], [1, 0, 1, 1]], -0.4361435607576663, -0.67329362509793245),
+    ]
+
+
+def test_fisher_rxc():
+    for table, ln_p, ln_midp in fisher_rxc_cases:
+        transposed = [list(col) for col in zip(*table)]
+        for tbl in (table, transposed):
+            assert exact_tests.fisher_exact(tbl, logp=True) == pytest.approx(ln_p, rel=1e-13, abs=1e-15), str(tbl)
+            assert exact_tests.fisher_exact(tbl, midp=True) == pytest.approx(math.exp(ln_midp), rel=1e-13, abs=0), str(tbl)
+    # Empty rows are dropped.
+    assert exact_tests.fisher_exact(fisher_rxc_cases[1][0] + [[0, 0, 0, 0]], logp=True) == pytest.approx(fisher_rxc_cases[1][1], rel=1e-13, abs=0)
+    with pytest.raises(MemoryError):
+        exact_tests.fisher_exact([[52, 36, 21, 21], [38, 37, 23, 11], [24, 25, 26, 15], [24, 12, 15, 20]], mem_limit=1)
+
+
+def test_fisher_3xk_mem_limit():
+    # A tiny mem_limit forces the fallback algorithm; None removes the limit.
+    for table in ([[102, 65, 39, 19], [59, 42, 34, 30], [32, 26, 25, 27]],
+                  [[23, 14, 8, 3, 0], [9, 7, 6, 6, 6], [3, 3, 4, 5, 7]]):
+        ref = exact_tests.fisher_exact(table, logp=True)
+        for mem_limit in (0.001, None, math.inf):
+            assert exact_tests.fisher_exact(table, logp=True, mem_limit=mem_limit) == pytest.approx(ref, rel=1e-12, abs=0)
+        assert exact_tests.fisher_exact(table, midp=True, mem_limit=0.001) == pytest.approx(exact_tests.fisher_exact(table, midp=True), rel=1e-12, abs=0)
+    with pytest.raises(ValueError):
+        exact_tests.fisher_exact([[1, 2, 3], [4, 5, 6], [7, 8, 9]], mem_limit=-1)
 
 
 def test_fisher_2xk_3xk_large():

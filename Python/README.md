@@ -139,3 +139,18 @@ in advance (it can vary by orders of magnitude between tables of similar
 shape and total), so it raises TimeoutError once the exact computation has
 run for time_limit seconds (default 3600; pass None for no limit).  These
 computations can also be interrupted with Ctrl-C.
+
+Most 3xk tables, 2xk tables with many columns and small counts, and all
+larger tables (at most 8 nonempty rows or columns) are handled by a network
+algorithm, whose main workspace is limited by mem_limit (in MiB; default 256,
+None for no limit).  Small allocations aren't counted, so memory use can
+exceed the limit slightly (by up to ~5% in tests).  If the limit would be
+exceeded, fisher_exact() falls back to a different search for 2xk and 3xk
+tables, whose memory use is bounded separately, and raises MemoryError for
+larger tables.  Some wide tables with moderate counts are solved much faster
+with a larger mem_limit.  Removing the limit (or setting it above the free
+physical memory) is dangerous, though: on a hard table the network algorithm
+can consume several GiB within seconds (well before a typical time_limit,
+and often before you would notice and press Ctrl-C) until the system runs out
+of memory, which can make the machine unresponsive, crash it, or get Python
+or other processes killed.
