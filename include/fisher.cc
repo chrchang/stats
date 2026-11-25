@@ -2889,22 +2889,6 @@ static const double kFisherMitmMaxSpan = 600.0;
 static const double kFisherMitmLikTolHi = 1.0 + k2m44;
 static const double kFisherMitmLikTolLo = 1.0 - k2m44;
 
-static inline double DdrExpd(dd_real a) {
-  return exp(a.x[0]) * (1.0 + a.x[1]);
-}
-
-// Neumaier summation.
-static inline void SumAdd(double addend, double* sump, double* errp) {
-  const double sum = *sump;
-  const double new_sum = sum + addend;
-  if (fabs(sum) >= fabs(addend)) {
-    *errp += (sum - new_sum) + addend;
-  } else {
-    *errp += (addend - new_sum) + sum;
-  }
-  *sump = new_sum;
-}
-
 static BoolErr FisherMitmInit(void* table_ctx, const uint32_t* abortedp, uint32_t b_val_ct, uint32_t max_outer_fac_args, FisherMitm* mitmp) {
   memset(mitmp, 0, sizeof(FisherMitm));
   mitmp->table_ctx = table_ctx;
@@ -2986,7 +2970,7 @@ static void FisherMitmAppend(FisherMitm* mitmp, int64_t key, dd_real lnlik_b, do
 // there's nothing left to do, and otherwise sets *excess_limit_ptr to the
 // largest relevant e(a) (plus epsilon).
 static uint32_t FisherMitmSweepBegin(FisherMitm* mitmp, const FisherMitmQuery* queries, uint32_t query_ct, double base_sum, double base_tie_ct, double* excess_limit_ptr) {
-  SumAdd(queries[0].weight * base_sum, &mitmp->sum, &mitmp->sum_err);
+  neumaier_add(queries[0].weight * base_sum, &mitmp->sum, &mitmp->sum_err);
   mitmp->tie_ct += queries[0].weight * base_tie_ct;
   if (query_ct == 1) {
     return 0;
@@ -2998,7 +2982,7 @@ static uint32_t FisherMitmSweepBegin(FisherMitm* mitmp, const FisherMitmQuery* q
   for (uint32_t query_idx = 0; query_idx != sweep_ct; ++query_idx) {
     const dd_real threshold_ddr = ddr_sub(lnlik_b1_ddr, sweep_queries[query_idx].lnlik_b);
     mitmp->thresholds[query_idx] = threshold_ddr.x[0];
-    mitmp->threshold_liks[query_idx] = DdrExpd(threshold_ddr);
+    mitmp->threshold_liks[query_idx] = ddr_exp_to_double(threshold_ddr);
     mitmp->bucket_sums[query_idx] = 0.0;
     mitmp->bucket_errs[query_idx] = 0.0;
     mitmp->extra_sums[query_idx] = 0.0;
@@ -3028,7 +3012,7 @@ static void FisherMitmAddNear(FisherMitm* mitmp, double excess, double lik, uint
     }
   }
   if (query_idx != query_ct) {
-    SumAdd(lik, &(mitmp->bucket_sums[query_idx]), &(mitmp->bucket_errs[query_idx]));
+    neumaier_add(lik, &(mitmp->bucket_sums[query_idx]), &(mitmp->bucket_errs[query_idx]));
   }
 }
 
@@ -3057,9 +3041,9 @@ static void FisherMitmAddEntry(FisherMitm* mitmp, dd_real excess_ddr) {
   if (lo == query_ct) {
     return;
   }
-  const double lik = DdrExpd(excess_ddr);
+  const double lik = ddr_exp_to_double(excess_ddr);
   if (thresholds[lo] > excess + kSmallEpsilon) {
-    SumAdd(lik, &(mitmp->bucket_sums[lo]), &(mitmp->bucket_errs[lo]));
+    neumaier_add(lik, &(mitmp->bucket_sums[lo]), &(mitmp->bucket_errs[lo]));
     return;
   }
   FisherMitmAddNear(mitmp, excess, lik, lo);
@@ -3094,7 +3078,7 @@ static inline uint32_t FisherMitmAddLik(FisherMitm* mitmp, double lik, uint32_t*
     return 0;
   }
   if (threshold_liks[bucket_idx] > lik * kFisherMitmLikTolHi) {
-    SumAdd(lik, &(mitmp->bucket_sums[bucket_idx]), &(mitmp->bucket_errs[bucket_idx]));
+    neumaier_add(lik, &(mitmp->bucket_sums[bucket_idx]), &(mitmp->bucket_errs[bucket_idx]));
     return 0;
   }
   return 1;
@@ -3125,7 +3109,7 @@ static void FisherMitmSweepEnd(FisherMitm* mitmp, const FisherMitmQuery* queries
   double prefix_err = 0.0;
   for (uint32_t query_idx = 0; query_idx != sweep_ct; ++query_idx) {
     const FisherMitmQuery* queryp = &(sweep_queries[query_idx]);
-    SumAdd(mitmp->bucket_sums[query_idx], &prefix_sum, &prefix_err);
+    neumaier_add(mitmp->bucket_sums[query_idx], &prefix_sum, &prefix_err);
     prefix_err += mitmp->bucket_errs[query_idx];
     const double cur_sum = prefix_sum + prefix_err + mitmp->extra_sums[query_idx];
     double cur_tie_ct = mitmp->extra_tie_cts[query_idx];
@@ -3134,8 +3118,8 @@ static void FisherMitmSweepEnd(FisherMitm* mitmp, const FisherMitmQuery* queries
       // The base region's ties are also ties for this query.
       cur_tie_ct += base_tie_ct;
     }
-    const double scale = queryp->weight * DdrExpd(ddr_negate(threshold_ddr));
-    SumAdd(scale * cur_sum, &mitmp->sum, &mitmp->sum_err);
+    const double scale = queryp->weight * ddr_exp_to_double(ddr_negate(threshold_ddr));
+    neumaier_add(scale * cur_sum, &mitmp->sum, &mitmp->sum_err);
     mitmp->tie_ct += queryp->weight * cur_tie_ct;
   }
 }
@@ -3363,7 +3347,7 @@ static void Fisher2xkMitmEnum(Fisher2xkCtx* ctxp, uint32_t level, int32_t row1_t
         if (!Fisher2xkMoreProbable(ctxp, excess_ddr)) {
           break;
         }
-        lik = DdrExpd(excess_ddr);
+        lik = ddr_exp_to_double(excess_ddr);
         steps_since_sync = 0;
         if (excess_ddr.x[0] <= excess_limit) {
           FisherMitmAddEntry(corep, excess_ddr);
@@ -4953,7 +4937,7 @@ static void Fisher3xkMitmEnumBase(Fisher3xkCtx* ctxp, dd_real partial_ddr, doubl
             break;
           }
           any_nonempty = 1;
-          lik = DdrExpd(excess_ddr);
+          lik = ddr_exp_to_double(excess_ddr);
           steps_since_sync = 0;
           if (excess_ddr.x[0] <= excess_limit) {
             FisherMitmAddEntry(corep, excess_ddr);

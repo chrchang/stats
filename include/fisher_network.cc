@@ -159,51 +159,19 @@ enum { kFisherNetMaxRows = 8 };
 static_assert(kFisherRxcMaxMinDim <= S_CAST(uint32_t, kFisherNetMaxRows), "kFisherRxcMaxMinDim exceeds kFisherNetMaxRows");
 #endif
 
-// ---- double-double helpers: decisions use the high parts; every weight added
-// to the result is computed from double-double exponents, so rounding of the
-// large log-factorial sums doesn't reach the p-value ----
-typedef struct DDStruct {
-  double hi, lo;
-} DD;
-static inline DD MkDD(double hi, double lo) {
-  DD r;
-  r.hi = hi;
-  r.lo = lo;
-  return r;
-}
-static inline DD TwoSumD(double a, double b) {
-  const double s = a + b;
-  const double bb = s - a;
-  return MkDD(s, (a - (s - bb)) + (b - bb));
-}
-// unnormalized: hi carries the TwoSum of the high parts, lo collects the
-// (small) low parts and rounding errors
-static inline DD DDAdd(DD a, DD b) {
-  const DD t = TwoSumD(a.hi, b.hi);
-  return MkDD(t.hi, t.lo + a.lo + b.lo);
-}
-static inline DD DDNeg(DD a) {
-  return MkDD(-a.hi, -a.lo);
-}
-static inline DD DDSub(DD a, DD b) {
-  return DDAdd(a, DDNeg(b));
-}
-static inline double ExpDD(DD a) {
-  return exp(a.hi) * (1.0 + a.lo);
-}
+// Double-double values (plink2_highprec.h's dd_real): decisions use the high
+// parts; every weight added to the result is computed from double-double
+// exponents (ddr_exp_to_double()), so rounding of the large log-factorial
+// sums doesn't reach the p-value.  Sums use the non-renormalizing
+// ddr_sloppier_add()/ddr_sloppier_sub(); the kTieEpsDD margin accounts for
+// that.
 
 // compensated sum
 typedef struct AccStruct {
   double s, comp;
 } Acc;
 static inline void AccAdd(Acc* a, double v) {
-  const double t = a->s + v;
-  if (fabs(a->s) >= fabs(v)) {
-    a->comp += (a->s - t) + v;
-  } else {
-    a->comp += (v - t) + a->s;
-  }
-  a->s = t;
+  neumaier_add(v, &a->s, &a->comp);
 }
 static inline double AccGet(const Acc* a) {
   return a->s + a->comp;
@@ -494,8 +462,8 @@ static void* NetRegrow(Net* net, void* old, size_t used_bytes, size_t old_bytes,
   return q;
 }
 
-static inline DD DLF(const Net* net, long long x) {
-  return MkDD(net->LF[x], net->LFL[x]);
+static inline dd_real DLF(const Net* net, long long x) {
+  return ddr_make(net->LF[x], net->LFL[x]);
 }
 
 // ---- cancellation hook ----
@@ -1189,12 +1157,12 @@ static int ModeCertify(Net* net, int* x, int R, int m, const double* pot, const 
 
 // ---- bounds for the remaining NR x m problem (rows r, columns c[0..m-1]) ----
 // Cells' factorial-product hash and double-double value (-sum lfact).
-static void CellsHashVal(const Net* net, const int* cells, int n, uint64_t* h_out, DD* v_out) {
+static void CellsHashVal(const Net* net, const int* cells, int n, uint64_t* h_out, dd_real* v_out) {
   uint64_t h = 0;
-  DD v = MkDD(0., 0.);
+  dd_real v = ddr_make(0., 0.);
   for (int q = 0; q < n; ++q) {
     h += net->FH[cells[q]];
-    v = DDSub(v, DLF(net, cells[q]));
+    v = ddr_sloppier_sub(v, DLF(net, cells[q]));
   }
   *h_out = h;
   *v_out = v;
@@ -1204,7 +1172,7 @@ static void CellsHashVal(const Net* net, const int* cells, int n, uint64_t* h_ou
 // first-column total c0, or a 2 x n table with column totals r and first-row
 // total c0).  Separable concave: proportional start, greedy fill, then pairwise
 // exchanges while one is (exactly) an improvement.
-static double ModeTwoWay(Net* net, const int* r, int n, long long c0, uint64_t* h_out, DD* v_out) {
+static double ModeTwoWay(Net* net, const int* r, int n, long long c0, uint64_t* h_out, dd_real* v_out) {
   const double* LF = net->LF;
   int xbuf[64];
   int* x = xbuf;
@@ -1275,10 +1243,10 @@ static double ModeTwoWay(Net* net, const int* r, int n, long long c0, uint64_t* 
   }
   if (h_out) {
     uint64_t h = 0;
-    DD vd = MkDD(0., 0.);
+    dd_real vd = ddr_make(0., 0.);
     for (int i = 0; i < n; ++i) {
       h += net->FH[x[i]] + net->FH[r[i] - x[i]];
-      vd = DDSub(DDSub(vd, DLF(net, x[i])), DLF(net, r[i] - x[i]));
+      vd = ddr_sloppier_sub(ddr_sloppier_sub(vd, DLF(net, x[i])), DLF(net, r[i] - x[i]));
     }
     *h_out = h;
     *v_out = vd;
@@ -1292,7 +1260,7 @@ static double ModeTwoWay(Net* net, const int* r, int n, long long c0, uint64_t* 
 // -log(x_ij)), push one unit around it, repeat; then certify optimality
 // exactly (ModeCertify(), which pushes any improving cycle the tolerances
 // hid).  Start from proportional rounding + northwest corner.
-static double ModeGeneral(Net* net, const int* r, const int* c, int m, uint64_t* h_out, DD* v_out) {
+static double ModeGeneral(Net* net, const int* r, const int* c, int m, uint64_t* h_out, dd_real* v_out) {
   const int R = net->NR;
   const int V = R + m;
   if (IntVecAssign(net, &net->mode_i, S_CAST(size_t, R * m + m + V)) ||
@@ -1320,7 +1288,7 @@ static double ModeGeneral(Net* net, const int* r, const int* c, int m, uint64_t*
   if (N == 0) {
     if (h_out) {
       *h_out = 0;
-      *v_out = MkDD(0., 0.);
+      *v_out = ddr_make(0., 0.);
     }
     return 0.;
   }
@@ -1427,7 +1395,7 @@ static double ModeGeneral(Net* net, const int* r, const int* c, int m, uint64_t*
 // Value of the most probable completion (the mode).  If h_out is non-null, the
 // mode table's factorial-product hash and double-double value are written to
 // *h_out and *v_out.  On failure, net->err is set.
-static double MaxCompletion(Net* net, const int* r, const int* c, int m, uint64_t* h_out, DD* v_out) {
+static double MaxCompletion(Net* net, const int* r, const int* c, int m, uint64_t* h_out, dd_real* v_out) {
   const int NR = net->NR;
   const double* LF = net->LF;
   if (m <= 2) {
@@ -1475,7 +1443,7 @@ static double MaxCompletion(Net* net, const int* r, const int* c, int m, uint64_
   if (N == 0) {
     if (h_out) {
       *h_out = 0;
-      *v_out = MkDD(0., 0.);
+      *v_out = ddr_make(0., 0.);
     }
     return 0.;
   }
@@ -1711,12 +1679,12 @@ static BoolErr BoundsLazy(Net* net, Node* nd, const int* c, int m) {
   for (int i = 0; i < NR; ++i) {
     N += nd->r[i];
   }
-  DD t = DLF(net, N);
+  dd_real t = DLF(net, N);
   for (int i = 0; i < NR; ++i) {
-    t = DDSub(t, DLF(net, nd->r[i]));
+    t = ddr_sloppier_sub(t, DLF(net, nd->r[i]));
   }
-  nd->logt = t.hi;
-  nd->logtl = t.lo;
+  nd->logt = t.x[0];
+  nd->logtl = t.x[1];
   for (int j = 0; j < m; ++j) {
     nd->logt -= net->LF[c[j]];
   }
@@ -1763,41 +1731,38 @@ typedef struct LastCtxStruct {
 static inline double Gi(const Net* net, const LastCtx* L, int i, int x) {
   return net->LF[x] + net->LF[L->r[i] - x];
 }
-static inline DD GiD(const Net* net, const LastCtx* L, int i, int x) {
-  return DDAdd(DLF(net, x), DLF(net, L->r[i] - x));
+static inline dd_real GiD(const Net* net, const LastCtx* L, int i, int x) {
+  return ddr_sloppier_add(DLF(net, x), DLF(net, L->r[i] - x));
 }
-static inline DD LogTotD(const Net* net, const LastCtx* L, int j, long long m) {
-  return DDSub(DDSub(DDSub(DLF(net, L->S[j]), DLF(net, m)), DLF(net, L->S[j] - m)), MkDD(L->sumlf[j], L->sumlfl[j]));
+static inline dd_real LogTotD(const Net* net, const LastCtx* L, int j, long long m) {
+  return ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(DLF(net, L->S[j]), DLF(net, m)), DLF(net, L->S[j] - m)), ddr_make(L->sumlf[j], L->sumlfl[j]));
 }
 // Resolve the entries srt[q0..) whose value is inside the tie window at a leaf
 // with completion value tvD and completion hash leafh; adds their
 // contributions (scale w relative to the list's cum scaling).
-static void ResolveWindow(Net* net, LastCtx* L, size_t q0, double lim_win, DD tvD, uint64_t leafh, double w) {
-  const DD pmaxD = MkDD(L->pmax, L->pmaxl);
-  const DD vobsD = MkDD(L->vobs, L->vobsl);
+static void ResolveWindow(Net* net, LastCtx* L, size_t q0, double lim_win, dd_real tvD, uint64_t leafh, double w) {
+  const dd_real pmaxD = ddr_make(L->pmax, L->pmaxl);
+  const dd_real vobsD = ddr_make(L->vobs, L->vobsl);
   const double eps = net->kTieEpsDD;
   for (size_t q = q0; (q < L->n) && (L->srt[q].v <= lim_win); ++q) {
     const Entry* e = &L->srt[q];
-    const double wt = e->f * ExpDD(DDSub(MkDD(e->v, e->vl), pmaxD));
-    const DD diff = DDSub(DDAdd(MkDD(e->v, e->vl), tvD), vobsD);
-    const double d = diff.hi + diff.lo;
-    // equal hashes: a tie, verified by value (so a hash collision can't be
-    // miscounted as one)
-    if (e->h + leafh == L->obs_h) {
-      if (fabs(d) > eps) {
-        NetFail(net, kFisherNetUnsupported);
-        return;
+    const double wt = e->f * ddr_exp_to_double(ddr_sloppier_sub(ddr_make(e->v, e->vl), pmaxD));
+    const dd_real diff = ddr_sloppier_sub(ddr_sloppier_add(ddr_make(e->v, e->vl), tvD), vobsD);
+    const double d = diff.x[0] + diff.x[1];
+    // outside the margin, the sign of d is reliable whatever the hashes say
+    // (equal hashes there can only be a collision)
+    if (fabs(d) > eps) {
+      if (d < 0.) {
+        AccAdd(L->acc, w * wt);
       }
-      AccAdd(L->acc, w * L->tie_w * wt);
       continue;
     }
-    if (fabs(d) <= eps) {
+    // inside the margin: a tie iff the factorial products are equal
+    if (e->h + leafh != L->obs_h) {
       NetFail(net, kFisherNetUnsupported);
       return;
     }
-    if (d < 0.) {
-      AccAdd(L->acc, w * wt);
-    }
+    AccAdd(L->acc, w * L->tie_w * wt);
   }
 }
 // max over d[0..j-1] (sum m) of -sum g; mode written to md
@@ -1892,7 +1857,7 @@ static void LastTail(const Net* net, LastCtx* L, int j, long long m, double fixe
   const int xhi = S_CAST(int, MINV(S_CAST(long long, L->r[j - 1]), m));
   double local = 0.;
   double prev = 0.;
-  const DD baseD = DDSub(DDAdd(MkDD(L->pmax, L->pmaxl), MkDD(fixed, fixedl)), MkDD(L->vobs, L->vobsl));
+  const dd_real baseD = ddr_sloppier_sub(ddr_sloppier_add(ddr_make(L->pmax, L->pmaxl), ddr_make(fixed, fixedl)), ddr_make(L->vobs, L->vobsl));
   // term(x) = exp(base - g_{j-1}(x) + LogTot(j-1, m-x)); consecutive terms
   // differ by a rational factor:
   // x -> x+1: (r-x)(m-x) / ((x+1)(S-m+x+1)), with r = r_{j-1}, S = S_{j-1}
@@ -1903,7 +1868,7 @@ static void LastTail(const Net* net, LastCtx* L, int j, long long m, double fixe
   int since = 64;
   for (int x = xs; (x >= xlo) && (x <= xhi); x += dir) {
     if (since >= 64) {
-      term = ExpDD(DDAdd(DDSub(baseD, GiD(net, L, j - 1, x)), LogTotD(net, L, j - 1, m - x)));
+      term = ddr_exp_to_double(ddr_sloppier_add(ddr_sloppier_sub(baseD, GiD(net, L, j - 1, x)), LogTotD(net, L, j - 1, m - x)));
       since = 0;
     } else {
       const double xp = x - dir;  // previous x
@@ -1955,12 +1920,12 @@ static inline size_t Advance(const Entry* a, size_t n, size_t lo, double lim) {
 static inline double L2TV(const Net* net, const LastCtx* L, double fixed, long long m, int x) {
   return fixed - Gi(net, L, 1, x) - Gi(net, L, 0, S_CAST(int, (m - x)));
 }
-static inline DD L2TVD(const Net* net, const LastCtx* L, double fixed, double fixedl, long long m, int x) {
-  return DDSub(DDSub(MkDD(fixed, fixedl), GiD(net, L, 1, x)), GiD(net, L, 0, S_CAST(int, (m - x))));
+static inline dd_real L2TVD(const Net* net, const LastCtx* L, double fixed, double fixedl, long long m, int x) {
+  return ddr_sloppier_sub(ddr_sloppier_sub(ddr_make(fixed, fixedl), GiD(net, L, 1, x)), GiD(net, L, 0, S_CAST(int, (m - x))));
 }
 // exact leaf weight
-static inline double L2WX(const Net* net, const LastCtx* L, DD baseD, long long m, int x) {
-  return ExpDD(DDSub(DDSub(baseD, GiD(net, L, 1, x)), GiD(net, L, 0, S_CAST(int, (m - x)))));
+static inline double L2WX(const Net* net, const LastCtx* L, dd_real baseD, long long m, int x) {
+  return ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_sub(baseD, GiD(net, L, 1, x)), GiD(net, L, 0, S_CAST(int, (m - x)))));
 }
 // j == 2 level: leaves along x = d[1] outward from the mode x0. tv(x) is
 // concave in x, so moving outward tv falls, the count threshold thr - tv rises
@@ -1975,7 +1940,7 @@ static void Level2Fast(Net* net, LastCtx* L, long long m, double fixed, double f
   if (Poll(net, 64)) {
     return;
   }
-  const DD baseD = DDSub(DDAdd(MkDD(L->pmax, L->pmaxl), MkDD(fixed, fixedl)), MkDD(L->vobs, L->vobsl));
+  const dd_real baseD = ddr_sloppier_sub(ddr_sloppier_add(ddr_make(L->pmax, L->pmaxl), ddr_make(fixed, fixedl)), ddr_make(L->vobs, L->vobsl));
   const int xlo = S_CAST(int, MAXV(0LL, m - r0));
   const int xhi = S_CAST(int, MINV(S_CAST(long long, r1), m));
   size_t lo0 = 0;
@@ -2063,7 +2028,7 @@ static void Level2Fast(Net* net, LastCtx* L, long long m, double fixed, double f
           lr.w = w;
           lr.h = leafh;
           lr.tv = fixed - Gi(net, L, 1, x) - Gi(net, L, 0, S_CAST(int, (m - x)));
-          lr.tvl = L2TVD(net, L, fixed, fixedl, m, x).lo;
+          lr.tvl = L2TVD(net, L, fixed, fixedl, m, x).x[1];
           if (LeafVecPush(net, L->leafrec, lr)) {
             return;
           }
@@ -2117,7 +2082,7 @@ static void Level2Fast(Net* net, LastCtx* L, long long m, double fixed, double f
         // U_{m}(c) = [(N - m') U_{m'}(c) + (r1 - c + 1) h_{m'}(c - 1)] / (m' + 1), m' = m - 1, c = previous start
         const long long mp = L->pt_m[di];
         const int c = L->pt_s[di];
-        double U = ExpDD(DDSub(MkDD(fixed, fixedl), MkDD(L->pt_fixed[di], L->pt_fixedl[di]))) * (S_CAST(double, (N2 - mp)) * L->pt_sum[di] + S_CAST(double, (r1 - c + 1)) * L->pt_wfull[di]) / S_CAST(double, (mp + 1));
+        double U = ddr_exp_to_double(ddr_sloppier_sub(ddr_make(fixed, fixedl), ddr_make(L->pt_fixed[di], L->pt_fixedl[di]))) * (S_CAST(double, (N2 - mp)) * L->pt_sum[di] + S_CAST(double, (r1 - c + 1)) * L->pt_wfull[di]) / S_CAST(double, (mp + 1));
         double ww = w;
         for (int xx = x; xx + 1 <= c - 1; ++xx) {
           ww *= S_CAST(double, (r1 - xx)) * (m - xx) / (S_CAST(double, (xx + 1)) * (r0 - m + xx + 1));
@@ -2136,7 +2101,7 @@ static void Level2Fast(Net* net, LastCtx* L, long long m, double fixed, double f
             add += ww;
           }
         }
-        local = (S_CAST(double, (m + 1)) * ExpDD(DDSub(MkDD(fixed, fixedl), MkDD(L->pt_fixed[di], L->pt_fixedl[di]))) * L->pt_sum[di] + S_CAST(double, (r1 - c)) * ww) / S_CAST(double, (N2 - m)) + add;
+        local = (S_CAST(double, (m + 1)) * ddr_exp_to_double(ddr_sloppier_sub(ddr_make(fixed, fixedl), ddr_make(L->pt_fixed[di], L->pt_fixedl[di]))) * L->pt_sum[di] + S_CAST(double, (r1 - c)) * ww) / S_CAST(double, (N2 - m)) + add;
         reused = 1;
       }
     }
@@ -2229,9 +2194,9 @@ static void Level2Fast(Net* net, LastCtx* L, long long m, double fixed, double f
 static int LastLevel(Net* net, LastCtx* L, int j, long long m, double fixed, double fixedl, uint64_t fixedh) {
   const double kTieEps = net->kTieEps;
   if (j == 1) {
-    const DD tvD = DDSub(MkDD(fixed, fixedl), GiD(net, L, 0, S_CAST(int, m)));
+    const dd_real tvD = ddr_sloppier_sub(ddr_make(fixed, fixedl), GiD(net, L, 0, S_CAST(int, m)));
     const double tv = fixed - Gi(net, L, 0, S_CAST(int, m));
-    const double w = ExpDD(DDSub(DDAdd(MkDD(L->pmax, L->pmaxl), tvD), MkDD(L->vobs, L->vobsl)));
+    const double w = ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_make(L->pmax, L->pmaxl), tvD), ddr_make(L->vobs, L->vobsl)));
     const uint64_t leafh = fixedh + net->FH[m] + net->FH[L->r[0] - m];
     const double lim_def = L->vobs - kTieEps - tv;
     if (L->leafrec) {
@@ -2240,7 +2205,7 @@ static int LastLevel(Net* net, LastCtx* L, int j, long long m, double fixed, dou
       lr.w = w;
       lr.h = leafh;
       lr.tv = tv;
-      lr.tvl = tvD.lo;
+      lr.tvl = tvD.x[1];
       if (LeafVecPush(net, L->leafrec, lr)) {
         return 0;
       }
@@ -2258,7 +2223,7 @@ static int LastLevel(Net* net, LastCtx* L, int j, long long m, double fixed, dou
   int md[kFisherNetMaxRows + 1];
   const double gmax = GroupMax(net, L, j, m, md);
   if (L->pmax + fixed + gmax <= L->vobs - kTieEps) {
-    AccAdd(L->acc, ExpDD(DDSub(DDAdd(DDAdd(MkDD(L->pmax, L->pmaxl), MkDD(fixed, fixedl)), LogTotD(net, L, j, m)), MkDD(L->vobs, L->vobsl))) * L->cum_all);
+    AccAdd(L->acc, ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_sloppier_add(ddr_make(L->pmax, L->pmaxl), ddr_make(fixed, fixedl)), LogTotD(net, L, j, m)), ddr_make(L->vobs, L->vobsl))) * L->cum_all);
     return 1;
   }
   if ((j != 2) && (L->pmin + fixed + GroupMin(net, L, j, m) > L->thr)) {
@@ -2273,8 +2238,8 @@ static int LastLevel(Net* net, LastCtx* L, int j, long long m, double fixed, dou
   const int xhi = S_CAST(int, MINV(S_CAST(long long, L->r[j - 1]), m));
   for (int dir = 1; dir >= -1; dir -= 2) {
     for (int x = (dir > 0)? x0 : (x0 - 1); (x >= xlo) && (x <= xhi); x += dir) {
-      const DD fD = DDSub(MkDD(fixed, fixedl), GiD(net, L, j - 1, x));
-      const int full = LastLevel(net, L, j - 1, m - x, fD.hi, fD.lo, fixedh + net->FH[x] + net->FH[L->r[j - 1] - x]);
+      const dd_real fD = ddr_sloppier_sub(ddr_make(fixed, fixedl), GiD(net, L, j - 1, x));
+      const int full = LastLevel(net, L, j - 1, m - x, fD.x[0], fD.x[1], fixedh + net->FH[x] + net->FH[L->r[j - 1] - x]);
       if (net->err) {
         return 0;
       }
@@ -2557,12 +2522,12 @@ static BoolErr MergeRuns(Net* net, const NodeVec* mothers, const Run* runs, size
       return 1;
     }
     for (uint32_t q = R->lo; q < R->hi; ++q) {
-      const DD v = DDAdd(MkDD(me[q].v, me[q].vl), MkDD(R->colv, R->colvl));
+      const dd_real v = ddr_sloppier_add(ddr_make(me[q].v, me[q].vl), ddr_make(R->colv, R->colvl));
       Entry* d = &dst[q - R->lo];
-      d->v = v.hi;
+      d->v = v.x[0];
       d->h = me[q].h + R->ch;
       d->f = me[q].f;
-      d->vl = v.lo;
+      d->vl = v.x[1];
     }
     out->p = dst;
     out->n = R->hi - R->lo;
@@ -2632,25 +2597,25 @@ static BoolErr MergeRuns(Net* net, const NodeVec* mothers, const Run* runs, size
         // Equal hashes mean equal factorial products unless the hash collided,
         // so the values are checked too: a collision is detected (and the call
         // falls back) unless the values also agree to double-double accuracy.
-        // sv.hi - o->v has only relative rounding error (and is exact when
+        // sv.x[0] - o->v has only relative rounding error (and is exact when
         // they're within a factor of 2), so a tiny result is trustworthy.  The
         // failure is deferred to the end of the merge, which keeps it out of
         // the hot loop.
         Entry* o = &buf->p[tab[p].ix];
-        const DD sv = TwoSumD(me[q].v, colv);
-        collision |= (fabs((sv.hi - o->v) + (((sv.lo + me[q].vl) + colvl) - o->vl)) > eps);
+        const dd_real sv = ddr_add2d(me[q].v, colv);
+        collision |= (fabs((sv.x[0] - o->v) + (((sv.x[1] + me[q].vl) + colvl) - o->vl)) > eps);
         o->f += me[q].f;
         continue;
       }
       tab[p].h = h;
       tab[p].ix = S_CAST(int32_t, buf->n);
       {
-        const DD v = DDAdd(MkDD(me[q].v, me[q].vl), MkDD(colv, colvl));
+        const dd_real v = ddr_sloppier_add(ddr_make(me[q].v, me[q].vl), ddr_make(colv, colvl));
         Entry e;
-        e.v = v.hi;
+        e.v = v.x[0];
         e.h = h;
         e.f = me[q].f;
-        e.vl = v.lo;
+        e.vl = v.x[1];
         if (EntryVecPush(net, buf, e)) {
           return 1;
         }
@@ -2764,16 +2729,16 @@ typedef struct StageCtxStruct {
   size_t nsrt;
   const double* cum;
   double pmax, v0;
-  DD pmaxD;
+  dd_real pmaxD;
   uint32_t single;
   const int* r;
   int x[kFisherNetMaxRows];
   // grouped enumeration
   const int* crem;
   int mcols;
-  DD KD;
+  dd_real KD;
   long long S[kFisherNetMaxRows + 1];
-  DD slf[kFisherNetMaxRows + 1];
+  dd_real slf[kFisherNetMaxRows + 1];
   double cumall;
   int* gub_cc;   // GroupUB() scratch: the later columns plus one more
 } StageCtx;
@@ -2850,15 +2815,15 @@ static int Body(StageCtx* sc) {
   const int* r = sc->r;
   const int* x = sc->x;
   const double kTieEps = net->kTieEps;
-  DD colvD = MkDD(0., 0.);
+  dd_real colvD = ddr_make(0., 0.);
   uint64_t ch = 0;
   int dr[kFisherNetMaxRows];
   for (int q = 0; q < nr; ++q) {
-    colvD = DDSub(colvD, DLF(net, x[q]));
+    colvD = ddr_sloppier_sub(colvD, DLF(net, x[q]));
     ch += net->FH[x[q]];
     dr[q] = r[q] - x[q];
   }
-  const double colv = colvD.hi;
+  const double colv = colvD.x[0];
   if (Poll(net, 1)) {
     return 1;
   }
@@ -2897,7 +2862,7 @@ static int Body(StageCtx* sc) {
     }
   }
   if (pre) {
-    AccAdd(sc->acc, ExpDD(DDSub(DDAdd(DDAdd(sc->pmaxD, colvD), MkDD(dn->logt, dn->logtl)), MkDD(vobs, sc->vobsl))) * sc->cum[pre]);
+    AccAdd(sc->acc, ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_sloppier_add(sc->pmaxD, colvD), ddr_make(dn->logt, dn->logtl)), ddr_make(vobs, sc->vobsl))) * sc->cum[pre]);
   }
   if (keep_end > pre) {
     RunVec* rv = &net->druns.p[di];
@@ -2908,7 +2873,7 @@ static int Body(StageCtx* sc) {
     run.hi = S_CAST(uint32_t, keep_end);
     run.colv = colv;
     run.ch = ch;
-    run.colvl = colvD.lo;
+    run.colvl = colvD.x[1];
     if (RunVecPush(net, rv, &run)) {
       return 1;
     }
@@ -3005,7 +2970,7 @@ static inline double Fval(StageCtx* sc, int mrem, int t) {
   return ExactF(sc);
 }
 // grouped enumeration: rows j..nr-1 fixed, rows 0..j-1 free with sum mrem
-static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
+static void Rec(StageCtx* sc, int j, int mrem, double fixedv, dd_real fixedt) {
   Net* net = sc->net;
   int* x = sc->x;
   const int* r = sc->r;
@@ -3016,8 +2981,8 @@ static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
     return;
   }
   if (sc->pmax + GroupUB(sc, j, mrem, fixedv) <= vobs - net->kTieEps) {
-    const DD lt = DDSub(DDSub(DDSub(DLF(net, sc->S[j]), DLF(net, mrem)), DLF(net, sc->S[j] - mrem)), sc->slf[j]);
-    AccAdd(sc->acc, ExpDD(DDSub(DDAdd(DDAdd(DDAdd(sc->pmaxD, sc->KD), fixedt), lt), MkDD(vobs, sc->vobsl))) * sc->cumall);
+    const dd_real lt = ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(DLF(net, sc->S[j]), DLF(net, mrem)), DLF(net, sc->S[j] - mrem)), sc->slf[j]);
+    AccAdd(sc->acc, ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_sloppier_add(ddr_sloppier_add(sc->pmaxD, sc->KD), fixedt), lt), ddr_make(vobs, sc->vobsl))) * sc->cumall);
     return;
   }
   const int lo = S_CAST(int, MAXV(0LL, mrem - sc->S[j - 1]));
@@ -3103,7 +3068,7 @@ static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
       }
     }
     // tails [lo, a-1] and [b+1, hi2]: all fully counted
-    const DD base = DDSub(DDAdd(DDAdd(sc->pmaxD, sc->KD), fixedt), MkDD(vobs, sc->vobsl));
+    const dd_real base = ddr_sloppier_sub(ddr_sloppier_add(ddr_sloppier_add(sc->pmaxD, sc->KD), fixedt), ddr_make(vobs, sc->vobsl));
 #ifdef FISHER_DEBUG_OVERRIDES
     if (g_gcheck) {
       // debug builds only: keeps exit() and stderr out of normal builds
@@ -3127,7 +3092,7 @@ static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
       if ((t < lo) || (t > hi2)) {
         continue;
       }
-      double w = ExpDD(DDSub(DDSub(DDSub(DDSub(base, DLF(net, t)), DLF(net, r1 - t)), DLF(net, mrem - t)), DLF(net, r0 - mrem + t)));
+      double w = ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(base, DLF(net, t)), DLF(net, r1 - t)), DLF(net, mrem - t)), DLF(net, r0 - mrem + t)));
       double sum = 0.;
       int since = 0;
       for (;;) {
@@ -3142,7 +3107,7 @@ static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
         }
         t = tn;
         if (++since >= 64) {
-          w = ExpDD(DDSub(DDSub(DDSub(DDSub(base, DLF(net, t)), DLF(net, r1 - t)), DLF(net, mrem - t)), DLF(net, r0 - mrem + t)));
+          w = ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(ddr_sloppier_sub(base, DLF(net, t)), DLF(net, r1 - t)), DLF(net, mrem - t)), DLF(net, r0 - mrem + t)));
           since = 0;
         } else {
           w *= ratio;
@@ -3154,7 +3119,7 @@ static void Rec(StageCtx* sc, int j, int mrem, double fixedv, DD fixedt) {
   }
   for (int t = lo; t <= hi2; ++t) {
     x[j - 1] = t;
-    Rec(sc, j - 1, mrem - t, fixedv - net->LF[t], DDSub(DDSub(fixedt, DLF(net, t)), DLF(net, r[j - 1] - t)));
+    Rec(sc, j - 1, mrem - t, fixedv - net->LF[t], ddr_sloppier_sub(ddr_sloppier_sub(fixedt, DLF(net, t)), DLF(net, r[j - 1] - t)));
     if (net->err) {
       return;
     }
@@ -3179,21 +3144,18 @@ static void SwapNodeVecs(NodeVec* a, NodeVec* b) {
 // resolution.  Returns the pair's weight factor (tie_w for a tie, 1 if the
 // table counts, 0 if not); on failure, net->err is set.
 static double ResolveDeferred(Net* net, const Entry* e, const Run* R, const LeafRec* lr, uint64_t obs_h, double vobs, double vobsl, double tie_w) {
-  const DD diff = DDSub(DDAdd(DDAdd(MkDD(e->v, e->vl), MkDD(R->colv, R->colvl)), MkDD(lr->tv, lr->tvl)), MkDD(vobs, vobsl));
-  const double d = diff.hi + diff.lo;
-  if (e->h + R->ch + lr->h == obs_h) {
-    // verified tie
-    if (fabs(d) > net->kTieEpsDD) {
-      NetFail(net, kFisherNetUnsupported);
-      return 0.;
-    }
-    return tie_w;
+  const dd_real diff = ddr_sloppier_sub(ddr_sloppier_add(ddr_sloppier_add(ddr_make(e->v, e->vl), ddr_make(R->colv, R->colvl)), ddr_make(lr->tv, lr->tvl)), ddr_make(vobs, vobsl));
+  const double d = diff.x[0] + diff.x[1];
+  // outside the margin, the sign of d is reliable whatever the hashes say
+  if (fabs(d) > net->kTieEpsDD) {
+    return (d < 0.)? 1. : 0.;
   }
-  if (fabs(d) <= net->kTieEpsDD) {
+  // inside the margin: a tie iff the factorial products are equal
+  if (e->h + R->ch + lr->h != obs_h) {
     NetFail(net, kFisherNetUnsupported);
     return 0.;
   }
-  return (d < 0.)? 1. : 0.;
+  return tie_w;
 }
 static inline size_t LeafBucket(double x, double qmin, double qinv, size_t qnb) {
   const double t = (x - qmin) * qinv;
@@ -3326,20 +3288,20 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
     return 0.;
   }
   const double* LF = net->LF;
-  DD vobsD = MkDD(0., 0.);
+  dd_real vobsD = ddr_make(0., 0.);
   uint64_t obs_h = 0;
   for (int q = 0; q < nr * k; ++q) {
-    vobsD = DDSub(vobsD, DLF(net, t[q]));
+    vobsD = ddr_sloppier_sub(vobsD, DLF(net, t[q]));
     obs_h += net->FH[t[q]];
   }
-  const double vobs = vobsD.hi;
-  const double vobsl = vobsD.lo;
-  DD cnD = DDNeg(DLF(net, N));
+  const double vobs = vobsD.x[0];
+  const double vobsl = vobsD.x[1];
+  dd_real cnD = ddr_negate(DLF(net, N));
   for (int i = 0; i < nr; ++i) {
-    cnD = DDAdd(cnD, DLF(net, row[i]));
+    cnD = ddr_sloppier_add(cnD, DLF(net, row[i]));
   }
   for (int j = 0; j < k; ++j) {
-    cnD = DDAdd(cnD, DLF(net, col[j]));
+    cnD = ddr_sloppier_add(cnD, DLF(net, col[j]));
   }
   // decisions compare double sums of up to ~nr*k log-factorials; their
   // rounding stays well inside this margin
@@ -3428,14 +3390,14 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
   // hashes, confirmed by value); otherwise the sum is computed as usual.
   if (!net->midp) {
     uint64_t mode_h;
-    DD mode_v;
+    dd_real mode_v;
     const double mode_val = MaxCompletion(net, net->cur.p[0].r, cols, k, &mode_h, &mode_v);
     if (net->err) {
       return 0.;
     }
     if (vobs >= mode_val - kTieEps) {
-      const DD d = DDSub(mode_v, vobsD);
-      if ((mode_h == obs_h) && (fabs(d.hi + d.lo) <= net->kTieEpsDD)) {
+      const dd_real d = ddr_sloppier_sub(mode_v, vobsD);
+      if ((mode_h == obs_h) && (fabs(d.x[0] + d.x[1]) <= net->kTieEpsDD)) {
         return 0.;
       }
     }
@@ -3483,14 +3445,14 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         const RunVec* runs = &net->prevruns.p[mi];
         double pmin_n = 1e300;
         double pmax_n = -1e300;
-        DD pmaxnD = MkDD(-1e300, 0.);
+        dd_real pmaxnD = ddr_make(-1e300, 0.);
         for (size_t ri = 0; ri < runs->n; ++ri) {
           const Run* R = &runs->p[ri];
           const Node* M = &net->prevm.p[R->m];
           pmin_n = MINV(pmin_n, M->ents.p[R->lo].v + R->colv);
-          const DD top = DDAdd(MkDD(M->ents.p[R->hi - 1].v, M->ents.p[R->hi - 1].vl), MkDD(R->colv, R->colvl));
-          if (top.hi > pmax_n) {
-            pmax_n = top.hi;
+          const dd_real top = ddr_sloppier_add(ddr_make(M->ents.p[R->hi - 1].v, M->ents.p[R->hi - 1].vl), ddr_make(R->colv, R->colvl));
+          if (top.x[0] > pmax_n) {
+            pmax_n = top.x[0];
             pmaxnD = top;
           }
         }
@@ -3500,7 +3462,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         for (size_t ri = 0; ri < runs->n; ++ri) {
           const Run* R = &runs->p[ri];
           const Node* M = &net->prevm.p[R->m];
-          AccAdd(&callA, (M->cumv[R->hi] - M->cumv[R->lo]) * ExpDD(DDSub(DDAdd(MkDD(M->pmaxv, M->pmaxvl), MkDD(R->colv, R->colvl)), pmaxnD)));
+          AccAdd(&callA, (M->cumv[R->hi] - M->cumv[R->lo]) * ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_make(M->pmaxv, M->pmaxvl), ddr_make(R->colv, R->colvl)), pmaxnD)));
         }
         const double call = AccGet(&callA);
         net->lvbuf.n = 0;
@@ -3512,7 +3474,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         L.cum = nullptr;
         L.leafrec = &net->lvbuf;
         L.pmax = pmax_n;
-        L.pmaxl = pmaxnD.lo;
+        L.pmaxl = pmaxnD.x[1];
         L.pmin = pmin_n;
         L.cum_all = call;
         L.vobs = vobs;
@@ -3526,9 +3488,9 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         L.sumlfl[0] = 0.;
         for (int i = 0; i < nr; ++i) {
           L.S[i + 1] = L.S[i] + mo->r[i];
-          const DD sl = DDAdd(MkDD(L.sumlf[i], L.sumlfl[i]), DLF(net, mo->r[i]));
-          L.sumlf[i + 1] = sl.hi;
-          L.sumlfl[i + 1] = sl.lo;
+          const dd_real sl = ddr_sloppier_add(ddr_make(L.sumlf[i], L.sumlfl[i]), DLF(net, mo->r[i]));
+          L.sumlf[i + 1] = sl.x[0];
+          L.sumlfl[i + 1] = sl.x[1];
         }
         if (c <= L.S[nr]) {
           LastLevel(net, &L, nr, c, 0., 0., 0);
@@ -3662,7 +3624,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
               }
             }
           }
-          AccAdd(&acc, sum * ExpDD(DDSub(DDAdd(MkDD(M->pmaxv, M->pmaxvl), MkDD(R->colv, R->colvl)), pmaxnD)));
+          AccAdd(&acc, sum * ddr_exp_to_double(ddr_sloppier_sub(ddr_sloppier_add(ddr_make(M->pmaxv, M->pmaxvl), ddr_make(R->colv, R->colvl)), pmaxnD)));
         }
         if (MemCheck(net, 0)) {
           return 0.;
@@ -3675,7 +3637,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
       const Entry* srt = mo->ents.p;
       const size_t nsrt = mo->ents.n;
       const double pmax = srt[nsrt - 1].v;
-      const DD pmaxD = MkDD(pmax, srt[nsrt - 1].vl);
+      const dd_real pmaxD = ddr_make(pmax, srt[nsrt - 1].vl);
       if (DoubleVecAssign(net, &net->cum, nsrt + 1)) {
         return 0.;
       }
@@ -3686,7 +3648,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         ca.s = 0.;
         ca.comp = 0.;
         for (size_t q = 0; q < nsrt; ++q) {
-          AccAdd(&ca, srt[q].f * ExpDD(DDSub(MkDD(srt[q].v, srt[q].vl), pmaxD)));
+          AccAdd(&ca, srt[q].f * ddr_exp_to_double(ddr_sloppier_sub(ddr_make(srt[q].v, srt[q].vl), pmaxD)));
           cum[q + 1] = AccGet(&ca);
         }
       }
@@ -3702,7 +3664,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         mo->cumv_n = nsrt + 1;
         memcpy(mo->cumv, cum, (nsrt + 1) * sizeof(double));
         mo->pmaxv = pmax;
-        mo->pmaxvl = pmaxD.lo;
+        mo->pmaxvl = pmaxD.x[1];
         mo->wv = S_CAST(double*, BigAllocRaw(nsrt * sizeof(double)));
         if (!mo->wv) {
           NetFail(net, kFisherNetMemLimit);
@@ -3710,7 +3672,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         }
         mo->wv_n = nsrt;
         for (size_t q = 0; q < nsrt; ++q) {
-          mo->wv[q] = srt[q].f * ExpDD(DDSub(MkDD(srt[q].v, srt[q].vl), pmaxD));
+          mo->wv[q] = srt[q].f * ddr_exp_to_double(ddr_sloppier_sub(ddr_make(srt[q].v, srt[q].vl), pmaxD));
         }
         net->mem_mothers += (mo->wv_n + mo->cumv_n) * sizeof(double);
         if (MemCheck(net, 0)) {
@@ -3726,7 +3688,7 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         L.n = nsrt;
         L.cum = cum;
         L.pmax = pmax;
-        L.pmaxl = pmaxD.lo;
+        L.pmaxl = pmaxD.x[1];
         L.pmin = srt[0].v;
         L.cum_all = cum[nsrt];
         L.vobs = vobs;
@@ -3740,9 +3702,9 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         L.sumlfl[0] = 0.;
         for (int i = 0; i < nr; ++i) {
           L.S[i + 1] = L.S[i] + r[i];
-          const DD sl = DDAdd(MkDD(L.sumlf[i], L.sumlfl[i]), DLF(net, r[i]));
-          L.sumlf[i + 1] = sl.hi;
-          L.sumlfl[i + 1] = sl.lo;
+          const dd_real sl = ddr_sloppier_add(ddr_make(L.sumlf[i], L.sumlfl[i]), DLF(net, r[i]));
+          L.sumlf[i + 1] = sl.x[0];
+          L.sumlfl[i + 1] = sl.x[1];
         }
         if (g_bucket && (nsrt >= S_CAST(size_t, g_bucket_min)) && (srt[nsrt - 1].v > srt[0].v)) {
           const int nb = S_CAST(int, nsrt);
@@ -3799,19 +3761,19 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
         sc.crem = &cols[s + 1];
         sc.mcols = rem_after;
         const long long Nd = S_CAST(long long, suf[0]) - c;
-        DD KD = DLF(net, Nd);
+        dd_real KD = DLF(net, Nd);
         for (int l = 0; l < sc.mcols; ++l) {
-          KD = DDSub(KD, DLF(net, sc.crem[l]));
+          KD = ddr_sloppier_sub(KD, DLF(net, sc.crem[l]));
         }
         sc.KD = KD;
         sc.S[0] = 0;
-        sc.slf[0] = MkDD(0., 0.);
+        sc.slf[0] = ddr_make(0., 0.);
         for (int q = 0; q < nr; ++q) {
           sc.S[q + 1] = sc.S[q] + r[q];
-          sc.slf[q + 1] = DDAdd(sc.slf[q], DLF(net, r[q]));
+          sc.slf[q + 1] = ddr_sloppier_add(sc.slf[q], DLF(net, r[q]));
         }
         sc.cumall = cum[nsrt];
-        Rec(&sc, nr, c, 0., MkDD(0., 0.));
+        Rec(&sc, nr, c, 0., ddr_make(0., 0.));
         if (net->err) {
           return 0.;
         }
@@ -3915,8 +3877,8 @@ static double Core(Net* net, const int32_t* tin, int nr, int nc) {
   }
   net->out_arena = nullptr;
   const double Ssum = AccGet(&acc);
-  const DD lnpD = DDAdd(DDAdd(MkDD(log(Ssum), 0.), vobsD), cnD);
-  return MINV(0., lnpD.hi + lnpD.lo);
+  const dd_real lnpD = ddr_sloppier_add(ddr_sloppier_add(ddr_make(log(Ssum), 0.), vobsD), cnD);
+  return MINV(0., lnpD.x[0] + lnpD.x[1]);
 }
 
 static void NetDestroy(Net* net) {

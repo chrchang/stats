@@ -215,6 +215,19 @@ HEADER_INLINE dd_real ddr_sloppy_add(const dd_real a, const dd_real b) {
   return ddr_make(s, e);
 }
 
+// Like ddr_sloppy_add(), but without the final renormalization: the high word
+// is fl(a.x[0] + b.x[0]), and the low word collects that sum's rounding error
+// along with both low words.  The low word can then exceed half an ulp of the
+// high word (it grows with each chained addition), so the result is only
+// meaningful as the unevaluated sum x[0] + x[1]; don't pass it to functions
+// that assume a normalized dd_real (comparisons, ddr_exp(), etc.) without
+// renormalizing first.
+HEADER_INLINE dd_real ddr_sloppier_add(const dd_real a, const dd_real b) {
+  double e;
+  const double s = qd_two_sum(a.x[0], b.x[0], &e);
+  return ddr_make(s, e + a.x[1] + b.x[1]);
+}
+
 /*
 HEADER_INLINE dd_real ddr_ieee_add(const dd_real a, const dd_real b) {
   double s2;
@@ -249,6 +262,13 @@ HEADER_INLINE dd_real ddr_sloppy_sub(const dd_real a, const dd_real b) {
   e -= b.x[1];
   s = qd_quick_two_sum(s, e, &e);
   return ddr_make(s, e);
+}
+
+// Non-renormalizing subtraction; see ddr_sloppier_add().
+HEADER_INLINE dd_real ddr_sloppier_sub(const dd_real a, const dd_real b) {
+  double e;
+  const double s = qd_two_diff(a.x[0], b.x[0], &e);
+  return ddr_make(s, e + a.x[1] - b.x[1]);
 }
 
 HEADER_INLINE dd_real ddr_ieee_sub(const dd_real a, const dd_real b) {
@@ -420,6 +440,29 @@ HEADER_INLINE dd_real ddr_add(const dd_real a, const dd_real b) {
 
 HEADER_INLINE dd_real ddr_sub(const dd_real a, const dd_real b) {
   return ddr_sloppy_sub(a, b);
+}
+
+// Returns exp(a) rounded to double precision, cheaply: exp(a.x[0]) *
+// (1 + a.x[1]).  The relative error is a few ulps (exp()'s error, two
+// roundings, and O(a.x[1]^2)), so a needn't be normalized, as long as |a.x[1]| is tiny (e.g. a was produced by
+// a short chain of ddr_sloppier_add() calls).  Use ddr_exp() when a full
+// dd_real result is needed.
+HEADER_INLINE double ddr_exp_to_double(const dd_real a) {
+  return exp(a.x[0]) * (1.0 + a.x[1]);
+}
+
+// Neumaier (improved Kahan-Babuska) compensated summation step: adds addend
+// to *sump, accumulating the rounding error in *errp.  The compensated total
+// is *sump + *errp.
+HEADER_INLINE void neumaier_add(double addend, double* sump, double* errp) {
+  const double sum = *sump;
+  const double new_sum = sum + addend;
+  if (fabs(sum) >= fabs(addend)) {
+    *errp += (sum - new_sum) + addend;
+  } else {
+    *errp += (addend - new_sum) + sum;
+  }
+  *sump = new_sum;
 }
 
 

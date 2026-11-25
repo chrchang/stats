@@ -1,6 +1,7 @@
 test_that("dbinom works", {
   ## Based on dbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
   ## tests/reg-tests-1{a,e}.R .
+  set.seed(123)
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
   for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
@@ -103,6 +104,7 @@ test_that("dbinom works", {
 test_that("pbinom works", {
   ## Based on pbinom() tests in R 4.6.1 tests/d-p-q-r-{tests,tst-2}.R and
   ## tests/reg-tests-1{a,b}.R .
+  set.seed(123)
   n0 <- 50; n1 <- 16; n2 <- 20; n3 <- 8
   for (n in stats::rbinom(n1, size = 2*n0, p = .4)) {
     for (p in c(0,1,rbeta(n2, 2, 4))) {
@@ -115,7 +117,6 @@ test_that("pbinom works", {
     }
   }
 
-  set.seed(123)
   n <- 20
   Rbinom <- sort(unique(stats::rbinom(n, size = 55, prob = pi/16)))
   Pbinom <- pbinom(Rbinom, size = 55, prob = pi/16)
